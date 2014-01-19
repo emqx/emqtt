@@ -1,6 +1,9 @@
-.eunit
-ebin
-deps
-*.o
 *.beam
-*.plt
+ebin
+.eunit
+*~
+erl_crash.dump
+deps
+.DS_Store
+log
+eunit.coverage.xml

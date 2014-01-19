@@ -55,48 +55,58 @@
 -define(QOS_1, 1).
 -define(QOS_2, 2).
 
--record(mqtt_frame, {fixed,
-                     variable,
-                     payload}).
+-record(mqtt_frame_fixed,
+	{type   = 0                       :: non_neg_integer(),
+	 dup    = 0                       :: non_neg_integer(),
+	 qos    = 0                       :: non_neg_integer(),
+	 retain = 0                       :: non_neg_integer() }).
 
--record(mqtt_frame_fixed,    {type   = 0,
-                              dup    = 0,
-                              qos    = 0,
-                              retain = 0}).
+-record(mqtt_frame_connect,  
+	{client_id   = <<>>               :: binary(),
+	 proto_ver   = ?MQTT_PROTO_MAJOR  :: integer(),
+	 username    = undefined          :: undefined | binary(),
+	 password    = undefined          :: undefined | binary(),      
+	 will_retain = false              :: boolean(),
+	 will_qos    = false              :: boolean(),
+	 will_flag   = false              :: boolean(),
+	 clean_sess  = false              :: boolean(),
+	 keep_alive  = false              :: boolean(),
+	 will_topic  = undefined          :: undefined | binary(),
+	 will_msg    = undefined          :: undefined | binary() }).
 
--record(mqtt_frame_connect,  {proto_ver,
-                              will_retain,
-                              will_qos,
-                              will_flag,
-                              clean_sess,
-                              keep_alive,
-                              client_id,
-                              will_topic,
-                              will_msg,
-                              username,
-                              password}).
+-record(mqtt_frame, 
+	{fixed                            :: #mqtt_frame_fixed{},
+	 variable                         :: #mqtt_frame_connect{},
+	 payload                          :: binary() }).
 
--record(mqtt_frame_connack,  {return_code}).
+-record(mqtt_frame_connack,  
+	{return_code                      :: non_neg_integer() }).
 
--record(mqtt_frame_publish,  {topic_name,
-                              message_id}).
+-record(mqtt_frame_publish,
+	{topic_name                       :: binary(),
+	 message_id                       :: non_neg_integer() }).
 
--record(mqtt_frame_subscribe,{message_id,
-                              topic_table}).
+-record(mqtt_frame_subscribe,
+	{message_id                       :: non_neg_integer(),
+	 topic_table                      :: list() }).
 
--record(mqtt_frame_suback,   {message_id,
-                              qos_table = []}).
+-record(mqtt_frame_suback,
+	{message_id                       :: non_neg_integer(),
+	 qos_table = []                   :: list()}).
 
--record(mqtt_topic,          {name,
-                              qos}).
+-record(mqtt_topic,
+	{name                             :: binary(),
+	 qos                              :: non_neg_integer() }).
 
--record(mqtt_frame_other,    {other}).
+-record(mqtt_frame_other,
+	{other                            :: any()}).
 
--record(mqtt_msg,            {retain,
-                              qos,
-                              topic,
-                              dup,
-                              message_id,
-                              payload}).
+-record(mqtt_msg,
+	{retain = false                   :: boolean(),
+	 qos = 0                          :: non_neg_integer(),
+	 topic                            :: binary(),
+	 dup = 0                          :: non_neg_integer(),
+	 message_id                       :: undefined | non_neg_integer(),
+	 payload                          :: binary() }).
 
 
