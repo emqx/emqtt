@@ -94,18 +94,6 @@ handle_event({publish, Topic, Payload, _Qos, MsgId}, State) ->
     io:format("publish: payload:~p~n", [Payload]),
     {ok, State};
 
-handle_event({puback, MsgId}, State) ->
-    io:format("puback: message_id:~p~n", [MsgId]),
-    {ok, State};
-
-handle_event({pubrec, MsgId}, State) ->
-    io:format("pubrec: message_id:~p~n", [MsgId]),
-    {ok, State};
-
-handle_event({pingresp}, State) ->
-    io:format("pong~n"),
-    {ok, State};
-
 handle_event(_Event, State) ->
     {ok, State}.
 
