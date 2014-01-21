@@ -8,7 +8,7 @@
 %%
 main([]) ->
     code:add_patha("deps/edown/ebin"),
-    Default = "hiroeorz17",
+    Default = "emqtt",
     U = case os:getenv("TGT") of
 	    [] -> Default;
 	    false -> Default;

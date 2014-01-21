@@ -84,14 +84,20 @@ init([]) ->
 %%                          remove_handler
 %% @end
 %%--------------------------------------------------------------------
+handle_event({connack_accept}, State) ->
+    ok = emqttc:subscribe(emqttc, [{<<"temp/random">>, 0},
+				   {<<"temp/random">>, 1}]),
+    {ok, State};
+
 handle_event({publish, Topic, Payload}, State) ->
     io:format("publish: topic:~p~n", [Topic]),
     io:format("publish: payload:~p~n", [Payload]),
     {ok, State};
 
-handle_event({publish, Topic, Payload, _Qos, MsgId}, State) ->
+handle_event({publish, Topic, Payload, 1, MsgId}, State) ->
     io:format("publish: topic(id:~p):~p~n", [MsgId, Topic]),
     io:format("publish: payload:~p~n", [Payload]),
+    emqttc:puback(emqttc, MsgId),
     {ok, State};
 
 handle_event(_Event, State) ->

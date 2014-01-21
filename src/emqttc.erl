@@ -13,6 +13,7 @@
 
 %api
 -export([publish/2, publish/3, publish/4,
+	 pubrel/2,
 	 puback/2,
 	 pubrec/2,
 	 pubcomp/2,
@@ -35,7 +36,8 @@
 	 connecting/3,
 	 waiting_for_connack/2,
 	 connected/2,
-	 connected/3]).
+	 connected/3,
+	 disconnected/2]).
 
 -define(TCPOPTIONS, [binary,
 		     {packet,    raw},
@@ -121,6 +123,16 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) when is_record(Msg, mqtt_msg) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
 %%--------------------------------------------------------------------
+%% @doc pubrec.
+%% @end
+%%--------------------------------------------------------------------
+-spec pubrel(C, MsgId) -> ok when
+      C :: pid() | atom(),
+      MsgId :: non_neg_integer().
+pubrel(C, MsgId) when is_integer(MsgId) ->
+    gen_fsm:sync_send_event(C, {pubrel, MsgId}).
+
+%%--------------------------------------------------------------------
 %% @doc puback.
 %% @end
 %%--------------------------------------------------------------------
@@ -198,6 +210,10 @@ init([_Name, Args]) ->
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
+disconnected(timeout, State) ->
+    timer:sleep(3000),
+    {next_state, connecting, State, 0}.
+
 connecting(timeout, State) ->
     connect(State);
 
@@ -272,10 +288,6 @@ connected({pubrec, MsgId}, State=#state{sock=Sock}) ->
     send_puback(Sock, ?PUBREC, MsgId),
     {next_state, connected, State};
 
-connected({pubrel, MsgId}, State=#state{sock=Sock}) ->
-    send_puback(Sock, ?PUBREL, MsgId),
-    {next_state, connected, State};
-
 connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
     send_puback(Sock, ?PUBCOMP, MsgId),
     {next_state, connected, State};
@@ -333,6 +345,11 @@ connected({publish, Msg}, From,
     Ref2 = dict:append(publish, From, Ref),
     {next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
 
+connected({pubrel, MsgId}, From, State=#state{sock=Sock, ref=Ref}) ->
+    send_puback(Sock, ?PUBREL, MsgId),
+    Ref2 = dict:append(pubrel, From, Ref),
+    {next_state, connected, State#state{ref=Ref2}};
+
 connected(ping, From, State=#state{sock=Sock, ref = Ref}) ->
     send_ping(Sock),
     Ref2 = dict:append(ping, From, Ref),
@@ -353,6 +370,7 @@ handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer, 2:8/integer,
     case ReturnCode of
 	?CONNACK_ACCEPT ->
 	    io:format("connack: Connection Accepted~n"),
+	    gen_event:notify(emqttc_event, {connack_accept}),
 	    {next_state, connected, State};
 	?CONNACK_PROTO_VER ->
 	    io:format("connack: NG(unacceptable protocol version)~n"),
@@ -413,9 +431,9 @@ handle_info({tcp, _Sock, <<?PUBREC:4/integer,
 			   _:1/integer, _:2/integer, _:1/integer,
 			   2:8/integer,
 			   MsgId:16/big-unsigned-integer>>},
-	    connected, State=#state{sock=Sock}) ->
-    send_puback(Sock, ?PUBREL, MsgId),
-    {next_state, connected, State};
+	    connected, State=#state{ref=Ref}) ->
+    Ref2 = reply({ok, MsgId}, publish, Ref),
+    {next_state, connected, State#state{ref=Ref2}};
 
 %% pubcomp message from broker.
 handle_info({tcp, _Sock, <<?PUBCOMP:4/integer,
@@ -423,7 +441,7 @@ handle_info({tcp, _Sock, <<?PUBCOMP:4/integer,
 			   2:8/integer,
 			   MsgId:16/big-unsigned-integer>>},
 	    connected, State=#state{ref=Ref}) ->
-    Ref2 = reply({ok, MsgId}, publish, Ref),
+    Ref2 = reply({ok, MsgId}, pubrel, Ref),
     {next_state, connected, State#state{ref=Ref2}};
 
 %% pingresp message from broker.
@@ -440,7 +458,8 @@ handle_info({tcp, _Sock, Data}, connected, State) ->
     {next_state, connected, State};
 
 handle_info({tcp_closed, Sock}, connected, State=#state{sock=Sock}) ->
-    {next_state, disconnected, State};
+    io:format("tcp_closed state goto disconnected.~n"),
+    {next_state, disconnected, State, 0};
 
 handle_info({timeout, reconnect}, connecting, S) ->
     connect(S);
@@ -490,6 +509,10 @@ send_frame(Sock, Frame) ->
     erlang:port_command(Sock, emqtt_frame:serialise(Frame)).
 
 reply(Reply, Name, Ref) ->
-    {ok, [From | FromTail]} = dict:find(Name, Ref),
-    gen_fsm:reply(From, Reply),
-    dict:store(Name, FromTail, Ref).
+    case dict:find(Name, Ref) of
+	{ok, []} ->
+	    Ref;
+	{ok, [From | FromTail]} ->
+	    gen_fsm:reply(From, Reply),
+	    dict:store(Name, FromTail, Ref)
+    end.
