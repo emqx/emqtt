@@ -39,7 +39,7 @@ ok
 ok
 
 %% add event handler.
-5> emqttc_sub_event:add_handler().
+5> emqttc_event:add_handler().
 ok
 ```
 
