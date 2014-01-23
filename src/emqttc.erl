@@ -55,7 +55,8 @@
 		msgid = 0 :: non_neg_integer(),
 		username  :: binary(),
 		password  :: binary(),
-		ref       :: dict() }).
+		ref       :: dict(),
+		client_id :: binary() }).
 
 %%--------------------------------------------------------------------
 %% @doc start application
@@ -206,7 +207,12 @@ init([_Name, Args]) ->
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
     Password = proplists:get_value(password, Args, undefined),
+
+    <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
+    ClientId = proplists:get_value(client_id, Args, DefaultIdentifier),
+
     State = #state{host = Host, port = Port, ref = dict:new(),
+		   client_id = ClientId,
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
@@ -238,7 +244,8 @@ connect(#state{host = Host, port = Port} = State) ->
 	    {next_state, connecting, State#state{sock = undefined}}
     end.
 
-send_connect(#state{sock=Sock, username=Username, password=Password}) ->
+send_connect(#state{sock=Sock, username=Username, password=Password,
+		    client_id=ClientId}) ->
     Frame = 
 	#mqtt_frame{
 	   fixed = #mqtt_frame_fixed{
@@ -252,7 +259,7 @@ send_connect(#state{sock=Sock, username=Username, password=Password}) ->
 			 proto_ver  = ?MQTT_PROTO_MAJOR,
 			 clean_sess = true,
 			 keep_alive = 60,
-			 client_id  = "emqttc"}},
+			 client_id  = ClientId}},
     send_frame(Sock, Frame).
 
 waiting_for_connack(_Event, State) ->
