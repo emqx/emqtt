@@ -43,7 +43,7 @@
 		     {packet,    raw},
 		     {reuseaddr, true},
 		     {nodelay,   true},
-		     {active, 	true},
+		     {active, 	false},
 		     {reuseaddr, true},
 		     {send_timeout,  3000}]).
 
@@ -235,6 +235,7 @@ connect(#state{host = Host, port = Port} = State) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
+	    emqttc_sock:start_link(Sock, self()),
 	    NewState = State#state{sock = Sock},
 	    send_connect(NewState),
 	    {next_state, waiting_for_connack, NewState};
