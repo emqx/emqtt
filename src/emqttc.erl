@@ -22,7 +22,6 @@
 	 ping/1,
 	 disconnect/1]).
 
-
 %% gen_fsm callbacks
 -export([init/1,
 	 handle_info/3,
@@ -235,7 +234,7 @@ connect(#state{host = Host, port = Port} = State) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
-	    emqttc_sock:start_link(Sock, self()),
+	    emqttc_sock_sup:start_sock(0, Sock, self()),
 	    NewState = State#state{sock = Sock},
 	    send_connect(NewState),
 	    {next_state, waiting_for_connack, NewState};
@@ -486,6 +485,7 @@ handle_sync_event(stop, _From, _StateName, State) ->
     {stop, normal, ok, State}.
 
 terminate(_Reason, _StateName, _State) ->
+    emqttc_sock_sup:terminate_sock(0),
     ok.
 
 code_change(_OldVsn, StateName, State, _Extra) ->

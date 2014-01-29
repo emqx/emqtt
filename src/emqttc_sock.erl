@@ -10,6 +10,7 @@
 
 %% API
 -export([start_link/2, loop/1]).
+-export([init/1]).
 
 -define(MQTT_HEADER_SIZE, 2).
 -define(BODY_RECV_TIMEOUT, 1000).
@@ -19,11 +20,15 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
+%% @doc start socket server.
 %% @end
 %%--------------------------------------------------------------------
 start_link(Sock, Client) ->
-    spawn_link(?MODULE, loop, [[Sock, Client]]).
+    proc_lib:start_link(?MODULE, init, [[self(), Sock, Client]]).
+
+init([Parent, Sock, Client]) ->
+    proc_lib:init_ack(Parent, {ok, self()}),
+    loop([Sock, Client]).
 
 %% todo: check 8bit of remaining length. 
 loop([Sock, Client]) ->

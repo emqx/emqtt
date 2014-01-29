@@ -24,8 +24,11 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
+    SockSup = {emqttc_sock_sup, {emqttc_sock_sup, start_link, []},
+	       permanent, 2000, worker, [emqttc_sock_sup]},
+
     SubEvent = {emqttc_event, {emqttc_event, start_link, []},
 		permanent, 2000, worker, [emqttc_event]},
 
-    {ok, { {one_for_one, 5, 10}, [SubEvent]} }.
+    {ok, { {one_for_one, 5, 10}, [SockSup, SubEvent]} }.
 
