@@ -370,8 +370,8 @@ reconnect() ->
     %%FIXME
     erlang:send_after(30000, self(), {timeout, reconnect}).
 
-%% connack message from broker.
-handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer, 2:8/integer,
+%% connack message from broker(without remaining length).
+handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
 			 _:8/integer, ReturnCode:8/unsigned-integer>>},
 	    waiting_for_connack, State) ->
     case ReturnCode of
@@ -401,10 +401,9 @@ handle_info({tcp, _Sock, <<?SUBACK:4/integer, _:4/integer, _/binary>>},
 	    connected, State) ->
     {next_state, connected, State};
 
-%% pub message from broker(QoS = 0).
+%% pub message from broker(QoS = 0)(without remaining length).
 handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
 			   _:1/integer, ?QOS_0:2/integer, _:1/integer,
-			   _Len:8/integer,
 			   TopicSize:16/big-unsigned-integer,
 			   Topic:TopicSize/binary,
 			   Payload/binary>>},
@@ -412,10 +411,9 @@ handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
     gen_event:notify(emqttc_event, {publish, Topic, Payload}),
     {next_state, connected, State};
 
-%% pub message from broker(QoS = 1 or 2).
+%% pub message from broker(QoS = 1 or 2)(without remaining length).
 handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
 			   _:1/integer, Qos:2/integer, _:1/integer,
-			   _Len:8/integer,
 			   TopicSize:16/big-unsigned-integer,
 			   Topic:TopicSize/binary,
 			   MsgId:16/big-unsigned-integer,
@@ -424,37 +422,33 @@ handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
     gen_event:notify(emqttc_event, {publish, Topic, Payload, Qos, MsgId}),
     {next_state, connected, State};
 
-%% pubrec message from broker.
+%% pubrec message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?PUBACK:4/integer,
 			   _:1/integer, _:2/integer, _:1/integer,
-			   2:8/integer,
 			   MsgId:16/big-unsigned-integer>>},
 	    connected, State=#state{ref=Ref}) ->
     Ref2 = reply({ok, MsgId}, publish, Ref),
     {next_state, connected, State#state{ref=Ref2}};
 
-%% pubrec message from broker.
+%% pubrec message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?PUBREC:4/integer,
 			   _:1/integer, _:2/integer, _:1/integer,
-			   2:8/integer,
 			   MsgId:16/big-unsigned-integer>>},
 	    connected, State=#state{ref=Ref}) ->
     Ref2 = reply({ok, MsgId}, publish, Ref),
     {next_state, connected, State#state{ref=Ref2}};
 
-%% pubcomp message from broker.
+%% pubcomp message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?PUBCOMP:4/integer,
 			   _:1/integer, _:2/integer, _:1/integer,
-			   2:8/integer,
 			   MsgId:16/big-unsigned-integer>>},
 	    connected, State=#state{ref=Ref}) ->
     Ref2 = reply({ok, MsgId}, pubrel, Ref),
     {next_state, connected, State#state{ref=Ref2}};
 
-%% pingresp message from broker.
+%% pingresp message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?PINGRESP:4/integer,
-			   _:1/integer, _:2/integer, _:1/integer,
-			   0:8/integer>>},
+			   _:1/integer, _:2/integer, _:1/integer>>},
 	    connected, State=#state{ref = Ref}) ->
     Ref2 = reply(ok, ping, Ref),
     {next_state, connected, State#state{ref = Ref2}};

@@ -22,7 +22,7 @@
 %%--------------------------------------------------------------------
 %% @doc start socket server.
 %% @end
-%%--------------------------z------------------------------------------
+%%--------------------------------------------------------------------
 start_link(Sock, Client) ->
     proc_lib:start_link(?MODULE, init, [[self(), Sock, Client]]).
 
@@ -30,37 +30,50 @@ init([Parent, Sock, Client]) ->
     proc_lib:init_ack(Parent, {ok, self()}),
     loop([Sock, Client]).
 
-%% todo: check 8bit of remaining length. 
 loop([Sock, Client]) ->
     case gen_tcp:recv(Sock, ?MQTT_HEADER_SIZE) of
-	{ok, <<_Flags:1/binary>> = Header} ->
-	    {Length, LenBin} = remaining_length(Sock, 1, 0, []),
-	    case gen_tcp:recv(Sock, Length, ?BODY_RECV_TIMEOUT) of
-		{ok, Body} ->
-		    Bin = <<Header/binary, LenBin/binary, Body/binary>>,
-		    Client ! {tcp, Sock, Bin},
+	{ok, Header} ->
+	    case remaining_length(Sock) of
+		0 ->
+		    Client ! {tcp, Sock, Header},
 		    loop([Sock, Client]);
-		{error, Reason} ->
-		    Client ! {tcp, error, Reason},
-		    loop([Sock, Client])
-	    end;
+		Length ->
+		    case gen_tcp:recv(Sock, Length, ?BODY_RECV_TIMEOUT) of
+			{ok, Body} ->
+			    Client ! {tcp, Sock, <<Header/binary,Body/binary>>},
+			    loop([Sock, Client]);
+			{error, Reason} ->
+			    Client ! {tcp, error, Reason},
+			    erlang:error({socket_error, Reason})
+		    end
+		end;
 	{error, Reason1} ->
 	    Client ! {tcp, error, Reason1},
-	    loop([Sock, Client])
+	    erlang:error({socket_error, Reason1})
     end.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-remaining_length(Sock, Multiplier, TotalLen, LenBins) ->
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Get payload part length.
+%%
+%% top of bit is continue flag.
+%% 0 -> last byte.
+%% 1 -> next byte is exist.
+%% @end
+%%--------------------------------------------------------------------
+-spec remaining_length(gen_tcp:socket()) -> non_neg_integer(). 
+remaining_length(Sock) ->
+    remaining_length(Sock, 1, 0).
+
+remaining_length(Sock, Multiplier, TotalLen) ->
     case gen_tcp:recv(Sock, 1, 100) of
-	{ok, <<1:1, Len:7/unsigned-integer>> = Bin} ->
+	{ok, <<1:1, Len:7/unsigned-integer>>} ->
 	    NewTotalLen = TotalLen + Len * Multiplier,
-	    remaining_length(Sock, Multiplier * 128, NewTotalLen, 
-			     [Bin | LenBins]);
-	{ok, <<0:1/integer, Len:7/unsigned-integer>> = Bin} ->
-	    NewTotalLen = TotalLen + Len * Multiplier,
-	    LenBin = list_to_binary(lists:reverse([Bin | LenBins])),
-	    {NewTotalLen, LenBin}
+	    remaining_length(Sock, Multiplier * 128, NewTotalLen);
+	{ok, <<0:1/integer, Len:7/unsigned-integer>>} ->
+	    TotalLen + Len * Multiplier
     end.
