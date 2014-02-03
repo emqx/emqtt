@@ -51,6 +51,7 @@
 -record(state, {host      :: inet:ip_address(),
 		port      :: inet:port_number(),
 		sock      :: gen_tcp:socket(),
+		sock_pid  :: supervisor:child(),
 		msgid = 0 :: non_neg_integer(),
 		username  :: binary(),
 		password  :: binary(),
@@ -215,9 +216,18 @@ init([_Name, Args]) ->
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
-disconnected(timeout, State) ->
+%% first connect.
+disconnected(timeout, State = #state{sock_pid = undefined}) ->
     timer:sleep(3000),
-    {next_state, connecting, State, 0}.
+    {next_state, connecting, State, 0};
+
+%% reconnect
+disconnected(timeout, State = #state{sock = Sock, sock_pid = SockPid}) ->
+    ok = supervisor:terminate_child(emqttc_sock_sup, SockPid),
+    ok = gen_tcp:close(Sock),
+    timer:sleep(5000),
+    NewState = State#state{sock = undefined, sock_pid = undefined},
+    {next_state, connecting, NewState, 0}.
 
 connecting(timeout, State) ->
     connect(State);
@@ -234,8 +244,8 @@ connect(#state{host = Host, port = Port} = State) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
-	    emqttc_sock_sup:start_sock(0, Sock, self()),
-	    NewState = State#state{sock = Sock},
+	    {ok, SockPid} = emqttc_sock_sup:start_sock(0, Sock, self()),
+	    NewState = State#state{sock = Sock, sock_pid = SockPid},
 	    send_connect(NewState),
 	    {next_state, waiting_for_connack, NewState};
 	{error, Reason} ->
@@ -458,8 +468,12 @@ handle_info({tcp, _Sock, Data}, connected, State) ->
     io:format("data received from remote(code:~w): ~p~n", [Code, Data]),
     {next_state, connected, State};
 
-handle_info({tcp_closed, Sock}, connected, State=#state{sock=Sock}) ->
+handle_info({tcp_closed, _Sock}, _, State) ->
     io:format("tcp_closed state goto disconnected.~n"),
+    {next_state, disconnected, State, 0};
+
+handle_info({tcp, error, Reason}, _, State) ->
+    io:format("tcp error: ~p.~n", [Reason]),
     {next_state, disconnected, State, 0};
 
 handle_info({timeout, reconnect}, connecting, S) ->

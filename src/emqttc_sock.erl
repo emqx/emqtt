@@ -42,11 +42,17 @@ loop([Sock, Client]) ->
 			{ok, Body} ->
 			    Client ! {tcp, Sock, <<Header/binary,Body/binary>>},
 			    loop([Sock, Client]);
+			{socket_error, closed} ->
+			    Client ! {tcp_closed, Sock};
 			{error, Reason} ->
 			    Client ! {tcp, error, Reason},
 			    erlang:error({socket_error, Reason})
 		    end
 		end;
+
+	{socket_error, closed} ->
+	    Client ! {tcp_closed, Sock};
+
 	{error, Reason1} ->
 	    Client ! {tcp, error, Reason1},
 	    erlang:error({socket_error, Reason1})
