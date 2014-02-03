@@ -165,10 +165,10 @@ publish to broker.
 
 
 <pre><code>
-publish(C, Topic, Payload, Qos) -&gt; ok | {ok, MsgId}
+publish(C, Topic, Payload, Opts) -&gt; ok | {ok, MsgId}
 </code></pre>
 
-<ul class="definitions"><li><code>C = pid() | atom()</code></li><li><code>Topic = binary()</code></li><li><code>Payload = binary()</code></li><li><code>Qos = non_neg_integer()</code></li><li><code>MsgId = non_neg_integer()</code></li></ul>
+<ul class="definitions"><li><code>C = pid() | atom()</code></li><li><code>Topic = binary()</code></li><li><code>Payload = binary()</code></li><li><code>Opts = [tuple()]</code></li><li><code>MsgId = non_neg_integer()</code></li></ul>
 
 
 <a name="pubrec-2"></a>

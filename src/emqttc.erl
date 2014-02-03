@@ -102,25 +102,28 @@ start_link(Name, Opts) when is_atom(Name), is_list(Opts) ->
 publish(C, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     publish(C, #mqtt_msg{topic = Topic, payload = Payload}).
 
--spec publish(C, Topic, Payload, Qos) -> ok | {ok, MsgId} when
+-spec publish(C, Topic, Payload, Opts) -> ok | {ok, MsgId} when
       C :: pid() | atom(),
       Topic :: binary(),
       Payload :: binary(),
-      Qos :: non_neg_integer(),
+      Opts :: [tuple()],
       MsgId :: non_neg_integer().
-publish(C, Topic, Payload, Qos) when is_binary(Topic), is_binary(Payload),
-				     is_integer(Qos) ->
-    publish(C, #mqtt_msg{topic = Topic, payload = Payload, qos = Qos}).
+publish(C, Topic, Payload, Opts) when is_binary(Topic), is_binary(Payload),
+				      is_list(Opts) ->
+    Qos = proplists:get_value(qos, Opts, 0),
+    Retain = proplists:get_value(retain, Opts, false),
+    publish(C, #mqtt_msg{topic = Topic, payload = Payload,
+			 qos = Qos, retain = Retain}).
 
 -spec publish(C, #mqtt_msg{}) -> ok | pubrec when
       C :: pid() | atom().			       
-publish(C, Msg = #mqtt_msg{qos = ?QOS_0}) when is_record(Msg, mqtt_msg) ->
+publish(C, Msg = #mqtt_msg{qos = ?QOS_0}) ->
     gen_fsm:send_event(C, {publish, Msg});
 
-publish(C, Msg = #mqtt_msg{qos = ?QOS_1}) when is_record(Msg, mqtt_msg) ->
+publish(C, Msg = #mqtt_msg{qos = ?QOS_1}) ->
     gen_fsm:sync_send_event(C, {publish, Msg});
 
-publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) when is_record(Msg, mqtt_msg) ->
+publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
 %%--------------------------------------------------------------------
