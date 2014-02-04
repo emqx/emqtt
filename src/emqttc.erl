@@ -227,6 +227,7 @@ disconnected(timeout, State = #state{sock_pid = undefined}) ->
 %% reconnect
 disconnected(timeout, State = #state{sock = Sock, sock_pid = SockPid}) ->
     ok = supervisor:terminate_child(emqttc_sock_sup, SockPid),
+    ok = supervisor:delete_child(emqttc_sock_sup, SockPid),
     ok = gen_tcp:close(Sock),
     timer:sleep(5000),
     NewState = State#state{sock = undefined, sock_pid = undefined},
