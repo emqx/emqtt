@@ -225,13 +225,9 @@ disconnected(timeout, State = #state{sock_pid = undefined}) ->
     {next_state, connecting, State, 0};
 
 %% reconnect
-disconnected(timeout, State = #state{sock = Sock, sock_pid = SockPid}) ->
-    ok = supervisor:terminate_child(emqttc_sock_sup, SockPid),
-    ok = supervisor:delete_child(emqttc_sock_sup, SockPid),
-    ok = gen_tcp:close(Sock),
+disconnected(timeout, State) ->
     timer:sleep(5000),
-    NewState = State#state{sock = undefined, sock_pid = undefined},
-    {next_state, connecting, NewState, 0}.
+    {next_state, connecting, State, 0}.
 
 connecting(timeout, State) ->
     connect(State);
@@ -242,7 +238,9 @@ connecting(_Event, State) ->
 connecting(_Event, _From, State) ->
     {reply, {error, connecting}, connecting, State}.
 
-connect(#state{host = Host, port = Port} = State) ->
+%% connect to mqtt broker.
+connect(#state{host = Host, port = Port,
+	       sock = undefined, sock_pid = undefined} = State) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
 
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
@@ -256,7 +254,12 @@ connect(#state{host = Host, port = Port} = State) ->
 	    io:format("tcp connection failure: ~p~n", [Reason]),
 	    reconnect(),
 	    {next_state, connecting, State#state{sock = undefined}}
-    end.
+    end;
+
+%% now already socket pid is spawned.
+connect(#state{sock = Sock, sock_pid = SockPid} = State) ->
+    emqttc_sock_sup:stop_sock(SockPid, Sock),    
+    connect(State#state{sock = undefined, sock_pid = undefined}).
 
 send_connect(#state{sock=Sock, username=Username, password=Password,
 		    client_id=ClientId}) ->

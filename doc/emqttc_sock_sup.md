@@ -17,7 +17,7 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>Starts the supervisor.</td></tr><tr><td valign="top"><a href="#start_sock-3">start_sock/3</a></td><td>Starts child.</td></tr><tr><td valign="top"><a href="#terminate_sock-1">terminate_sock/1</a></td><td>Terminate child.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>Starts the supervisor.</td></tr><tr><td valign="top"><a href="#start_sock-3">start_sock/3</a></td><td>Start socket child.</td></tr><tr><td valign="top"><a href="#stop_sock-2">stop_sock/2</a></td><td>Stop socket child.</td></tr><tr><td valign="top"><a href="#terminate_sock-1">terminate_sock/1</a></td><td>Terminate child.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -48,7 +48,20 @@ start_sock(ChildNo, Sock, Client) -&gt; <a href="supervisor.md#type-start_child_
 
 <ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Sock = <a href="gen_tcp.md#type-socket">gen_tcp:socket()</a></code></li><li><code>Client = pid()</code></li></ul>
 
-Starts child
+Start socket child.
+<a name="stop_sock-2"></a>
+
+### stop_sock/2 ###
+
+
+<pre><code>
+stop_sock(Pid::pid(), Sock::<a href="gen_tcp.md#type-socket">gen_tcp:socket()</a>) -&gt; ok
+</code></pre>
+
+<br></br>
+
+
+Stop socket child.
 <a name="terminate_sock-1"></a>
 
 ### terminate_sock/1 ###
