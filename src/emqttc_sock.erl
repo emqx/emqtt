@@ -9,11 +9,21 @@
 -module(emqttc_sock).
 
 %% API
--export([start_link/2, loop/1]).
+-export([start_link/3, loop/1]).
 -export([init/1]).
 
 -define(MQTT_HEADER_SIZE, 1).
 -define(BODY_RECV_TIMEOUT, 1000).
+-define(TIMEOUT, 3000).
+-define(RECONNECT_INTERVAL, 3000).
+
+-define(TCPOPTIONS, [binary,
+		     {packet,    raw},
+		     {reuseaddr, true},
+		     {nodelay,   true},
+		     {active, 	false},
+		     {reuseaddr, true},
+		     {send_timeout,  3000}]).
 
 %%%===================================================================
 %%% API
@@ -23,12 +33,24 @@
 %% @doc start socket server.
 %% @end
 %%--------------------------------------------------------------------
-start_link(Sock, Client) ->
-    proc_lib:start_link(?MODULE, init, [[self(), Sock, Client]]).
+start_link(Host, Port, Client) ->
+    proc_lib:start_link(?MODULE, init, [[self(), Host, Port, Client]]).
 
-init([Parent, Sock, Client]) ->
+init([Parent, Host, Port, Client]) ->
+    {ok, Sock} = connect(Host, Port, Client),
     proc_lib:init_ack(Parent, {ok, self()}),
     loop([Sock, Client]).
+
+connect(Host, Port, Client) ->
+    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
+	{ok, Sock} ->
+	    io:format("tcp connected.~n"),
+	    emqttc:set_socket(Client, Sock),
+	    {ok, Sock};
+	{error, Reason} ->
+	    io:format("tcp connection failure: ~p~n", [Reason]),
+	    {error, Reason}
+    end.
 
 loop([Sock, Client]) ->
     case gen_tcp:recv(Sock, ?MQTT_HEADER_SIZE) of
@@ -42,20 +64,14 @@ loop([Sock, Client]) ->
 			{ok, Body} ->
 			    Client ! {tcp, Sock, <<Header/binary,Body/binary>>},
 			    loop([Sock, Client]);
-			{socket_error, closed} ->
-			    Client ! {tcp_closed, Sock};
 			{error, Reason} ->
-			    Client ! {tcp, error, Reason},
-			    erlang:error({socket_error, Reason})
+			    timer:sleep(?RECONNECT_INTERVAL),
+			    erlang:error(socket_error, Reason)
 		    end
-		end;
-
-	{socket_error, closed} ->
-	    Client ! {tcp_closed, Sock};
-
+	    end;
 	{error, Reason1} ->
-	    Client ! {tcp, error, Reason1},
-	    erlang:error({socket_error, Reason1})
+	    timer:sleep(?RECONNECT_INTERVAL),
+	    erlang:error(socket_error, Reason1)
     end.
 
 %%%===================================================================

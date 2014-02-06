@@ -20,7 +20,8 @@
 	 subscribe/2,
 	 unsubscribe/2,
 	 ping/1,
-	 disconnect/1]).
+	 disconnect/1,
+	 set_socket/2]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -126,6 +127,9 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_1}) ->
 publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
+set_socket(C, Sock) ->
+    gen_fsm:send_event(C, {set_socket, Sock}).
+
 %%--------------------------------------------------------------------
 %% @doc pubrec.
 %% @end
@@ -219,11 +223,6 @@ init([_Name, Args]) ->
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
-%% first connect.
-disconnected(timeout, State = #state{sock_pid = undefined}) ->
-    timer:sleep(3000),
-    {next_state, connecting, State, 0};
-
 %% reconnect
 disconnected(timeout, State) ->
     timer:sleep(5000),
@@ -232,29 +231,24 @@ disconnected(timeout, State) ->
 connecting(timeout, State) ->
     connect(State);
 
+connecting({set_socket, Sock}, State) ->
+    NewState = State#state{sock = Sock},
+    send_connect(NewState),
+    {next_state, waiting_for_connack, NewState};
+
 connecting(_Event, State) ->
     {next_state, connecting, State}.
 
 connecting(_Event, _From, State) ->
     {reply, {error, connecting}, connecting, State}.
 
+
 %% connect to mqtt broker.
 connect(#state{host = Host, port = Port,
 	       sock = undefined, sock_pid = undefined} = State) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
-
-    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
-	{ok, Sock} ->
-	    io:format("tcp connected.~n"),
-	    {ok, SockPid} = emqttc_sock_sup:start_sock(0, Sock, self()),
-	    NewState = State#state{sock = Sock, sock_pid = SockPid},
-	    send_connect(NewState),
-	    {next_state, waiting_for_connack, NewState};
-	{error, Reason} ->
-	    io:format("tcp connection failure: ~p~n", [Reason]),
-	    reconnect(),
-	    {next_state, connecting, State#state{sock = undefined}}
-    end;
+    {ok, SockPid} = emqttc_sock_sup:start_sock(0, Host, Port, self()),
+    {next_state, connecting, State#state{sock_pid = SockPid}};
 
 %% now already socket pid is spawned.
 connect(#state{sock = Sock, sock_pid = SockPid} = State) ->
@@ -383,9 +377,9 @@ connected(Event, _From, State) ->
     io:format("unsupported event: ~p~n", [Event]),
     {reply, {error, unsupport}, connected, State}.
 
-reconnect() ->
+%reconnect() ->
     %%FIXME
-    erlang:send_after(30000, self(), {timeout, reconnect}).
+%    erlang:send_after(30000, self(), {timeout, reconnect}).
 
 %% connack message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
@@ -499,8 +493,11 @@ handle_sync_event(status, _From, StateName, State) ->
 handle_sync_event(stop, _From, _StateName, State) ->
     {stop, normal, ok, State}.
 
-terminate(_Reason, _StateName, _State) ->
-    emqttc_sock_sup:terminate_sock(0),
+terminate(_Reason, _StateName, #state{sock_pid = undefined}) ->
+    ok;
+
+terminate(_Reason, _StateName, #state{sock_pid = SockPid, sock = Sock}) ->
+    emqttc_sock_sup:stop_sock(SockPid, Sock),    
     ok.
 
 code_change(_OldVsn, StateName, State, _Extra) ->

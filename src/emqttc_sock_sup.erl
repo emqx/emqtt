@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_sock/3, stop_sock/2, terminate_sock/1]).
+-export([start_link/0, start_sock/4, stop_sock/2, terminate_sock/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -34,13 +34,14 @@ start_link() ->
 %% @doc Start socket child.
 %% @end
 %%--------------------------------------------------------------------
--spec start_sock(ChildNo, Sock, Client) -> supervisor:start_child_ret() when
+-spec start_sock(ChildNo, Host, Port, Client) -> supervisor:start_child_ret() when
       ChildNo :: non_neg_integer(),
-      Sock :: gen_tcp:socket(),
+      Host :: inet:ip_address() | list(),
+      Port :: inet:port_number(),
       Client :: pid().
-start_sock(ChildNo, Sock, Client) ->
+start_sock(ChildNo, Host, Port, Client) ->
     ChildSpec = {{emqttc_sock, ChildNo},
-		 {emqttc_sock, start_link, [Sock, Client]},
+		 {emqttc_sock, start_link, [Host, Port, Client]},
 		 permanent, 2000, worker, [emqttc_sock]},
     supervisor:start_child(?SERVER, ChildSpec).
 
