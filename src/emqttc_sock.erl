@@ -16,7 +16,7 @@
 -define(BODY_RECV_TIMEOUT, 1000).
 -define(TIMEOUT, 3000).
 -define(RECONNECT_INTERVAL, 3000).
-
+-define(SOCKET_SEND_INTERVAL, 3000).
 -define(TCPOPTIONS, [binary,
 		     {packet,    raw},
 		     {reuseaddr, true},
@@ -45,7 +45,8 @@ connect(Host, Port, Client) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
-	    emqttc:set_socket(Client, Sock),
+	    timer:apply_interval(?SOCKET_SEND_INTERVAL, 
+				 emqttc, set_socket, [Client, Sock]),
 	    {ok, Sock};
 	{error, Reason} ->
 	    io:format("tcp connection failure: ~p~n", [Reason]),

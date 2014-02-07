@@ -287,9 +287,7 @@ waiting_for_connack(_Event, State) ->
     {next_state, waiting_for_connack, State}.
 
 connected({set_socket, Sock}, State) ->
-    NewState = State#state{sock = Sock},
-    send_connect(NewState),
-    {next_state, waiting_for_connack, NewState};
+    {next_state, connected, State#state{sock = Sock}};
 
 connected({publish, Msg}, State=#state{sock=Sock, msgid=MsgId}) ->
     #mqtt_msg{retain     = Retain,
@@ -478,17 +476,17 @@ handle_info({tcp, _Sock, <<?PINGRESP:4/integer,
     Ref2 = reply(ok, ping, Ref),
     {next_state, connected, State#state{ref = Ref2}};
 
-handle_info({tcp, _Sock, Data}, connected, State) ->
+handle_info({tcp, error, Reason}, _, State) ->
+    io:format("tcp error: ~p.~n", [Reason]),
+    {next_state, disconnected, State};
+
+handle_info({tcp, _Sock, Data}, connected, State) when is_binary(Data) ->
     <<Code:4/integer, _:4/integer, _/binary>> = Data,
     io:format("data received from remote(code:~w): ~p~n", [Code, Data]),
     {next_state, connected, State};
 
 handle_info({tcp_closed, _Sock}, _, State) ->
     io:format("tcp_closed state goto disconnected.~n"),
-    {next_state, disconnected, State};
-
-handle_info({tcp, error, Reason}, _, State) ->
-    io:format("tcp error: ~p.~n", [Reason]),
     {next_state, disconnected, State};
 
 handle_info({timeout, reconnect}, connecting, S) ->
