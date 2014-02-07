@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0, start_sock/4, stop_sock/2, terminate_sock/1]).
+-export([start_link/0, start_sock/4, stop_sock/1, terminate_sock/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -49,11 +49,11 @@ start_sock(ChildNo, Host, Port, Client) ->
 %% @doc Stop socket child.
 %% @end
 %%--------------------------------------------------------------------
--spec stop_sock(pid(), gen_tcp:socket()) -> ok.
-stop_sock(Pid, Sock) ->
-    supervisor:terminate_child(emqttc_sock_sup, Pid),
-    supervisor:delete_child(emqttc_sock_sup, Pid),
-    gen_tcp:close(Sock).
+-spec stop_sock(non_neg_integer()) -> ok | {error, Error} when
+      Error :: term().
+stop_sock(ChildNo) ->
+    supervisor:terminate_child(emqttc_sock_sup, {emqttc_sock, ChildNo}),
+    supervisor:delete_child(emqttc_sock_sup, {emqttc_sock, ChildNo}).
 
 %%--------------------------------------------------------------------
 %% @doc Terminate child

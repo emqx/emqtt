@@ -37,7 +37,7 @@
 	 waiting_for_connack/2,
 	 connected/2,
 	 connected/3,
-	 disconnected/2]).
+	 disconnected/2, disconnected/3]).
 
 -define(TCPOPTIONS, [binary,
 		     {packet,    raw},
@@ -210,6 +210,7 @@ disconnect(C) ->
 
 %%gen_fsm callbacks
 init([_Name, Args]) ->
+    emqttc_sock_sup:stop_sock(0),
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
@@ -231,7 +232,13 @@ disconnected(timeout, State) ->
 disconnected({set_socket, Sock}, State) ->
     NewState = State#state{sock = Sock},
     send_connect(NewState),
-    {next_state, waiting_for_connack, NewState}.
+    {next_state, waiting_for_connack, NewState};
+
+disconnected(_, State) ->
+    {next_state, disconnected, State}.
+
+disconnected(_, _From, State) ->
+    {next_state, disconnected, State}.
 
 connecting(timeout, State) ->
     connect(State);
@@ -260,8 +267,8 @@ connect(#state{host = Host, port = Port,
     {next_state, connecting, State#state{sock_pid = SockPid}};
 
 %% now already socket pid is spawned.
-connect(#state{sock = Sock, sock_pid = SockPid} = State) ->
-    emqttc_sock_sup:stop_sock(SockPid, Sock),    
+connect(#state{sock = _Sock, sock_pid = _SockPid} = State) ->
+    emqttc_sock_sup:stop_sock(0),    
     connect(State#state{sock = undefined, sock_pid = undefined}).
 
 send_connect(#state{sock=Sock, username=Username, password=Password,
@@ -508,8 +515,8 @@ handle_sync_event(stop, _From, _StateName, State) ->
 terminate(_Reason, _StateName, #state{sock_pid = undefined}) ->
     ok;
 
-terminate(_Reason, _StateName, #state{sock_pid = SockPid, sock = Sock}) ->
-    emqttc_sock_sup:stop_sock(SockPid, Sock),    
+terminate(_Reason, _StateName, _State) ->
+    emqttc_sock_sup:stop_sock(0),    
     ok.
 
 code_change(_OldVsn, StateName, State, _Extra) ->
