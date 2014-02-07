@@ -17,7 +17,7 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>Starts the supervisor.</td></tr><tr><td valign="top"><a href="#start_sock-3">start_sock/3</a></td><td>Start socket child.</td></tr><tr><td valign="top"><a href="#stop_sock-2">stop_sock/2</a></td><td>Stop socket child.</td></tr><tr><td valign="top"><a href="#terminate_sock-1">terminate_sock/1</a></td><td>Terminate child.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>Starts the supervisor.</td></tr><tr><td valign="top"><a href="#start_sock-4">start_sock/4</a></td><td>Start socket child.</td></tr><tr><td valign="top"><a href="#stop_sock-2">stop_sock/2</a></td><td>Stop socket child.</td></tr><tr><td valign="top"><a href="#terminate_sock-1">terminate_sock/1</a></td><td>Terminate child.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -37,16 +37,16 @@ start_link() -&gt; {ok, pid()} | ignore | {error, term()}
 
 
 Starts the supervisor
-<a name="start_sock-3"></a>
+<a name="start_sock-4"></a>
 
-### start_sock/3 ###
+### start_sock/4 ###
 
 
 <pre><code>
-start_sock(ChildNo, Sock, Client) -&gt; <a href="supervisor.md#type-start_child_ret">supervisor:start_child_ret()</a>
+start_sock(ChildNo, Host, Port, Client) -&gt; <a href="supervisor.md#type-start_child_ret">supervisor:start_child_ret()</a>
 </code></pre>
 
-<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Sock = <a href="gen_tcp.md#type-socket">gen_tcp:socket()</a></code></li><li><code>Client = pid()</code></li></ul>
+<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Host = <a href="inet.md#type-ip_address">inet:ip_address()</a> | list()</code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = pid()</code></li></ul>
 
 Start socket child.
 <a name="stop_sock-2"></a>

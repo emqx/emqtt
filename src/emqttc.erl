@@ -247,7 +247,11 @@ connecting(_Event, _From, State) ->
 connect(#state{host = Host, port = Port,
 	       sock = undefined, sock_pid = undefined} = State) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
-    {ok, SockPid} = emqttc_sock_sup:start_sock(0, Host, Port, self()),
+
+    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, self()) of
+		  {ok, SockPid1}                      -> SockPid1;
+		  {error,{already_started, SockPid2}} -> SockPid2
+	      end,
     {next_state, connecting, State#state{sock_pid = SockPid}};
 
 %% now already socket pid is spawned.
