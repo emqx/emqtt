@@ -65,11 +65,13 @@ loop([Sock, Client]) ->
 			    Client ! {tcp, Sock, <<Header/binary,Body/binary>>},
 			    loop([Sock, Client]);
 			{error, Reason} ->
+			    Client ! {tcp, error, Reason},
 			    timer:sleep(?RECONNECT_INTERVAL),
 			    erlang:error(socket_error, Reason)
 		    end
 	    end;
 	{error, Reason1} ->
+	    Client ! {tcp, error, Reason1},
 	    timer:sleep(?RECONNECT_INTERVAL),
 	    erlang:error(socket_error, Reason1)
     end.

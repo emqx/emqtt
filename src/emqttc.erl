@@ -226,7 +226,12 @@ init([_Name, Args]) ->
 %% reconnect
 disconnected(timeout, State) ->
     timer:sleep(5000),
-    {next_state, connecting, State, 0}.
+    {next_state, connecting, State, 0};
+
+disconnected({set_socket, Sock}, State) ->
+    NewState = State#state{sock = Sock},
+    send_connect(NewState),
+    {next_state, waiting_for_connack, NewState}.
 
 connecting(timeout, State) ->
     connect(State);
@@ -280,6 +285,11 @@ send_connect(#state{sock=Sock, username=Username, password=Password,
 waiting_for_connack(_Event, State) ->
     %FIXME:
     {next_state, waiting_for_connack, State}.
+
+connected({set_socket, Sock}, State) ->
+    NewState = State#state{sock = Sock},
+    send_connect(NewState),
+    {next_state, waiting_for_connack, NewState};
 
 connected({publish, Msg}, State=#state{sock=Sock, msgid=MsgId}) ->
     #mqtt_msg{retain     = Retain,
@@ -475,11 +485,11 @@ handle_info({tcp, _Sock, Data}, connected, State) ->
 
 handle_info({tcp_closed, _Sock}, _, State) ->
     io:format("tcp_closed state goto disconnected.~n"),
-    {next_state, disconnected, State, 0};
+    {next_state, disconnected, State};
 
 handle_info({tcp, error, Reason}, _, State) ->
     io:format("tcp error: ~p.~n", [Reason]),
-    {next_state, disconnected, State, 0};
+    {next_state, disconnected, State};
 
 handle_info({timeout, reconnect}, connecting, S) ->
     connect(S);
@@ -530,7 +540,12 @@ send_ping(Sock) ->
     send_frame(Sock, Frame).
 
 send_frame(Sock, Frame) ->
-    erlang:port_command(Sock, emqtt_frame:serialise(Frame)).
+    try
+	erlang:port_command(Sock, emqtt_frame:serialise(Frame))
+    catch
+	error:Reason ->
+	    io:format("error when publish data: ~p~n", [Reason])
+    end.
 
 reply(Reply, Name, Ref) ->
     case dict:find(Name, Ref) of
