@@ -49,7 +49,8 @@
 
 -define(TIMEOUT, 3000).
 
--record(state, {host      :: inet:ip_address(),
+-record(state, {name      :: atom(),
+		host      :: inet:ip_address(),
 		port      :: inet:port_number(),
 		sock      :: gen_tcp:socket(),
 		sock_pid  :: supervisor:child(),
@@ -128,6 +129,7 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
 set_socket(C, Sock) ->
+    io:format("set_socke request to ~p sock:~p~n", [C, Sock]),
     gen_fsm:send_event(C, {set_socket, Sock}).
 
 %%--------------------------------------------------------------------
@@ -209,8 +211,7 @@ disconnect(C) ->
     gen_fsm:send_event(C, disconnect).
 
 %%gen_fsm callbacks
-init([_Name, Args]) ->
-    emqttc_sock_sup:stop_sock(0),
+init([Name, Args]) ->
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
@@ -221,6 +222,7 @@ init([_Name, Args]) ->
 
     State = #state{host = Host, port = Port, ref = dict:new(),
 		   client_id = ClientId,
+		   name = Name,
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
@@ -230,9 +232,14 @@ disconnected(timeout, State) ->
     {next_state, connecting, State, 0};
 
 disconnected({set_socket, Sock}, State) ->
+    io:format("set_socket: disconnected~n"),
     NewState = State#state{sock = Sock},
-    send_connect(NewState),
-    {next_state, waiting_for_connack, NewState};
+    case send_connect(NewState) of
+	ok ->
+	    {next_state, waiting_for_connack, NewState};
+	{error, _Reason} ->
+	    {next_state, disconnected, State}
+    end;
 
 disconnected(_, State) ->
     {next_state, disconnected, State}.
@@ -244,9 +251,14 @@ connecting(timeout, State) ->
     connect(State);
 
 connecting({set_socket, Sock}, State) ->
+    io:format("set_socket: connecting~n"),
     NewState = State#state{sock = Sock},
-    send_connect(NewState),
-    {next_state, waiting_for_connack, NewState};
+    case send_connect(NewState) of
+	ok ->
+	    {next_state, waiting_for_connack, NewState};
+	{error, _Reason} ->
+	    {next_state, disconnected, State}
+    end;
 
 connecting(_Event, State) ->
     {next_state, connecting, State}.
@@ -254,13 +266,12 @@ connecting(_Event, State) ->
 connecting(_Event, _From, State) ->
     {reply, {error, connecting}, connecting, State}.
 
-
 %% connect to mqtt broker.
-connect(#state{host = Host, port = Port,
+connect(#state{host = Host, port = Port, name = Name,
 	       sock = undefined, sock_pid = undefined} = State) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
 
-    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, self()) of
+    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, Name) of
 		  {ok, SockPid1}                      -> SockPid1;
 		  {error,{already_started, SockPid2}} -> SockPid2
 	      end,
@@ -289,11 +300,16 @@ send_connect(#state{sock=Sock, username=Username, password=Password,
 			 client_id  = ClientId}},
     send_frame(Sock, Frame).
 
+waiting_for_connack({set_socket, Sock}, State) ->
+    io:format("set_socket: waiting_for_connack~n"),
+    {next_state, waiting_for_connack, State#state{sock = Sock}};
+
 waiting_for_connack(_Event, State) ->
     %FIXME:
     {next_state, waiting_for_connack, State}.
 
 connected({set_socket, Sock}, State) ->
+    io:format("set_socket: connected~n"),
     {next_state, connected, State#state{sock = Sock}};
 
 connected({publish, Msg}, State=#state{sock=Sock, msgid=MsgId}) ->
@@ -314,8 +330,16 @@ connected({publish, Msg}, State=#state{sock=Sock, msgid=MsgId}) ->
 								   MsgId
 							   end},
 	       payload = Payload},
-    send_frame(Sock, Frame),
-    {next_state, connected, State#state{msgid=MsgId+1}};
+
+    case send_frame(Sock, Frame) of
+	ok -> 
+	    {next_state, connected, State#state{msgid=MsgId+1}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;
+
+    %ok = send_frame(Sock, Frame),
+    %{next_state, connected, State#state{msgid=MsgId+1}};
 
 connected({puback, MsgId}, State=#state{sock=Sock}) ->
     send_puback(Sock, ?PUBACK, MsgId),
@@ -338,8 +362,15 @@ connected({subscribe, Topics}, State=#state{msgid=MsgId,sock=Sock}) ->
 					 retain = 0},
 	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
 						topic_table = Topics1}},
-    send_frame(Sock, Frame),
-    {next_state, connected, State#state{msgid=MsgId+1}};
+    %ok = send_frame(Sock, Frame),
+    %{next_state, connected, State#state{msgid=MsgId+1}};
+
+    case send_frame(Sock, Frame) of
+	ok -> 
+	    {next_state, connected, State#state{msgid=MsgId+1}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;
 
 connected({unsubscribe, Topics}, State=#state{sock=Sock, msgid=MsgId}) ->
     Frame = #mqtt_frame{
@@ -349,12 +380,23 @@ connected({unsubscribe, Topics}, State=#state{sock=Sock, msgid=MsgId}) ->
 					 retain = 0},
 	       variable = MsgId,
 	       payload = Topics},
-    send_frame(Sock, Frame),
-    {next_state, connected, State};
+    %ok = send_frame(Sock, Frame),
+    %{next_state, connected, State};
+
+    case send_frame(Sock, Frame) of
+	ok -> 
+	    {next_state, connected, State#state{msgid=MsgId+1}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;
 
 connected(disconnect, State=#state{sock=Sock}) ->
-    send_disconnect(Sock),
-    {next_state, connected, State};
+    case send_disconnect(Sock) of
+	ok ->
+	    {next_state, connected, State};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;	    
 
 connected(_Event, State) -> 
     {next_state, connected, State}.
@@ -378,27 +420,38 @@ connected({publish, Msg}, From,
 								   MsgId
 							   end},
 	       payload = Payload},
-    send_frame(Sock, Frame),
+    %ok = send_frame(Sock, Frame),
     Ref2 = dict:append(publish, From, Ref),
-    {next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
+    %{next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
+
+    case send_frame(Sock, Frame) of
+	ok -> 
+	    {next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;
 
 connected({pubrel, MsgId}, From, State=#state{sock=Sock, ref=Ref}) ->
-    send_puback(Sock, ?PUBREL, MsgId),
-    Ref2 = dict:append(pubrel, From, Ref),
-    {next_state, connected, State#state{ref=Ref2}};
+    case send_puback(Sock, ?PUBREL, MsgId) of
+	ok ->
+	    Ref2 = dict:append(pubrel, From, Ref),
+	    {next_state, connected, State#state{ref=Ref2}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;	    
 
 connected(ping, From, State=#state{sock=Sock, ref = Ref}) ->
-    send_ping(Sock),
-    Ref2 = dict:append(ping, From, Ref),
-    {next_state, connected, State#state{ref = Ref2}};
+    case send_ping(Sock) of
+	ok ->
+	    Ref2 = dict:append(ping, From, Ref),
+	    {next_state, connected, State#state{ref = Ref2}};
+	{error, _Reason} ->
+	    {next_state, disconnected, State#state{sock = undefined}}
+    end;	    
 
 connected(Event, _From, State) ->
     io:format("unsupported event: ~p~n", [Event]),
     {reply, {error, unsupport}, connected, State}.
-
-%reconnect() ->
-    %%FIXME
-%    erlang:send_after(30000, self(), {timeout, reconnect}).
 
 %% connack message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
@@ -526,7 +579,7 @@ send_puback(Sock, Type, MsgId) ->
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = Type},
 	       variable = #mqtt_frame_publish{message_id = MsgId}},
-    send_frame(Sock, Frame).
+    ok = send_frame(Sock, Frame).
 
 send_disconnect(Sock) ->
     Frame = #mqtt_frame{
@@ -545,11 +598,11 @@ send_ping(Sock) ->
     send_frame(Sock, Frame).
 
 send_frame(Sock, Frame) ->
-    try
-	erlang:port_command(Sock, emqtt_frame:serialise(Frame))
-    catch
-	error:Reason ->
-	    io:format("error when publish data: ~p~n", [Reason])
+    case gen_tcp:send(Sock, emqtt_frame:serialise(Frame)) of
+	ok -> ok;
+	{error, Reason} ->
+	    io:format("socket error when send frame: ~p~n", [Reason]),
+	    {error, Reason}
     end.
 
 reply(Reply, Name, Ref) ->

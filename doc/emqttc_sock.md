@@ -15,7 +15,7 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#loop-1">loop/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td>start socket server.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#init-1">init/1</a></td><td>Process init.</td></tr><tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td>start socket server.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -28,14 +28,7 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 
 `init(X1) -> any()`
 
-
-<a name="loop-1"></a>
-
-### loop/1 ###
-
-`loop(X1) -> any()`
-
-
+Process init.
 <a name="start_link-3"></a>
 
 ### start_link/3 ###

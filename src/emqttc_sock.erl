@@ -36,50 +36,105 @@
 start_link(Host, Port, Client) ->
     proc_lib:start_link(?MODULE, init, [[self(), Host, Port, Client]]).
 
+%%--------------------------------------------------------------------
+%% @doc Process init.
+%% @end
+%%--------------------------------------------------------------------
 init([Parent, Host, Port, Client]) ->
-    {ok, Sock} = connect(Host, Port, Client),
+    {ok, Sock, TRef} = connect(Host, Port, Client),
     proc_lib:init_ack(Parent, {ok, self()}),
-    loop([Sock, Client]).
+    loop([Sock, Client, TRef]).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Connect to MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
+-spec connect(Host, Port, Client) -> {ok, Sock} | {error, Reason} when
+      Host :: inet:ip_address() | list(),
+      Port :: inet:port_number(),
+      Client :: atom(),
+      Sock :: gen_tcp:socket(),
+      Reason :: atom().
 connect(Host, Port, Client) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
-	    timer:apply_interval(?SOCKET_SEND_INTERVAL, 
-				 emqttc, set_socket, [Client, Sock]),
-	    {ok, Sock};
+	    TRef = timer:apply_interval(?SOCKET_SEND_INTERVAL, 
+					emqttc, set_socket, [Client, Sock]),
+	    {ok, Sock, TRef};
 	{error, Reason} ->
 	    io:format("tcp connection failure: ~p~n", [Reason]),
+	    timer:sleep(?RECONNECT_INTERVAL),
 	    {error, Reason}
     end.
 
-loop([Sock, Client]) ->
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Socket read loop.
+%% @end
+%%--------------------------------------------------------------------
+loop([Sock, Client, TRef]) ->
     case gen_tcp:recv(Sock, ?MQTT_HEADER_SIZE) of
 	{ok, Header} ->
-	    case remaining_length(Sock) of
-		0 ->
-		    Client ! {tcp, Sock, Header},
-		    loop([Sock, Client]);
-		Length ->
-		    case gen_tcp:recv(Sock, Length, ?BODY_RECV_TIMEOUT) of
-			{ok, Body} ->
-			    Client ! {tcp, Sock, <<Header/binary,Body/binary>>},
-			    loop([Sock, Client]);
-			{error, Reason} ->
-			    Client ! {tcp, error, Reason},
-			    timer:sleep(?RECONNECT_INTERVAL),
-			    erlang:error(socket_error, Reason)
-		    end
-	    end;
+	    case forward_msg(Header, Sock, Client) of
+		ok ->
+		    loop([Sock, Client, TRef]);
+		{error, Reason} ->
+		    terminate(Reason, Client, TRef)
+	    end;		    
 	{error, Reason1} ->
-	    Client ! {tcp, error, Reason1},
-	    timer:sleep(?RECONNECT_INTERVAL),
-	    erlang:error(socket_error, Reason1)
+	    terminate(Reason1, Client, TRef)
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Read and forward data to emqttc.
+%% @end
+%%--------------------------------------------------------------------
+-spec forward_msg(Header, Sock, Pid) -> ok when
+      Header :: binary(),
+      Sock :: gen_tcp:socket(),
+      Pid :: pid().
+forward_msg(Header, Sock, Client) ->
+    case remaining_length(Sock) of
+	0 ->
+	    maybe_send_message(Client, {tcp, Sock, Header});
+	Length ->
+	    case gen_tcp:recv(Sock, Length, ?BODY_RECV_TIMEOUT) of
+		{ok, Body} ->
+		    Data = {tcp, Sock, <<Header/binary,Body/binary>>},
+		    maybe_send_message(Client, Data),
+		    ok;
+		{error, Reason} ->
+		    {error, Reason}
+	    end
+    end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Send message to emqttc process if process is alive.
+%% @end
+%%--------------------------------------------------------------------
+-spec maybe_send_message(Client, Data) -> ok | ignore when
+      Client :: atom(),
+      Data :: term().
+maybe_send_message(Client, Data) ->
+    case whereis(Client) of
+	undefined ->
+	    ignore;
+	Pid when is_pid(Pid) -> 
+	    Pid ! Data
     end.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+terminate(Reason, Client, TRef) ->
+    timer:cancel(TRef),
+    maybe_send_message(Client, {tcp, error, Reason}),
+    timer:sleep(?RECONNECT_INTERVAL).
 
 %%--------------------------------------------------------------------
 %% @private
