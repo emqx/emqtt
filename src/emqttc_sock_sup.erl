@@ -34,11 +34,12 @@ start_link() ->
 %% @doc Start socket child.
 %% @end
 %%--------------------------------------------------------------------
--spec start_sock(ChildNo, Host, Port, Client) -> supervisor:start_child_ret() when
+-spec start_sock(ChildNo, Host, Port, Client) -> 
+			supervisor:start_child_ret() when
       ChildNo :: non_neg_integer(),
       Host :: inet:ip_address() | list(),
       Port :: inet:port_number(),
-      Client :: pid().
+      Client :: atom().
 start_sock(ChildNo, Host, Port, Client) ->
     ChildSpec = {{emqttc_sock, ChildNo},
 		 {emqttc_sock, start_link, [Host, Port, Client]},

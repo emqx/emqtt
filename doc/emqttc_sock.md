@@ -15,24 +15,22 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#init-1">init/1</a></td><td>Process init.</td></tr><tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td>start socket server.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#start_link-3">start_link/3</a></td><td>start socket server.</td></tr></table>
 
 
 <a name="functions"></a>
 
 ## Function Details ##
 
-<a name="init-1"></a>
-
-### init/1 ###
-
-`init(X1) -> any()`
-
-Process init.
 <a name="start_link-3"></a>
 
 ### start_link/3 ###
 
-`start_link(Host, Port, Client) -> any()`
+
+<pre><code>
+start_link(Host, Port, Client) -&gt; {ok, pid()} | ignore | {error, term()}
+</code></pre>
+
+<ul class="definitions"><li><code>Host = binary() | <a href="inet.md#type-ip_address">inet:ip_address()</a></code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = atom()</code></li></ul>
 
 start socket server.

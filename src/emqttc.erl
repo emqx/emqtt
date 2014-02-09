@@ -69,7 +69,10 @@ start() ->
     application:start(emqttc).
 
 %%--------------------------------------------------------------------
-%% @doc Starts the server
+%% @doc
+%% Creates a gen_fsm process which calls Module:init/1 to
+%% initialize. To ensure a synchronized start-up procedure, this
+%% function does not return until Module:init/1 has returned.
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
@@ -93,7 +96,7 @@ start_link(Name, Opts) when is_atom(Name), is_list(Opts) ->
     gen_fsm:start_link({local, Name}, ?MODULE, [Name, Opts], []).
 
 %%--------------------------------------------------------------------
-%% @doc publish to broker.
+%% @doc Publish message to broker.
 %% @end
 %%--------------------------------------------------------------------
 -spec publish(C, Topic, Payload) -> ok | {ok, MsgId} when
@@ -128,6 +131,9 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_1}) ->
 publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
+-spec set_socket(C, Sock) -> ok when
+      C :: pid() | atom(),
+      Sock :: gen_tcp:socket().
 set_socket(C, Sock) ->
     io:format("set_socke request to ~p sock:~p~n", [C, Sock]),
     gen_fsm:send_event(C, {set_socket, Sock}).
@@ -210,7 +216,23 @@ ping(C) ->
 disconnect(C) ->
     gen_fsm:send_event(C, disconnect).
 
-%%gen_fsm callbacks
+%%%===================================================================
+%%% gen_fms callbacks
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
+%% gen_fsm:start_link/[3,4], this function is called by the new
+%% process to initialize.
+%%
+%% @spec init(Args) -> {ok, StateName, State} |
+%%                     {ok, StateName, State, Timeout} |
+%%                     ignore |
+%%                     {stop, StopReason}
+%% @end
+%%--------------------------------------------------------------------
 init([Name, Args]) ->
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
@@ -226,7 +248,11 @@ init([Name, Args]) ->
 		   username = Username, password = Password},
     {ok, connecting, State, 0}.
 
-%% reconnect
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Message Handler for state that disconnecting from MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 disconnected(timeout, State) ->
     timer:sleep(5000),
     {next_state, connecting, State, 0};
@@ -244,9 +270,19 @@ disconnected({set_socket, Sock}, State) ->
 disconnected(_, State) ->
     {next_state, disconnected, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Sync message handler for state that disconnecting from MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 disconnected(_, _From, State) ->
     {next_state, disconnected, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Message Handler for state that connecting to MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 connecting(timeout, State) ->
     connect(State);
 
@@ -263,43 +299,19 @@ connecting({set_socket, Sock}, State) ->
 connecting(_Event, State) ->
     {next_state, connecting, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Sync message Handler for state that connecting to MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 connecting(_Event, _From, State) ->
     {reply, {error, connecting}, connecting, State}.
 
-%% connect to mqtt broker.
-connect(#state{host = Host, port = Port, name = Name,
-	       sock = undefined, sock_pid = undefined} = State) ->
-    io:format("connecting to ~p:~p~n", [Host, Port]),
-
-    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, Name) of
-		  {ok, SockPid1}                      -> SockPid1;
-		  {error,{already_started, SockPid2}} -> SockPid2
-	      end,
-    {next_state, connecting, State#state{sock_pid = SockPid}};
-
-%% now already socket pid is spawned.
-connect(#state{sock = _Sock, sock_pid = _SockPid} = State) ->
-    emqttc_sock_sup:stop_sock(0),    
-    connect(State#state{sock = undefined, sock_pid = undefined}).
-
-send_connect(#state{sock=Sock, username=Username, password=Password,
-		    client_id=ClientId}) ->
-    Frame = 
-	#mqtt_frame{
-	   fixed = #mqtt_frame_fixed{
-		      type = ?CONNECT,
-		      dup = 0,
-		      qos = 1,
-		      retain = 0},
-	   variable = #mqtt_frame_connect{
-			 username   = Username,
-			 password   = Password,
-			 proto_ver  = ?MQTT_PROTO_MAJOR,
-			 clean_sess = true,
-			 keep_alive = 60,
-			 client_id  = ClientId}},
-    send_frame(Sock, Frame).
-
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Message Handler for state that waiting_for_connack from MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 waiting_for_connack({set_socket, Sock}, State) ->
     io:format("set_socket: waiting_for_connack~n"),
     {next_state, waiting_for_connack, State#state{sock = Sock}};
@@ -308,11 +320,16 @@ waiting_for_connack(_Event, State) ->
     %FIXME:
     {next_state, waiting_for_connack, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Message Handler for state that connected to MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 connected({set_socket, Sock}, State) ->
     io:format("set_socket: connected~n"),
     {next_state, connected, State#state{sock = Sock}};
 
-connected({publish, Msg}, State=#state{sock=Sock, msgid=MsgId}) ->
+connected({publish, Msg}, State=#state{sock = Sock, msgid = MsgId}) ->
     #mqtt_msg{retain     = Retain,
 	      qos        = Qos,
 	      topic      = Topic,
@@ -353,18 +370,15 @@ connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
     send_puback(Sock, ?PUBCOMP, MsgId),
     {next_state, connected, State};
 
-connected({subscribe, Topics}, State=#state{msgid=MsgId,sock=Sock}) ->
+connected({subscribe, Topics}, State=#state{msgid = MsgId,sock = Sock}) ->
     Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- Topics],
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
 					 dup = 0,
 					 qos = 1,
-					 retain = 0},
+					 retain = false},
 	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
 						topic_table = Topics1}},
-    %ok = send_frame(Sock, Frame),
-    %{next_state, connected, State#state{msgid=MsgId+1}};
-
     case send_frame(Sock, Frame) of
 	ok -> 
 	    {next_state, connected, State#state{msgid=MsgId+1}};
@@ -372,17 +386,15 @@ connected({subscribe, Topics}, State=#state{msgid=MsgId,sock=Sock}) ->
 	    {next_state, disconnected, State#state{sock = undefined}}
     end;
 
-connected({unsubscribe, Topics}, State=#state{sock=Sock, msgid=MsgId}) ->
+connected({unsubscribe, Topics}, State=#state{sock = Sock, msgid = MsgId}) ->
+    Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- Topics],
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?UNSUBSCRIBE,
 					 dup = 0,
 					 qos = 1,
-					 retain = 0},
-	       variable = MsgId,
-	       payload = Topics},
-    %ok = send_frame(Sock, Frame),
-    %{next_state, connected, State};
-
+					 retain = false},
+	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
+						topic_table = Topics1}},
     case send_frame(Sock, Frame) of
 	ok -> 
 	    {next_state, connected, State#state{msgid=MsgId+1}};
@@ -401,6 +413,11 @@ connected(disconnect, State=#state{sock=Sock}) ->
 connected(_Event, State) -> 
     {next_state, connected, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Sync Message Handler for state that connected to MQTT broker.
+%% @end
+%%--------------------------------------------------------------------
 connected({publish, Msg}, From, 
 	  State=#state{sock=Sock, msgid=MsgId, ref=Ref}) ->
     #mqtt_msg{retain     = Retain,
@@ -420,10 +437,8 @@ connected({publish, Msg}, From,
 								   MsgId
 							   end},
 	       payload = Payload},
-    %ok = send_frame(Sock, Frame),
-    Ref2 = dict:append(publish, From, Ref),
-    %{next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
 
+    Ref2 = dict:append(publish, From, Ref),
     case send_frame(Sock, Frame) of
 	ok -> 
 	    {next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
@@ -452,6 +467,20 @@ connected(ping, From, State=#state{sock=Sock, ref = Ref}) ->
 connected(Event, _From, State) ->
     io:format("unsupported event: ~p~n", [Event]),
     {reply, {error, unsupport}, connected, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_fsm when it receives any
+%% message other than a synchronous or asynchronous event
+%% (or a system message).
+%%
+%% @spec handle_info(Info,StateName,State)->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
+%% @end
+%%--------------------------------------------------------------------
 
 %% connack message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
@@ -555,9 +584,38 @@ handle_info({timeout, reconnect}, connecting, S) ->
 handle_info(_Info, StateName, State) ->
     {next_state, StateName, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:send_all_state_event/2, this function is called to handle
+%% the event.
+%%
+%% @spec handle_event(Event, StateName, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState}
+%% @end
+%%--------------------------------------------------------------------
 handle_event(_Event, StateName, State) ->
     {next_state, StateName, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
+%% to handle the event.
+%%
+%% @spec handle_sync_event(Event, From, StateName, State) ->
+%%                   {next_state, NextStateName, NextState} |
+%%                   {next_state, NextStateName, NextState, Timeout} |
+%%                   {reply, Reply, NextStateName, NextState} |
+%%                   {reply, Reply, NextStateName, NextState, Timeout} |
+%%                   {stop, Reason, NewState} |
+%%                   {stop, Reason, Reply, NewState}
+%% @end
+%%--------------------------------------------------------------------
 handle_sync_event(status, _From, StateName, State) ->
     Statistics = [{N, get(N)} || N <- [inserted]],
     {reply, {StateName, Statistics}, StateName, State};
@@ -565,6 +623,17 @@ handle_sync_event(status, _From, StateName, State) ->
 handle_sync_event(stop, _From, _StateName, State) ->
     {stop, normal, ok, State}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_fsm when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_fsm terminates with
+%% Reason. The return value is ignored.
+%%
+%% @spec terminate(Reason, StateName, State) -> void()
+%% @end
+%%--------------------------------------------------------------------
 terminate(_Reason, _StateName, #state{sock_pid = undefined}) ->
     ok;
 
@@ -572,8 +641,21 @@ terminate(_Reason, _StateName, _State) ->
     emqttc_sock_sup:stop_sock(0),    
     ok.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Convert process state when code is changed
+%%
+%% @spec code_change(OldVsn, StateName, State, Extra) ->
+%%                   {ok, StateName, NewState}
+%% @end
+%%--------------------------------------------------------------------
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 send_puback(Sock, Type, MsgId) ->
     Frame = #mqtt_frame{
@@ -585,7 +667,7 @@ send_disconnect(Sock) ->
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?DISCONNECT,
 					 qos = 0,
-					 retain = 0,
+					 retain = false,
 					 dup = 0}},
     send_frame(Sock, Frame).
 
@@ -593,10 +675,11 @@ send_ping(Sock) ->
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?PINGREQ,
 					 qos = 1,
-					 retain = 0,
+					 retain = false,
 					 dup = 0}},
     send_frame(Sock, Frame).
 
+-spec send_frame(gen_tcp:socket(), #mqtt_frame{}) -> ok | {error, term()}.
 send_frame(Sock, Frame) ->
     case gen_tcp:send(Sock, emqtt_frame:serialise(Frame)) of
 	ok -> ok;
@@ -613,3 +696,39 @@ reply(Reply, Name, Ref) ->
 	    gen_fsm:reply(From, Reply),
 	    dict:store(Name, FromTail, Ref)
     end.
+
+%% connect to mqtt broker.
+connect(#state{host = Host, port = Port, name = Name,
+	       sock = undefined, sock_pid = undefined} = State) 
+when is_list(Host); is_tuple(Host),
+     is_integer(Port),
+     is_atom(Name) ->
+    io:format("connecting to ~p:~p~n", [Host, Port]),
+    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, Name) of
+		  {ok, SockPid1}                      -> SockPid1;
+		  {error,{already_started, SockPid2}} -> SockPid2
+	      end,
+    {next_state, connecting, State#state{sock_pid = SockPid}};
+
+%% now already socket pid is spawned.
+connect(#state{sock = _Sock, sock_pid = _SockPid} = State) ->
+    emqttc_sock_sup:stop_sock(0),    
+    connect(State#state{sock = undefined, sock_pid = undefined}).
+
+send_connect(#state{sock=Sock, username=Username, password=Password,
+		    client_id=ClientId}) ->
+    Frame = 
+	#mqtt_frame{
+	   fixed = #mqtt_frame_fixed{
+		      type = ?CONNECT,
+		      dup = 0,
+		      qos = 1,
+		      retain = false},
+	   variable = #mqtt_frame_connect{
+			 username   = Username,
+			 password   = Password,
+			 proto_ver  = ?MQTT_PROTO_MAJOR,
+			 clean_sess = true,
+			 keep_alive = 60,
+			 client_id  = ClientId}},
+    send_frame(Sock, Frame).

@@ -30,4 +30,7 @@ edoc:
 	./make_doc
 
 dialyzer: compile
-	@$(DIALYZER) ebin
+	@$(DIALYZER) ebin deps/ossp_uuid/ebin
+
+setup-dialyzer:
+	@$(DIALYZER) --build_plt --apps kernel stdlib mnesia eunit erts crypto

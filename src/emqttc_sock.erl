@@ -9,7 +9,7 @@
 -module(emqttc_sock).
 
 %% API
--export([start_link/3, loop/1]).
+-export([start_link/3, loop/3]).
 -export([init/1]).
 
 -define(MQTT_HEADER_SIZE, 1).
@@ -33,17 +33,24 @@
 %% @doc start socket server.
 %% @end
 %%--------------------------------------------------------------------
+-spec start_link(Host, Port, Client) -> {ok, pid()} |
+					ignore |
+					{error, term()} when
+      Host :: binary() | inet:ip_address(),
+      Port :: inet:port_number(),
+      Client :: atom().
 start_link(Host, Port, Client) ->
     proc_lib:start_link(?MODULE, init, [[self(), Host, Port, Client]]).
 
 %%--------------------------------------------------------------------
+%% @private
 %% @doc Process init.
 %% @end
 %%--------------------------------------------------------------------
 init([Parent, Host, Port, Client]) ->
     {ok, Sock, TRef} = connect(Host, Port, Client),
     proc_lib:init_ack(Parent, {ok, self()}),
-    loop([Sock, Client, TRef]).
+    loop(Sock, Client, TRef).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -60,8 +67,9 @@ connect(Host, Port, Client) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
 	    io:format("tcp connected.~n"),
-	    TRef = timer:apply_interval(?SOCKET_SEND_INTERVAL, 
-					emqttc, set_socket, [Client, Sock]),
+	    {ok, TRef} = timer:apply_interval(?SOCKET_SEND_INTERVAL, 
+					      emqttc, set_socket,
+					      [Client, Sock]),
 	    {ok, Sock, TRef};
 	{error, Reason} ->
 	    io:format("tcp connection failure: ~p~n", [Reason]),
@@ -74,12 +82,16 @@ connect(Host, Port, Client) ->
 %% @doc Socket read loop.
 %% @end
 %%--------------------------------------------------------------------
-loop([Sock, Client, TRef]) ->
+-spec loop(Sock, Client, TRef) -> ok when
+      Sock :: gen_tcp:socket(),
+      Client :: atom(),
+      TRef :: timer:tref().
+loop(Sock, Client, TRef) ->
     case gen_tcp:recv(Sock, ?MQTT_HEADER_SIZE) of
 	{ok, Header} ->
 	    case forward_msg(Header, Sock, Client) of
 		ok ->
-		    loop([Sock, Client, TRef]);
+		    loop(Sock, Client, TRef);
 		{error, Reason} ->
 		    terminate(Reason, Client, TRef)
 	    end;		    
@@ -92,10 +104,11 @@ loop([Sock, Client, TRef]) ->
 %% @doc Read and forward data to emqttc.
 %% @end
 %%--------------------------------------------------------------------
--spec forward_msg(Header, Sock, Pid) -> ok when
+-spec forward_msg(Header, Sock, Client) -> ok | {error, Reason} when
       Header :: binary(),
       Sock :: gen_tcp:socket(),
-      Pid :: pid().
+      Client :: atom(),
+      Reason :: term().
 forward_msg(Header, Sock, Client) ->
     case remaining_length(Sock) of
 	0 ->
@@ -130,11 +143,15 @@ maybe_send_message(Client, Data) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
+-spec terminate(Reason, Client, TRef) -> ok when
+      Reason :: term(),
+      Client :: atom(),
+      TRef :: timer:tref().
 terminate(Reason, Client, TRef) ->
     timer:cancel(TRef),
     maybe_send_message(Client, {tcp, error, Reason}),
-    timer:sleep(?RECONNECT_INTERVAL).
+    timer:sleep(?RECONNECT_INTERVAL),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
