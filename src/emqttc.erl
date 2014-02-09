@@ -579,7 +579,7 @@ send_puback(Sock, Type, MsgId) ->
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = Type},
 	       variable = #mqtt_frame_publish{message_id = MsgId}},
-    ok = send_frame(Sock, Frame).
+    send_frame(Sock, Frame).
 
 send_disconnect(Sock) ->
     Frame = #mqtt_frame{
