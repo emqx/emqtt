@@ -46,7 +46,7 @@ Starts the supervisor
 start_sock(ChildNo, Host, Port, Client) -&gt; <a href="supervisor.md#type-start_child_ret">supervisor:start_child_ret()</a>
 </code></pre>
 
-<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Host = <a href="inet.md#type-ip_address">inet:ip_address()</a> | list()</code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = pid()</code></li></ul>
+<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Host = <a href="inet.md#type-ip_address">inet:ip_address()</a> | list()</code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = atom()</code></li></ul>
 
 Start socket child.
 <a name="stop_sock-1"></a>
