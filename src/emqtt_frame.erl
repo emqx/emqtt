@@ -284,7 +284,6 @@ serialise_variable(#mqtt_frame_fixed { type = ?CONNECT } = Fixed,
 		    true  -> [serialise_utf(Password) | Payloads4];
 		    false -> Payloads4
 		end,
-
     PayloadBin = list_to_binary(lists:reverse(Payloads5)),
     serialise_fixed(Fixed, Bin, PayloadBin);
 

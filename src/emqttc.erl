@@ -287,7 +287,7 @@ connecting(timeout, State) ->
     connect(State);
 
 connecting({set_socket, Sock}, State) ->
-    io:format("set_socket: connecting~n"),
+    io:format("-----------------------------set_socket: connecting~n"),
     NewState = State#state{sock = Sock},
     case send_connect(NewState) of
 	ok ->
@@ -488,23 +488,23 @@ handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
 	    waiting_for_connack, State) ->
     case ReturnCode of
 	?CONNACK_ACCEPT ->
-	    io:format("connack: Connection Accepted~n"),
+	    io:format("-------connack: Connection Accepted~n"),
 	    gen_event:notify(emqttc_event, {connack_accept}),
 	    {next_state, connected, State};
 	?CONNACK_PROTO_VER ->
-	    io:format("connack: NG(unacceptable protocol version)~n"),
+	    io:format("-------connack: NG(unacceptable protocol version)~n"),
 	    {next_state, waiting_for_connack, State};
 	?CONNACK_INVALID_ID ->
-	    io:format("connack: NG(identifier rejected)~n"),
+	    io:format("-------connack: NG(identifier rejected)~n"),
 	    {next_state, waiting_for_connack, State};
 	?CONNACK_SERVER ->
-	    io:format("connack: NG(server unavailable)~n"),
+	    io:format("-------connack: NG(server unavailable)~n"),
 	    {next_state, waiting_for_connack, State};
 	?CONNACK_CREDENTIALS ->
-	    io:format("connack: NG(bad user name or password)~n"),
+	    io:format("-------connack: NG(bad user name or password)~n"),
 	    {next_state, waiting_for_connack, State};
 	?CONNACK_AUTH ->
-	    io:format("connack: NG(not authorized)~n"),
+	    io:format("-------connack: NG(not authorized)~n"),
 	    {next_state, waiting_for_connack, State}
     end;
 
@@ -698,11 +698,15 @@ reply(Reply, Name, Ref) ->
     end.
 
 %% connect to mqtt broker.
+connect(#state{host = Host} = State) 
+  when is_binary(Host) ->
+    connect(State#state{host = binary_to_list(Host)});
+
 connect(#state{host = Host, port = Port, name = Name,
 	       sock = undefined, sock_pid = undefined} = State) 
-when is_list(Host); is_tuple(Host),
-     is_integer(Port),
-     is_atom(Name) ->
+  when is_list(Host); is_tuple(Host),
+       is_integer(Port),
+       is_atom(Name) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
     SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, Name) of
 		  {ok, SockPid1}                      -> SockPid1;

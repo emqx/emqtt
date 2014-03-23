@@ -66,13 +66,14 @@ init([Parent, Host, Port, Client]) ->
 connect(Host, Port, Client) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
-	    io:format("tcp connected.~n"),
+	    io:format("----------------------tcp connected.~n"),
 	    {ok, TRef} = timer:apply_interval(?SOCKET_SEND_INTERVAL, 
 					      emqttc, set_socket,
 					      [Client, Sock]),
 	    {ok, Sock, TRef};
 	{error, Reason} ->
-	    io:format("tcp connection failure: ~p~n", [Reason]),
+	    io:format("-----------------------tcp connection failure: ~p~n", 
+		      [Reason]),
 	    timer:sleep(?RECONNECT_INTERVAL),
 	    {error, Reason}
     end.
