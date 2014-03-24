@@ -50,7 +50,7 @@
 -define(TIMEOUT, 3000).
 
 -record(state, {name      :: atom(),
-		host      :: inet:ip_address(),
+		host      :: inet:ip_address() | binary() | string(),
 		port      :: inet:port_number(),
 		sock      :: gen_tcp:socket(),
 		sock_pid  :: supervisor:child(),
