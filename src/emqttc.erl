@@ -54,6 +54,7 @@
 		port      :: inet:port_number(),
 		sock      :: gen_tcp:socket(),
 		sock_pid  :: supervisor:child(),
+		sock_no   :: non_neg_integer(),
 		msgid = 0 :: non_neg_integer(),
 		username  :: binary(),
 		password  :: binary(),
@@ -85,7 +86,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec start_link([tuple()]) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Opts) when is_list(Opts) ->
-    start_link(emqttc, Opts).
+    gen_fsm:start_link(?MODULE, [undefined, Opts], []).
 
 %%--------------------------------------------------------------------
 %% @doc Starts the server with name and options.
@@ -233,6 +234,9 @@ disconnect(C) ->
 %%                     {stop, StopReason}
 %% @end
 %%--------------------------------------------------------------------
+init([undefined, Args]) ->
+    init([self(), Args]);
+
 init([Name, Args]) ->
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
@@ -706,18 +710,21 @@ connect(#state{host = Host, port = Port, name = Name,
 	       sock = undefined, sock_pid = undefined} = State) 
   when is_list(Host); is_tuple(Host),
        is_integer(Port),
-       is_atom(Name) ->
+       is_atom(Name) orelse is_pid(Name) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
-    SockPid = case emqttc_sock_sup:start_sock(0, Host, Port, Name) of
+    SockNo = emqttc_childno:get(),
+    SockPid = case emqttc_sock_sup:start_sock(SockNo, Host, Port, Name) of
 		  {ok, SockPid1}                      -> SockPid1;
 		  {error,{already_started, SockPid2}} -> SockPid2
 	      end,
-    {next_state, connecting, State#state{sock_pid = SockPid}};
+    {next_state, connecting, State#state{sock_pid = SockPid, sock_no = SockNo}};
 
 %% now already socket pid is spawned.
-connect(#state{sock = _Sock, sock_pid = _SockPid} = State) ->
-    emqttc_sock_sup:stop_sock(0),    
-    connect(State#state{sock = undefined, sock_pid = undefined}).
+connect(#state{sock_no = SockNo} = State) ->
+    emqttc_sock_sup:stop_sock(SockNo),    
+    connect(State#state{sock = undefined, 
+			sock_pid = undefined, 
+			sock_no = undefined}).
 
 send_connect(#state{sock=Sock, username=Username, password=Password,
 		    client_id=ClientId}) ->
