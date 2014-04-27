@@ -508,10 +508,11 @@ connected(Event, _From, State) ->
 %% connack message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
 			 _:8/integer, ReturnCode:8/unsigned-integer>>},
-	    waiting_for_connack, State) ->
+	    waiting_for_connack, State = #state{topics = Topics}) ->
     case ReturnCode of
 	?CONNACK_ACCEPT ->
 	    io:format("-------connack: Connection Accepted~n"),
+	    io:format("subscribe: ~p~n", [Topics]),
 	    ok = gen_fsm:send_event(self(), {subscribe, []}),
 	    {next_state, connected, State};
 	?CONNACK_PROTO_VER ->
