@@ -54,12 +54,13 @@
 		port      :: inet:port_number(),
 		sock      :: gen_tcp:socket(),
 		sock_pid  :: supervisor:child(),
-		sock_no   :: non_neg_integer(),
+		sock_ref  :: reference(),
 		msgid = 0 :: non_neg_integer(),
 		username  :: binary(),
 		password  :: binary(),
 		ref       :: dict(),
-		client_id :: binary() }).
+		client_id :: binary(),
+		topics    :: [ {binary(), non_neg_integer()} ] }).
 
 %%--------------------------------------------------------------------
 %% @doc start application
@@ -186,7 +187,9 @@ pubcomp(C, MsgId) when is_integer(MsgId) ->
 -spec subscribe(C, Topics) -> ok when
       C :: pid() | atom(),
       Topics :: [ {binary(), non_neg_integer()} ].
-subscribe(C, Topics) ->
+subscribe(C, [{Topic, Qos} | _] = Topics) when 
+      is_binary(Topic),
+      is_integer(Qos) ->
     gen_fsm:send_event(C, {subscribe, Topics}).
 
 %%--------------------------------------------------------------------
@@ -196,7 +199,9 @@ subscribe(C, Topics) ->
 -spec unsubscribe(C, Topics) -> ok when
       C :: pid() | atom(),
       Topics :: [ {binary(), non_neg_integer()} ].
-unsubscribe(C, Topics) ->
+unsubscribe(C, [{Topic, Qos} | _] = Topics) when 
+      is_binary(Topic),
+      is_integer(Qos) ->
     gen_fsm:send_event(C, {unsubscribe, Topics}).
 
 %%--------------------------------------------------------------------
@@ -242,6 +247,7 @@ init([Name, Args]) ->
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
     Password = proplists:get_value(password, Args, undefined),
+    Topics = proplists:get_value(topics, Args, []),
 
     <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
     ClientId = proplists:get_value(client_id, Args, DefaultIdentifier),
@@ -249,7 +255,8 @@ init([Name, Args]) ->
     State = #state{host = Host, port = Port, ref = dict:new(),
 		   client_id = ClientId,
 		   name = Name,
-		   username = Username, password = Password},
+		   username = Username, password = Password,
+		   topics = Topics},
     {ok, connecting, State, 0}.
 
 %%--------------------------------------------------------------------
@@ -270,6 +277,9 @@ disconnected({set_socket, Sock}, State) ->
 	{error, _Reason} ->
 	    {next_state, disconnected, State}
     end;
+
+disconnected({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
+    {next_state, disconnected, State#state{topics = Topics ++ NewTopics}};    
 
 disconnected(_, State) ->
     {next_state, disconnected, State}.
@@ -300,6 +310,9 @@ connecting({set_socket, Sock}, State) ->
 	    {next_state, disconnected, State}
     end;
 
+connecting({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
+    {next_state, connecting, State#state{topics = Topics ++ NewTopics}};    
+
 connecting(_Event, State) ->
     {next_state, connecting, State}.
 
@@ -319,6 +332,10 @@ connecting(_Event, _From, State) ->
 waiting_for_connack({set_socket, Sock}, State) ->
     io:format("set_socket: waiting_for_connack~n"),
     {next_state, waiting_for_connack, State#state{sock = Sock}};
+
+waiting_for_connack({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
+    NewState = State#state{topics = Topics ++ NewTopics},
+    {next_state, waiting_for_connack, NewState};    
 
 waiting_for_connack(_Event, State) ->
     %FIXME:
@@ -374,8 +391,10 @@ connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
     send_puback(Sock, ?PUBCOMP, MsgId),
     {next_state, connected, State};
 
-connected({subscribe, Topics}, State=#state{msgid = MsgId,sock = Sock}) ->
-    Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- Topics],
+connected({subscribe, Topics}, State=#state{topics = QueuedTopics, 
+					    msgid = MsgId,sock = Sock}) ->
+    TotalTopics = QueuedTopics ++ Topics,
+    Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- TotalTopics],
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
 					 dup = 0,
@@ -493,7 +512,7 @@ handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
     case ReturnCode of
 	?CONNACK_ACCEPT ->
 	    io:format("-------connack: Connection Accepted~n"),
-	    gen_event:notify(emqttc_event, {connack_accept}),
+	    ok = gen_fsm:send_event(self(), {subscribe, []}),
 	    {next_state, connected, State};
 	?CONNACK_PROTO_VER ->
 	    io:format("-------connack: NG(unacceptable protocol version)~n"),
@@ -535,6 +554,7 @@ handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
 			   MsgId:16/big-unsigned-integer,
 			   Payload/binary>>},
 	    connected, State) when Qos =:= ?QOS_1; Qos =:= ?QOS_2 ->
+
     gen_event:notify(emqttc_event, {publish, Topic, Payload, Qos, MsgId}),
     {next_state, connected, State};
 
@@ -583,6 +603,7 @@ handle_info({tcp_closed, _Sock}, _, State) ->
     {next_state, disconnected, State};
 
 handle_info({timeout, reconnect}, connecting, S) ->
+    io:format("connect(handle_info)~n"),
     connect(S);
 
 handle_info(_Info, StateName, State) ->
@@ -712,19 +733,19 @@ connect(#state{host = Host, port = Port, name = Name,
        is_integer(Port),
        is_atom(Name) orelse is_pid(Name) ->
     io:format("connecting to ~p:~p~n", [Host, Port]),
-    SockNo = emqttc_childno:get(),
-    SockPid = case emqttc_sock_sup:start_sock(SockNo, Host, Port, Name) of
+    Ref = make_ref(),
+    SockPid = case emqttc_sock_sup:start_sock(Ref, Host, Port, Name) of
 		  {ok, SockPid1}                      -> SockPid1;
 		  {error,{already_started, SockPid2}} -> SockPid2
 	      end,
-    {next_state, connecting, State#state{sock_pid = SockPid, sock_no = SockNo}};
+    {next_state, connecting, State#state{sock_pid = SockPid, sock_ref = Ref}};
 
 %% now already socket pid is spawned.
-connect(#state{sock_no = SockNo} = State) ->
-    emqttc_sock_sup:stop_sock(SockNo),    
+connect(#state{sock_ref = Ref} = State) ->
+    emqttc_sock_sup:stop_sock(Ref),    
     connect(State#state{sock = undefined, 
 			sock_pid = undefined, 
-			sock_no = undefined}).
+			sock_ref = undefined}).
 
 send_connect(#state{sock=Sock, username=Username, password=Password,
 		    client_id=ClientId}) ->

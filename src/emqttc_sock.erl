@@ -66,13 +66,13 @@ init([Parent, Host, Port, Client]) ->
 connect(Host, Port, Client) ->
     case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
 	{ok, Sock} ->
-	    io:format("----------------------tcp connected.~n"),
+	    io:format("---tcp connected.~n"),
 	    {ok, TRef} = timer:apply_interval(?SOCKET_SEND_INTERVAL, 
 					      emqttc, set_socket,
 					      [Client, Sock]),
 	    {ok, Sock, TRef};
 	{error, Reason} ->
-	    io:format("-----------------------tcp connection failure: ~p~n", 
+	    io:format("---tcp connection failure: ~p~n", 
 		      [Reason]),
 	    timer:sleep(?RECONNECT_INTERVAL),
 	    {error, Reason}
@@ -133,13 +133,17 @@ forward_msg(Header, Sock, Client) ->
 -spec maybe_send_message(Client, Data) -> ok | ignore when
       Client :: atom(),
       Data :: term().
-maybe_send_message(Client, Data) ->
+maybe_send_message(Client, Data) when is_atom(Client) ->
     case whereis(Client) of
 	undefined ->
 	    ignore;
 	Pid when is_pid(Pid) -> 
-	    Pid ! Data
-    end.
+	    maybe_send_message(Pid, Data)
+    end;
+
+maybe_send_message(Pid, Data) when is_pid(Pid) ->
+    Pid ! Data.
+
 
 %%%===================================================================
 %%% Internal functions

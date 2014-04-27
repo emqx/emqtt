@@ -34,14 +34,14 @@ start_link() ->
 %% @doc Start socket child.
 %% @end
 %%--------------------------------------------------------------------
--spec start_sock(ChildNo, Host, Port, Client) -> 
+-spec start_sock(Ref, Host, Port, Client) -> 
 			supervisor:start_child_ret() when
-      ChildNo :: non_neg_integer(),
+      Ref :: reference(),
       Host :: inet:ip_address() | list(),
       Port :: inet:port_number(),
       Client :: atom().
-start_sock(ChildNo, Host, Port, Client) ->
-    ChildSpec = {{emqttc_sock, ChildNo},
+start_sock(Ref, Host, Port, Client) ->
+    ChildSpec = {{emqttc_sock, Ref},
 		 {emqttc_sock, start_link, [Host, Port, Client]},
 		 permanent, 2000, worker, [emqttc_sock]},
     supervisor:start_child(?SERVER, ChildSpec).
@@ -50,21 +50,21 @@ start_sock(ChildNo, Host, Port, Client) ->
 %% @doc Stop socket child.
 %% @end
 %%--------------------------------------------------------------------
--spec stop_sock(non_neg_integer()) -> ok | {error, Error} when
+-spec stop_sock(reference()) -> ok | {error, Error} when
       Error :: term().
-stop_sock(ChildNo) ->
-    supervisor:terminate_child(emqttc_sock_sup, {emqttc_sock, ChildNo}),
-    supervisor:delete_child(emqttc_sock_sup, {emqttc_sock, ChildNo}).
+stop_sock(Ref) ->
+    supervisor:terminate_child(emqttc_sock_sup, {emqttc_sock, Ref}),
+    supervisor:delete_child(emqttc_sock_sup, {emqttc_sock, Ref}).
 
 %%--------------------------------------------------------------------
 %% @doc Terminate child
 %% @end
 %%--------------------------------------------------------------------
--spec terminate_sock(ChildNo) -> ok | {error, Error} when
-      ChildNo :: non_neg_integer(),
+-spec terminate_sock(Ref) -> ok | {error, Error} when
+      Ref :: reference(),
       Error :: term().
-terminate_sock(ChildNo) ->
-    supervisor:terminate_child(?SERVER, {emqttc_sock, ChildNo}).
+terminate_sock(Ref) ->
+    supervisor:terminate_child(?SERVER, {emqttc_sock, Ref}).
 
 %%%===================================================================
 %%% Supervisor callbacks
