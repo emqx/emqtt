@@ -137,7 +137,6 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
       C :: pid() | atom(),
       Sock :: gen_tcp:socket().
 set_socket(C, Sock) ->
-    io:format("set_socke request to ~p sock:~p~n", [C, Sock]),
     gen_fsm:send_event(C, {set_socket, Sock}).
 
 %%--------------------------------------------------------------------
@@ -269,7 +268,6 @@ disconnected(timeout, State) ->
     {next_state, connecting, State, 0};
 
 disconnected({set_socket, Sock}, State) ->
-    io:format("set_socket: disconnected~n"),
     NewState = State#state{sock = Sock},
     case send_connect(NewState) of
 	ok ->
@@ -301,7 +299,6 @@ connecting(timeout, State) ->
     connect(State);
 
 connecting({set_socket, Sock}, State) ->
-    io:format("-----------------------------set_socket: connecting~n"),
     NewState = State#state{sock = Sock},
     case send_connect(NewState) of
 	ok ->
@@ -330,7 +327,6 @@ connecting(_Event, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 waiting_for_connack({set_socket, Sock}, State) ->
-    io:format("set_socket: waiting_for_connack~n"),
     {next_state, waiting_for_connack, State#state{sock = Sock}};
 
 waiting_for_connack({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
@@ -347,7 +343,6 @@ waiting_for_connack(_Event, State) ->
 %% @end
 %%--------------------------------------------------------------------
 connected({set_socket, Sock}, State) ->
-    io:format("set_socket: connected~n"),
     {next_state, connected, State#state{sock = Sock}};
 
 connected({publish, Msg}, State=#state{sock = Sock, msgid = MsgId}) ->
@@ -508,11 +503,10 @@ connected(Event, _From, State) ->
 %% connack message from broker(without remaining length).
 handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
 			 _:8/integer, ReturnCode:8/unsigned-integer>>},
-	    waiting_for_connack, State = #state{topics = Topics}) ->
+	    waiting_for_connack, State) ->
     case ReturnCode of
 	?CONNACK_ACCEPT ->
 	    io:format("-------connack: Connection Accepted~n"),
-	    io:format("subscribe: ~p~n", [Topics]),
 	    ok = gen_fsm:send_event(self(), {subscribe, []}),
 	    {next_state, connected, State};
 	?CONNACK_PROTO_VER ->
@@ -595,8 +589,7 @@ handle_info({tcp, error, Reason}, _, State) ->
     {next_state, disconnected, State};
 
 handle_info({tcp, _Sock, Data}, connected, State) when is_binary(Data) ->
-    <<Code:4/integer, _:4/integer, _/binary>> = Data,
-    io:format("data received from remote(code:~w): ~p~n", [Code, Data]),
+    <<_Code:4/integer, _:4/integer, _/binary>> = Data,
     {next_state, connected, State};
 
 handle_info({tcp_closed, _Sock}, _, State) ->

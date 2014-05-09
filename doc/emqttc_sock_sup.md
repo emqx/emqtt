@@ -43,10 +43,10 @@ Starts the supervisor
 
 
 <pre><code>
-start_sock(ChildNo, Host, Port, Client) -&gt; <a href="supervisor.md#type-start_child_ret">supervisor:start_child_ret()</a>
+start_sock(Ref, Host, Port, Client) -&gt; <a href="supervisor.md#type-start_child_ret">supervisor:start_child_ret()</a>
 </code></pre>
 
-<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Host = <a href="inet.md#type-ip_address">inet:ip_address()</a> | list()</code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = atom()</code></li></ul>
+<ul class="definitions"><li><code>Ref = reference()</code></li><li><code>Host = <a href="inet.md#type-ip_address">inet:ip_address()</a> | list()</code></li><li><code>Port = <a href="inet.md#type-port_number">inet:port_number()</a></code></li><li><code>Client = atom()</code></li></ul>
 
 Start socket child.
 <a name="stop_sock-1"></a>
@@ -55,7 +55,7 @@ Start socket child.
 
 
 <pre><code>
-stop_sock(ChildNo::non_neg_integer()) -&gt; ok | {error, Error}
+stop_sock(Ref::reference()) -&gt; ok | {error, Error}
 </code></pre>
 
 <ul class="definitions"><li><code>Error = term()</code></li></ul>
@@ -67,9 +67,9 @@ Stop socket child.
 
 
 <pre><code>
-terminate_sock(ChildNo) -&gt; ok | {error, Error}
+terminate_sock(Ref) -&gt; ok | {error, Error}
 </code></pre>
 
-<ul class="definitions"><li><code>ChildNo = non_neg_integer()</code></li><li><code>Error = term()</code></li></ul>
+<ul class="definitions"><li><code>Ref = reference()</code></li><li><code>Error = term()</code></li></ul>
 
 Terminate child
