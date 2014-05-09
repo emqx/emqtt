@@ -130,7 +130,7 @@ forward_msg(Header, Sock, Client) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec maybe_send_message(Client, Data) -> ok | ignore when
-      Client :: atom(),
+      Client :: atom() | pid(),
       Data :: term().
 maybe_send_message(Client, Data) when is_atom(Client) ->
     case whereis(Client) of
