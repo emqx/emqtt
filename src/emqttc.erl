@@ -656,8 +656,8 @@ handle_sync_event(stop, _From, _StateName, State) ->
 terminate(_Reason, _StateName, #state{sock_pid = undefined}) ->
     ok;
 
-terminate(_Reason, _StateName, _State) ->
-    emqttc_sock_sup:stop_sock(0),    
+terminate(_Reason, _StateName, _State = #state{sock_pid = Pid}) ->
+    emqttc_sock_sup:stop_sock(Pid),    
     ok.
 
 %%--------------------------------------------------------------------
