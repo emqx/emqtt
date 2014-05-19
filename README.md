@@ -1,4 +1,4 @@
-# emqttc
+# emqttc   [![Build Status](https://travis-ci.org/hiroeorz/emqttc.svg?branch=master)](https://travis-ci.org/hiroeorz/emqttc/requests)
 
 Erlang mqtt client.
 Emttc provides parallel connection and auto reconnect to broker.
