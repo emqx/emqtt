@@ -49,18 +49,20 @@
 
 -define(TIMEOUT, 3000).
 
--record(state, {name      :: atom(),
-		host      :: inet:ip_address() | binary() | string(),
-		port      :: inet:port_number(),
-		sock      :: gen_tcp:socket(),
-		sock_pid  :: supervisor:child(),
-		sock_ref  :: reference(),
-		msgid = 0 :: non_neg_integer(),
-		username  :: binary(),
-		password  :: binary(),
-		ref       :: dict(),
-		client_id :: binary(),
-		topics    :: [ {binary(), non_neg_integer()} ] }).
+-record(state, {name          :: atom(),
+		host          :: inet:ip_address() | binary() | string(),
+		port          :: inet:port_number(),
+		sock          :: gen_tcp:socket(),
+		sock_pid      :: supervisor:child(),
+		sock_ref      :: reference(),
+		msgid = 0     :: non_neg_integer(),
+		username      :: binary(),
+		password      :: binary(),
+		ref           :: dict(),
+		client_id     :: binary(),
+		clean_session :: boolean(),
+		keep_alive    :: non_neg_integer(),
+		topics        :: [ {binary(), non_neg_integer()} ] }).
 
 %%--------------------------------------------------------------------
 %% @doc start application
@@ -246,6 +248,8 @@ init([Name, Args]) ->
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
     Password = proplists:get_value(password, Args, undefined),
+    CleanSession = proplists:get_value(clean_session, Args, true),
+    KeepAlive = proplists:get_value(keep_alive, Args, 20),
     Topics = proplists:get_value(topics, Args, []),
 
     <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
@@ -255,7 +259,10 @@ init([Name, Args]) ->
 		   client_id = ClientId,
 		   name = Name,
 		   username = Username, password = Password,
+		   clean_session = CleanSession,
+		   keep_alive = KeepAlive,
 		   topics = Topics},
+
     {ok, connecting, State, 0}.
 
 %%--------------------------------------------------------------------
@@ -742,7 +749,8 @@ connect(#state{sock_ref = Ref} = State) ->
 			sock_ref = undefined}).
 
 send_connect(#state{sock=Sock, username=Username, password=Password,
-		    client_id=ClientId}) ->
+		    client_id=ClientId, clean_session = CleanSession,
+		    keep_alive=KeepAlive}) ->
     Frame = 
 	#mqtt_frame{
 	   fixed = #mqtt_frame_fixed{
@@ -754,7 +762,7 @@ send_connect(#state{sock=Sock, username=Username, password=Password,
 			 username   = Username,
 			 password   = Password,
 			 proto_ver  = ?MQTT_PROTO_MAJOR,
-			 clean_sess = true,
-			 keep_alive = 60,
+			 clean_sess = CleanSession,
+			 keep_alive = KeepAlive,
 			 client_id  = ClientId}},
     send_frame(Sock, Frame).

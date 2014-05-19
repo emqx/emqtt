@@ -53,3 +53,21 @@ You can add your custom event handler.
 ```erl-sh
 1> emqttc_event:add_handler(your_handler, []).
 ```
+
+##Options
+
+### Clean Session
+
+Default Clean Session value is true, If you want to set Clean Session = false, add option <code>{clean_session, false}</code>.
+
+```erl-sh
+1> {ok, Pid} = emqttc:start_link([{host, "test.mosquitto.org"}, {clean_session. false}]).
+```
+
+### Keep Alive
+
+Default Keep Alive value is 20(sec), If you want to set KeepAlive, add option <code>{keep_alive, 60}</code>.
+
+```erl-sh
+1> {ok, Pid} = emqttc:start_link([{host, "test.mosquitto.org"}, {keep_alive. 60}]).
+```
