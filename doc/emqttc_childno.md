@@ -32,9 +32,7 @@ __Authors:__ HIROE Shin ([`shin@HIROE-no-MacBook-Pro.local`](mailto:shin@HIROE-n
 <pre><code>
 get() -&gt; non_neg_integer()
 </code></pre>
-
-<br></br>
-
+<br />
 
 Get next child no.
 <a name="start_link-1"></a>
@@ -45,8 +43,6 @@ Get next child no.
 <pre><code>
 start_link(Ets::<a href="ets.md#type-tid">ets:tid()</a>) -&gt; {ok, pid()} | ignore | {error, term()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Starts the server

@@ -35,9 +35,7 @@ Creates an event manager.</td></tr></table>
 <pre><code>
 add_handler() -&gt; ok | {'EXIT', Reason} | term()
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 Adds an event handler
@@ -50,9 +48,7 @@ Adds an event handler
 <pre><code>
 add_handler(Module, Args::Arg) -&gt; ok | {'EXIT', Reason} | term()
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 Adds an event handler
@@ -65,9 +61,7 @@ Adds an event handler
 <pre><code>
 start_link() -&gt; {ok, Pid} | {error, Error}
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 Creates an event manager

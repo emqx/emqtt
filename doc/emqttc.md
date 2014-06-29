@@ -147,9 +147,7 @@ set_socket(C, Sock) -&gt; ok
 <pre><code>
 start() -&gt; ok
 </code></pre>
-
-<br></br>
-
+<br />
 
 start application
 <a name="start_link-0"></a>
@@ -160,9 +158,7 @@ start application
 <pre><code>
 start_link() -&gt; {ok, pid()} | ignore | {error, term()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 
 Creates a gen_fsm process which calls Module:init/1 to
@@ -176,9 +172,7 @@ function does not return until Module:init/1 has returned.
 <pre><code>
 start_link(Opts::[tuple()]) -&gt; {ok, pid()} | ignore | {error, term()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Starts the server with options.
 <a name="start_link-2"></a>
@@ -189,9 +183,7 @@ Starts the server with options.
 <pre><code>
 start_link(Name::atom(), Opts::[tuple()]) -&gt; {ok, pid()} | ignore | {error, term()}
 </code></pre>
-
-<br></br>
-
+<br />
 
 Starts the server with name and options.
 <a name="subscribe-2"></a>

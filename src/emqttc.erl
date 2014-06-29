@@ -58,7 +58,7 @@
 		msgid = 0     :: non_neg_integer(),
 		username      :: binary(),
 		password      :: binary(),
-		ref           :: dict(),
+		ref           :: dict:dict(),
 		client_id     :: binary(),
 		clean_session :: boolean(),
 		keep_alive    :: non_neg_integer(),
