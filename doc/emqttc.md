@@ -10,7 +10,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#disconnect-1">disconnect/1</a></td><td>Disconnect from broker.</td></tr><tr><td valign="top"><a href="#ping-1">ping/1</a></td><td>Send ping to broker.</td></tr><tr><td valign="top"><a href="#puback-2">puback/2</a></td><td>puback.</td></tr><tr><td valign="top"><a href="#pubcomp-2">pubcomp/2</a></td><td>pubcomp.</td></tr><tr><td valign="top"><a href="#publish-2">publish/2</a></td><td></td></tr><tr><td valign="top"><a href="#publish-3">publish/3</a></td><td>Publish message to broker.</td></tr><tr><td valign="top"><a href="#publish-4">publish/4</a></td><td></td></tr><tr><td valign="top"><a href="#pubrec-2">pubrec/2</a></td><td>pubrec.</td></tr><tr><td valign="top"><a href="#pubrel-2">pubrel/2</a></td><td>pubrec.</td></tr><tr><td valign="top"><a href="#set_socket-2">set_socket/2</a></td><td></td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>start application.</td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add_event_handler-2">add_event_handler/2</a></td><td>Add subscribe event handler.</td></tr><tr><td valign="top"><a href="#disconnect-1">disconnect/1</a></td><td>Disconnect from broker.</td></tr><tr><td valign="top"><a href="#ping-1">ping/1</a></td><td>Send ping to broker.</td></tr><tr><td valign="top"><a href="#puback-2">puback/2</a></td><td>puback.</td></tr><tr><td valign="top"><a href="#pubcomp-2">pubcomp/2</a></td><td>pubcomp.</td></tr><tr><td valign="top"><a href="#publish-2">publish/2</a></td><td></td></tr><tr><td valign="top"><a href="#publish-3">publish/3</a></td><td>Publish message to broker.</td></tr><tr><td valign="top"><a href="#publish-4">publish/4</a></td><td></td></tr><tr><td valign="top"><a href="#pubrec-2">pubrec/2</a></td><td>pubrec.</td></tr><tr><td valign="top"><a href="#pubrel-2">pubrel/2</a></td><td>pubrec.</td></tr><tr><td valign="top"><a href="#set_socket-2">set_socket/2</a></td><td></td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>start application.</td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td>
 Creates a gen_fsm process which calls Module:init/1 to
 initialize.</td></tr><tr><td valign="top"><a href="#start_link-1">start_link/1</a></td><td>Starts the server with options.</td></tr><tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td>Starts the server with name and options.</td></tr><tr><td valign="top"><a href="#subscribe-2">subscribe/2</a></td><td>subscribe request to broker.</td></tr><tr><td valign="top"><a href="#unsubscribe-2">unsubscribe/2</a></td><td>unsubscribe request to broker.</td></tr></table>
 
@@ -19,6 +19,13 @@ initialize.</td></tr><tr><td valign="top"><a href="#start_link-1">start_link/1</
 
 ## Function Details ##
 
+<a name="add_event_handler-2"></a>
+
+### add_event_handler/2 ###
+
+`add_event_handler(C, Handler) -> any()`
+
+Add subscribe event handler.
 <a name="disconnect-1"></a>
 
 ### disconnect/1 ###

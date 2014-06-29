@@ -36,22 +36,23 @@ start_link() ->
     gen_event:start_link().
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Adds an event handler
-%%
-%% @spec add_handler() -> ok | {'EXIT', Reason} | term()
+%% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
+-spec add_handler(pid()) -> ok | {'EXIT', term()} | term().
 add_handler(Pid) ->
     gen_event:add_handler(Pid, ?MODULE, []).
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Adds an event handler
-%%
-%% @spec add_handler(Module, Arg) -> ok | {'EXIT', Reason} | term()
+%% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
+-spec add_handler(Pid, Module, Args) -> 
+			 ok | {'EXIT', Reason} | term() when
+      Pid :: pid(),
+      Module :: atom(),
+      Args :: [term()],
+      Reason :: term().
 add_handler(Pid, Module, Args) ->
     gen_event:add_handler(Pid, Module, Args).
 
