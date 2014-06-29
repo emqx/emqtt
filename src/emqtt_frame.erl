@@ -23,7 +23,7 @@
 -export([serialise/1]).
 
 -define(RESERVED, 0).
--define(PROTOCOL_MAGIC, <<"MQIsdp">>).
+-define(PROTOCOL_MAGIC, <<"MQTT">>).
 -define(MAX_LEN, 16#fffffff).
 -define(HIGHBIT, 2#10000000).
 -define(LOWBITS, 2#01111111).

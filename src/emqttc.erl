@@ -259,7 +259,7 @@ init([Name, Args]) ->
     Username = proplists:get_value(username, Args, undefined),
     Password = proplists:get_value(password, Args, undefined),
     CleanSession = proplists:get_value(clean_session, Args, true),
-    KeepAlive = proplists:get_value(keep_alive, Args, 20),
+    KeepAlive = proplists:get_value(keep_alive, Args, 0),
     Topics = proplists:get_value(topics, Args, []),
 
     <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
@@ -423,12 +423,11 @@ connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
 connected({subscribe, Topics}, State=#state{topics = QueuedTopics, 
 					    msgid = MsgId,sock = Sock}) ->
     TotalTopics = lists:usort(QueuedTopics ++ Topics),
-    io:format("Total Topic: ~p", [TotalTopics]),
     Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- TotalTopics],
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
 					 dup = 0,
-					 qos = 1,
+					 qos = 0,
 					 retain = false},
 	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
 						topic_table = Topics1}},
@@ -444,7 +443,7 @@ connected({unsubscribe, Topics}, State=#state{sock = Sock, msgid = MsgId}) ->
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?UNSUBSCRIBE,
 					 dup = 0,
-					 qos = 1,
+					 qos = 0,
 					 retain = false},
 	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
 						topic_table = Topics1}},
