@@ -11,7 +11,7 @@
 -behaviour(gen_event).
 
 %% API
--export([start_link/0, add_handler/0, add_handler/2]).
+-export([start_link/0, add_handler/1, add_handler/3]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
@@ -33,7 +33,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_event:start_link({local, ?SERVER}).
+    gen_event:start_link().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -42,8 +42,8 @@ start_link() ->
 %% @spec add_handler() -> ok | {'EXIT', Reason} | term()
 %% @end
 %%--------------------------------------------------------------------
-add_handler() ->
-    gen_event:add_handler(?SERVER, ?MODULE, []).
+add_handler(Pid) ->
+    gen_event:add_handler(Pid, ?MODULE, []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -52,8 +52,8 @@ add_handler() ->
 %% @spec add_handler(Module, Arg) -> ok | {'EXIT', Reason} | term()
 %% @end
 %%--------------------------------------------------------------------
-add_handler(Module, Args) ->
-    gen_event:add_handler(?SERVER, Module, Args).
+add_handler(Pid, Module, Args) ->
+    gen_event:add_handler(Pid, Module, Args).
 
 %%%===================================================================
 %%% gen_event callbacks

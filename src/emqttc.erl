@@ -21,6 +21,7 @@
 	 unsubscribe/2,
 	 ping/1,
 	 disconnect/1,
+	 add_event_handler/2,
 	 set_socket/2]).
 
 %% gen_fsm callbacks
@@ -62,7 +63,8 @@
 		client_id     :: binary(),
 		clean_session :: boolean(),
 		keep_alive    :: non_neg_integer(),
-		topics        :: [ {binary(), non_neg_integer()} ] }).
+		topics        :: [ {binary(), non_neg_integer()} ],
+		event_mgr_pid :: pid() }).
 
 %%--------------------------------------------------------------------
 %% @doc start application
@@ -223,6 +225,14 @@ ping(C) ->
 disconnect(C) ->
     gen_fsm:send_event(C, disconnect).
 
+%%--------------------------------------------------------------------
+%% @doc Add subscribe event handler.
+%% @end
+%%--------------------------------------------------------------------
+
+add_event_handler(C, Handler) ->
+    gen_fsm:send_event(C, {add_event_handler, Handler}).
+
 %%%===================================================================
 %%% gen_fms callbacks
 %%%===================================================================
@@ -254,6 +264,7 @@ init([Name, Args]) ->
 
     <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
     ClientId = proplists:get_value(client_id, Args, DefaultIdentifier),
+    {ok, Pid} = emqttc_event:start_link(),
 
     State = #state{host = Host, port = Port, ref = dict:new(),
 		   client_id = ClientId,
@@ -261,7 +272,8 @@ init([Name, Args]) ->
 		   username = Username, password = Password,
 		   clean_session = CleanSession,
 		   keep_alive = KeepAlive,
-		   topics = Topics},
+		   topics = Topics,
+		   event_mgr_pid = Pid},
 
     {ok, connecting, State, 0}.
 
@@ -285,6 +297,11 @@ disconnected({set_socket, Sock}, State) ->
 
 disconnected({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
     {next_state, disconnected, State#state{topics = Topics ++ NewTopics}};    
+
+disconnected({add_event_handler, Handler}, 
+	     State = #state{event_mgr_pid = EventPid}) ->
+    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    {next_state, connecting, State};    
 
 disconnected(_, State) ->
     {next_state, disconnected, State}.
@@ -314,8 +331,13 @@ connecting({set_socket, Sock}, State) ->
 	    {next_state, disconnected, State}
     end;
 
-connecting({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
+connecting({subscribe, NewTopics}, State=#state{topics = Topics}) ->
     {next_state, connecting, State#state{topics = Topics ++ NewTopics}};    
+
+connecting({add_event_handler, Handler}, 
+	   State = #state{event_mgr_pid = EventPid}) ->
+    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    {next_state, connecting, State};    
 
 connecting(_Event, State) ->
     {next_state, connecting, State}.
@@ -339,6 +361,11 @@ waiting_for_connack({set_socket, Sock}, State) ->
 waiting_for_connack({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
     NewState = State#state{topics = Topics ++ NewTopics},
     {next_state, waiting_for_connack, NewState};    
+
+waiting_for_connack({add_event_handler, Handler},
+		    State = #state{event_mgr_pid = EventPid}) ->
+    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    {next_state, connecting, State};    
 
 waiting_for_connack(_Event, State) ->
     %FIXME:
@@ -395,7 +422,8 @@ connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
 
 connected({subscribe, Topics}, State=#state{topics = QueuedTopics, 
 					    msgid = MsgId,sock = Sock}) ->
-    TotalTopics = QueuedTopics ++ Topics,
+    TotalTopics = lists:usort(QueuedTopics ++ Topics),
+    io:format("Total Topic: ~p", [TotalTopics]),
     Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- TotalTopics],
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
@@ -434,6 +462,11 @@ connected(disconnect, State=#state{sock=Sock}) ->
 	{error, _Reason} ->
 	    {next_state, disconnected, State#state{sock = undefined}}
     end;	    
+
+connected({add_event_handler, Handler},
+	  State = #state{event_mgr_pid = EventPid}) ->
+    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    {next_state, connecting, State};    
 
 connected(_Event, State) -> 
     {next_state, connected, State}.
@@ -544,8 +577,8 @@ handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
 			   TopicSize:16/big-unsigned-integer,
 			   Topic:TopicSize/binary,
 			   Payload/binary>>},
-	    connected, State) ->
-    gen_event:notify(emqttc_event, {publish, Topic, Payload}),
+	    connected, State = #state{event_mgr_pid = EventPid}) ->
+    gen_event:notify(EventPid, {publish, Topic, Payload}),
     {next_state, connected, State};
 
 %% pub message from broker(QoS = 1 or 2)(without remaining length).
@@ -555,9 +588,10 @@ handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
 			   Topic:TopicSize/binary,
 			   MsgId:16/big-unsigned-integer,
 			   Payload/binary>>},
-	    connected, State) when Qos =:= ?QOS_1; Qos =:= ?QOS_2 ->
+	    connected, State = #state{event_mgr_pid = EventPid}) 
+  when Qos =:= ?QOS_1; Qos =:= ?QOS_2 ->
 
-    gen_event:notify(emqttc_event, {publish, Topic, Payload, Qos, MsgId}),
+    gen_event:notify(EventPid, {publish, Topic, Payload, Qos, MsgId}),
     {next_state, connected, State};
 
 %% pubrec message from broker(without remaining length).
