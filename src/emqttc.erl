@@ -22,6 +22,7 @@
 	 ping/1,
 	 disconnect/1,
 	 add_event_handler/2,
+	 add_event_handler/3,
 	 set_socket/2]).
 
 %% gen_fsm callbacks
@@ -229,9 +230,18 @@ disconnect(C) ->
 %% @doc Add subscribe event handler.
 %% @end
 %%--------------------------------------------------------------------
-
+-spec add_event_handler(C, Handler) -> ok when
+      C :: pid | atom(),
+      Handler :: atom().
 add_event_handler(C, Handler) ->
-    gen_fsm:send_event(C, {add_event_handler, Handler}).
+    add_event_handler(C, Handler, []).
+
+-spec add_event_handler(C, Handler, Args) -> ok when
+      C :: pid | atom(),
+      Handler :: atom(),
+      Args :: [term()].
+add_event_handler(C, Handler, Args) ->
+    gen_fsm:send_event(C, {add_event_handler, Handler, Args}).
 
 %%%===================================================================
 %%% gen_fms callbacks
@@ -298,9 +308,9 @@ disconnected({set_socket, Sock}, State) ->
 disconnected({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
     {next_state, disconnected, State#state{topics = Topics ++ NewTopics}};    
 
-disconnected({add_event_handler, Handler}, 
+disconnected({add_event_handler, Handler, Args}, 
 	     State = #state{event_mgr_pid = EventPid}) ->
-    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    ok = emqttc_event:add_handler(EventPid, Handler, Args),
     {next_state, connecting, State};    
 
 disconnected(_, State) ->
@@ -334,9 +344,9 @@ connecting({set_socket, Sock}, State) ->
 connecting({subscribe, NewTopics}, State=#state{topics = Topics}) ->
     {next_state, connecting, State#state{topics = Topics ++ NewTopics}};    
 
-connecting({add_event_handler, Handler}, 
+connecting({add_event_handler, Handler, Args}, 
 	   State = #state{event_mgr_pid = EventPid}) ->
-    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    ok = emqttc_event:add_handler(EventPid, Handler, Args),
     {next_state, connecting, State};    
 
 connecting(_Event, State) ->
@@ -362,9 +372,9 @@ waiting_for_connack({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
     NewState = State#state{topics = Topics ++ NewTopics},
     {next_state, waiting_for_connack, NewState};    
 
-waiting_for_connack({add_event_handler, Handler},
+waiting_for_connack({add_event_handler, Handler, Args},
 		    State = #state{event_mgr_pid = EventPid}) ->
-    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    ok = emqttc_event:add_handler(EventPid, Handler, Args),
     {next_state, connecting, State};    
 
 waiting_for_connack(_Event, State) ->
@@ -462,9 +472,9 @@ connected(disconnect, State=#state{sock=Sock}) ->
 	    {next_state, disconnected, State#state{sock = undefined}}
     end;	    
 
-connected({add_event_handler, Handler},
+connected({add_event_handler, Handler, Args},
 	  State = #state{event_mgr_pid = EventPid}) ->
-    ok = emqttc_event:add_handler(EventPid, Handler, []),
+    ok = emqttc_event:add_handler(EventPid, Handler, Args),
     {next_state, connecting, State};    
 
 connected(_Event, State) -> 
