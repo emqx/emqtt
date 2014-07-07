@@ -272,10 +272,15 @@ init([Name, Args]) ->
     KeepAlive = proplists:get_value(keep_alive, Args, 0),
     Topics = proplists:get_value(topics, Args, []),
 
-    <<DefaultIdentifier:23/binary, _/binary>> = ossp_uuid:make(v4, text),
-    ClientId = proplists:get_value(client_id, Args, DefaultIdentifier),
-    {ok, Pid} = emqttc_event:start_link(),
+    ClientId = case proplists:get_value(client_id, Args) of
+		   undefined -> 
+		       <<I:23/binary, _/binary>> = ossp_uuid:make(v4,text),
+		       I;
+		   Id ->
+		       Id
+	       end,
 
+    {ok, Pid} = emqttc_event:start_link(),
     State = #state{host = Host, port = Port, ref = dict:new(),
 		   client_id = ClientId,
 		   name = Name,
