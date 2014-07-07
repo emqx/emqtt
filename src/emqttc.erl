@@ -264,6 +264,9 @@ init([undefined, Args]) ->
     init([self(), Args]);
 
 init([Name, Args]) ->
+    true = proplists:is_defined(client_id, Args),
+    ClientId = proplists:get_value(client_id, Args),
+
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
     Username = proplists:get_value(username, Args, undefined),
@@ -271,14 +274,6 @@ init([Name, Args]) ->
     CleanSession = proplists:get_value(clean_session, Args, true),
     KeepAlive = proplists:get_value(keep_alive, Args, 0),
     Topics = proplists:get_value(topics, Args, []),
-
-    ClientId = case proplists:get_value(client_id, Args) of
-		   undefined -> 
-		       <<I:23/binary, _/binary>> = ossp_uuid:make(v4,text),
-		       I;
-		   Id ->
-		       Id
-	       end,
 
     {ok, Pid} = emqttc_event:start_link(),
     State = #state{host = Host, port = Port, ref = dict:new(),
