@@ -50,6 +50,7 @@
 		     {send_timeout,  3000}]).
 
 -define(TIMEOUT, 3000).
+-define(RECONNECT_INTERVAL, 5000).
 
 -record(state, {name          :: atom(),
 		host          :: inet:ip_address() | binary() | string(),
@@ -139,7 +140,7 @@ publish(C, Msg = #mqtt_msg{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(C, {publish, Msg}).
 
 -spec set_socket(C, Sock) -> ok when
-      C :: pid() | atom(),
+      C :: atom() | pid(),
       Sock :: gen_tcp:socket().
 set_socket(C, Sock) ->
     gen_fsm:send_event(C, {set_socket, Sock}).
@@ -780,7 +781,14 @@ connect(#state{host = Host, port = Port, name = Name,
     Ref = make_ref(),
     SockPid = case emqttc_sock_sup:start_sock(Ref, Host, Port, Name) of
 		  {ok, SockPid1}                      -> SockPid1;
-		  {error,{already_started, SockPid2}} -> SockPid2
+		  {error,{already_started, SockPid2}} ->
+		      SockPid2 ! {set_clinet_pid, self()},
+		      SockPid2;
+		  {error, Reason} ->
+		      io:format("connection failure: ~p~n", [Reason]),
+		      timer:sleep(?RECONNECT_INTERVAL),
+		      io:format("reconnecting to ~p:~p ...", [Host, Port]),
+		      connect(State)
 	      end,
     {next_state, connecting, State#state{sock_pid = SockPid, sock_ref = Ref}};
 

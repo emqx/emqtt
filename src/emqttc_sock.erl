@@ -60,7 +60,7 @@ init([Parent, Host, Port, Client]) ->
 -spec connect(Host, Port, Client) -> {ok, Sock} | {error, Reason} when
       Host :: inet:ip_address() | list(),
       Port :: inet:port_number(),
-      Client :: atom(),
+      Client :: atom() | pid(),
       Sock :: gen_tcp:socket(),
       Reason :: atom().
 connect(Host, Port, Client) ->
@@ -86,7 +86,8 @@ connect(Host, Port, Client) ->
       Sock :: gen_tcp:socket(),
       Client :: atom(),
       TRef :: timer:tref().
-loop(Sock, Client, TRef) ->
+loop(Sock, MaybeClient, TRef) ->
+    Client = handle_info(MaybeClient),
     case gen_tcp:recv(Sock, ?MQTT_HEADER_SIZE) of
 	{ok, Header} ->
 	    case forward_msg(Header, Sock, Client) of
@@ -97,6 +98,26 @@ loop(Sock, Client, TRef) ->
 	    end;		    
 	{error, Reason1} ->
 	    terminate(Reason1, Client, TRef)
+    end.
+
+handle_info(MaybeClient) ->
+    handle_info(MaybeClient, undefined).
+
+handle_info(MaybeClient, NewClient) ->
+    case process_info(self(), message_queue_len) of
+	{message_queue_len, 0} ->
+	    case NewClient of
+		undefined -> MaybeClient;
+		_         -> NewClient
+	    end;
+	{message_queue_len, Count} when Count > 0 ->
+	    receive
+		{set_clinet_pid, From} ->
+		    io:format("client update: ~p -> ~p~n", [MaybeClient, From]),
+		    handle_info(MaybeClient, From);
+		Other ->
+		    io:format("unkown message: ~p~n", [Other])
+	    end
     end.
 
 %%--------------------------------------------------------------------
