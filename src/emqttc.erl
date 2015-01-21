@@ -55,7 +55,7 @@
 		msgid = 0 :: non_neg_integer(),
 		username  :: binary(),
 		password  :: binary(),
-		ref       :: dict() }).
+		ref       :: dict:dict() }).
 
 %%--------------------------------------------------------------------
 %% @doc start application
