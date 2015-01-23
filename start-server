@@ -1,0 +1,3 @@
+#!/bin/sh
+
+erl -pa ebin deps/*/ebin -boot start_sasl -s emqttc start +K true
