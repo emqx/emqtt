@@ -439,7 +439,7 @@ connected({subscribe, Topics}, State=#state{topics = QueuedTopics,
     Frame = #mqtt_frame{
 	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
 					 dup = 0,
-					 qos = 0,
+					 qos = 1,
 					 retain = false},
 	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
 						topic_table = Topics1}},
