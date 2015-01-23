@@ -55,11 +55,13 @@
 -define(QOS_1, 1).
 -define(QOS_2, 2).
 
+-type message_id() :: non_neg_integer().
+
 -record(mqtt_frame_fixed,
 	{type   = 0                       :: non_neg_integer(),
 	 dup    = 0                       :: non_neg_integer(),
 	 qos    = 0                       :: non_neg_integer(),
-	 retain = 0                       :: non_neg_integer() }).
+	 retain = false                   :: boolean() }).
 
 -record(mqtt_frame_connect,  
 	{client_id   = <<>>               :: binary(),
@@ -67,31 +69,35 @@
 	 username    = undefined          :: undefined | binary(),
 	 password    = undefined          :: undefined | binary(),      
 	 will_retain = false              :: boolean(),
-	 will_qos    = false              :: boolean(),
+	 will_qos    = 0                  :: non_neg_integer(),
 	 will_flag   = false              :: boolean(),
 	 clean_sess  = false              :: boolean(),
-	 keep_alive  = false              :: boolean(),
+	 keep_alive  = 60                 :: non_neg_integer(),
 	 will_topic  = undefined          :: undefined | binary(),
 	 will_msg    = undefined          :: undefined | binary() }).
 
+-record(mqtt_frame_publish,
+	{topic_name                       :: binary(),
+	 message_id                       :: message_id() }).
+
+-record(mqtt_frame_subscribe,
+	{message_id = 0                   :: message_id(),
+	 topic_table = []                 :: list() }).
+
 -record(mqtt_frame, 
 	{fixed                            :: #mqtt_frame_fixed{},
-	 variable                         :: #mqtt_frame_connect{},
-	 payload                          :: binary() }).
+	 variable                         :: #mqtt_frame_connect{}   |
+					     #mqtt_frame_publish{}   |
+					     #mqtt_frame_subscribe{} |
+					     message_id()            |
+					     undefined,
+	 payload                          :: binary() | undefined }).
 
 -record(mqtt_frame_connack,  
 	{return_code                      :: non_neg_integer() }).
 
--record(mqtt_frame_publish,
-	{topic_name                       :: binary(),
-	 message_id                       :: non_neg_integer() }).
-
--record(mqtt_frame_subscribe,
-	{message_id                       :: non_neg_integer(),
-	 topic_table                      :: list() }).
-
 -record(mqtt_frame_suback,
-	{message_id                       :: non_neg_integer(),
+	{message_id                       :: message_id(),
 	 qos_table = []                   :: list()}).
 
 -record(mqtt_topic,
@@ -106,7 +112,7 @@
 	 qos = 0                          :: non_neg_integer(),
 	 topic                            :: binary(),
 	 dup = 0                          :: non_neg_integer(),
-	 message_id                       :: undefined | non_neg_integer(),
+	 message_id                       :: message_id(),
 	 payload                          :: binary() }).
 
 

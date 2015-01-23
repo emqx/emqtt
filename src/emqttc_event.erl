@@ -11,7 +11,7 @@
 -behaviour(gen_event).
 
 %% API
--export([start_link/0, add_handler/0, add_handler/2]).
+-export([start_link/0, add_handler/1, add_handler/3]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
@@ -33,27 +33,28 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_event:start_link({local, ?SERVER}).
+    gen_event:start_link().
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Adds an event handler
-%%
-%% @spec add_handler() -> ok | {'EXIT', Reason} | term()
+%% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
-add_handler() ->
-    gen_event:add_handler(?SERVER, ?MODULE, []).
+-spec add_handler(pid()) -> ok | {'EXIT', term()} | term().
+add_handler(Pid) ->
+    gen_event:add_handler(Pid, ?MODULE, []).
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Adds an event handler
-%%
-%% @spec add_handler(Module, Arg) -> ok | {'EXIT', Reason} | term()
+%% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
-add_handler(Module, Args) ->
-    gen_event:add_handler(?SERVER, Module, Args).
+-spec add_handler(Pid, Module, Args) -> 
+			 ok | {'EXIT', Reason} | term() when
+      Pid :: pid(),
+      Module :: atom(),
+      Args :: [term()],
+      Reason :: term().
+add_handler(Pid, Module, Args) ->
+    gen_event:add_handler(Pid, Module, Args).
 
 %%%===================================================================
 %%% gen_event callbacks
@@ -84,11 +85,6 @@ init([]) ->
 %%                          remove_handler
 %% @end
 %%--------------------------------------------------------------------
-handle_event({connack_accept}, State) ->
-    ok = emqttc:subscribe(emqttc, [{<<"temp/random">>, 0},
-				   {<<"temp/random">>, 1}]),
-    {ok, State};
-
 handle_event({publish, Topic, Payload}, State) ->
     io:format("publish: topic:~p~n", [Topic]),
     io:format("publish: payload:~p~n", [Payload]),
