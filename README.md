@@ -1,7 +1,8 @@
 # emqttc   [![Build Status](https://travis-ci.org/hiroeorz/emqttc.svg?branch=master)](https://travis-ci.org/hiroeorz/emqttc)
 
-Erlang mqtt client.
-Emttc provides parallel connection and auto reconnect to broker.
+Erlang MQTT Client.
+
+emqttc support parallel connections and auto reconnect to broker.
 
 ## Build
 
@@ -70,3 +71,5 @@ Default Keep Alive value is 20(sec), If you want to set KeepAlive, add option <c
 ```erl-sh
 1> {ok, Pid} = emqttc:start_link([{host, "test.mosquitto.org"}, {keep_alive. 60}]).
 ```
+
+
