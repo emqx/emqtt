@@ -160,7 +160,7 @@ pubrec.
 set_socket(C, Sock) -&gt; ok
 </code></pre>
 
-<ul class="definitions"><li><code>C = pid() | atom()</code></li><li><code>Sock = <a href="gen_tcp.md#type-socket">gen_tcp:socket()</a></code></li></ul>
+<ul class="definitions"><li><code>C = atom() | pid()</code></li><li><code>Sock = <a href="gen_tcp.md#type-socket">gen_tcp:socket()</a></code></li></ul>
 
 
 <a name="start-0"></a>
