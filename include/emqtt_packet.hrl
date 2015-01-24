@@ -132,8 +132,8 @@
     topic_table :: list(#mqtt_topic{}) }).
 
 -record(mqtt_packet_suback, {
-    packet_id       :: mqtt_packet_id(),
-    qos_table = []  :: list(mqtt_qos | 128) }).
+    packet_id   :: mqtt_packet_id(),
+    qos_table   :: list(mqtt_qos() | 128) }).
 
 %%------------------------------------------------------------------------------
 %% MQTT Control Packet

@@ -32,25 +32,35 @@
 
 -export([initial_state/2, client_id/1]).
 
--export([handle_packet/2, send_message/2, send_packet/2, redeliver/2, shutdown/2]).
+-export([handle_packet/2, send_packet/2, redeliver/2, shutdown/2]).
 
 -export([info/1]).
 
+-record(will_msg, {
+    retain = false, 
+    qos = ?QOS_0, 
+    topic, 
+    msg}).
 
 %% ------------------------------------------------------------------
 %% Protocol State
 %% ------------------------------------------------------------------
 -record(proto_state, {
-        socket,
-        peer_name,
-        connected = false, %received CONNECT action?
-        proto_vsn,
-        proto_name,
-		%packet_id,
-		client_id,
-		clean_sess,
-        session, %% session state or session pid
-		will_msg
+    socket,
+    sock_name,
+    proto_ver,
+    proto_name,
+    client_id,
+    clean_sess,
+    keep_alive,
+    username,
+    password,
+    will_msg,
+    packet_id = 1,
+    subscriptions  :: map(),
+    awaiting_ack   :: map(),
+    awaiting_rel   :: map(),
+    awaiting_comp  :: map()
 }).
 
 %%----------------------------------------------------------------------------
