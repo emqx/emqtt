@@ -14,16 +14,6 @@
 
 -define(MQTT_HEADER_SIZE, 1).
 -define(BODY_RECV_TIMEOUT, 1000).
--define(TIMEOUT, 3000).
--define(RECONNECT_INTERVAL, 3000).
--define(SOCKET_SEND_INTERVAL, 3000).
--define(TCPOPTIONS, [binary,
-		     {packet,    raw},
-		     {reuseaddr, true},
-		     {nodelay,   true},
-		     {active, 	false},
-		     {reuseaddr, true},
-		     {send_timeout,  3000}]).
 
 %%%===================================================================
 %%% API

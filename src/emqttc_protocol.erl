@@ -30,24 +30,31 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([initial_state/2, client_id/1]).
+-export([initial_state/2,
+         parse_opts/2,
+         set_socket/2,
+         client_id/1]).
 
--export([handle_packet/2, send_packet/2, redeliver/2, shutdown/2]).
+-export([handle_packet/2, 
+         send_connect/1,
+         send_disconnect/1,
+         send_publish/2,
+         send_subscribe/2,
+         send_unsubscribe/2,
+         send_packet/2, 
+         redeliver/2, 
+         shutdown/2]).
 
 -export([info/1]).
 
--record(will_msg, {
-    retain = false, 
-    qos = ?QOS_0, 
-    topic, 
-    msg}).
+-record(will_msg, { retain = false, qos = ?QOS_0, topic, msg}).
 
 %% ------------------------------------------------------------------
 %% Protocol State
 %% ------------------------------------------------------------------
 -record(proto_state, {
     socket,
-    sock_name,
+    socket_name,
     proto_ver,
     proto_name,
     client_id,
@@ -82,15 +89,49 @@
 
 -define(PUBACK_PACKET(PacketId), #mqtt_packet_puback { packet_id = PacketId }).
 
-initial_state(Socket, Peername) ->
-	#proto_state{
-		socket			= Socket,
-        peer_name       = Peername
+initial_state() ->
+	#proto_state {
+        proto_ver   = ?MQTT_PROTO_V311,
+        proto_name  = <<"MQTT">>,
+        clean_sess  = false,
+        keep_alive  = 60,
+        will_qos    = ?QOS_0,
+        will_retain = false
 	}. 
+
+parse_opts(ProtoState, []) ->
+    ProtoState;
+parse_opts(ProtoState, [{client_id, ClientId} | Opts]) when is_binary(ClientId) ->
+    parse_opts(ProtoState # proto_state {client_id = ClientId}, Opts);
+parse_opts(ProtoState, [{clean_sess, CleanSess} | Opts]) when is_boolean(CleanSess) ->
+    parse_opts(ProtoState # proto_state {clean_sess = CleanSess}, Opts);
+parse_opts(ProtoState, [{keep_alive, KeepAlive} | Opts]) when is_integer(KeepAlive) ->
+    parse_opts(ProtoState # proto_state {keep_alive = KeepAlive}, Opts);
+parse_opts(ProtoState, [{username, Username} | Opts]) when is_binary(Username)->
+    parse_opts(ProtoState # proto_state { username = Username}, Opts);
+parse_opts(ProtoState, [{password, Password} | Opts]) when is_binary(Password) ->
+    parse_opts(ProtoState # proto_state { password = Password }, Opts);
+parse_opts(ProtoState, [{will_topic, Topic} | Opts]) when is_binary(Topic) ->
+    parse_opts(ProtoState # proto_state { will_topic = Topic }, Opts);
+parse_opts(ProtoState, [{will_msg, Msg} | Opts]) when is_binary(Msg) ->
+    parse_opts(ProtoState # proto_state { will_msg = Msg }, Opts);
+parse_opts(ProtoState, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
+    parse_opts(ProtoState # proto_state { will_qos = Qos }, Opts);
+parse_opts(ProtoState, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
+    parse_opts(ProtoState # proto_state { will_retain = Retain }, Opts);
+parse_opts(ProtoState, [_Opt | Opts]) ->
+    parse_opts(ProtoState, Opts).
+
+set_socket(ProtoState, Socket) ->
+    {ok, SockName} = emqttc_socket:sockname_s(Socket),
+    ProtoState # proto_state {
+        socket = Socket,
+        socket_name = SockName,
+    }.
 
 client_id(#proto_state { client_id = ClientId }) -> ClientId.
 
-%%SHOULD be registered in emqtt_cm
+%%TODO: SHOULD be registered in emqtt_cm
 info(#proto_state{ proto_vsn    = ProtoVsn,
                    proto_name   = ProtoName,
 				   client_id	= ClientId,

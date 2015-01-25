@@ -7,3 +7,4 @@ deps
 .DS_Store
 log
 eunit.coverage.xml
+.rebar

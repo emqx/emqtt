@@ -92,7 +92,7 @@
 -record(mqtt_packet_header, {
     type   = ?RESERVED  :: mqtt_packet_type(),
     dup    = false      :: boolean(),
-    qos    = 0          :: mqtt_qos(),
+    qos    = ?QOS_0     :: mqtt_qos(),
     retain = false      :: boolean() }).
 
 %%------------------------------------------------------------------------------
