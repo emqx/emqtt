@@ -320,7 +320,7 @@ connect(State = #state{name = Name,
     case emqttc_socket:connect(Host, Port) of
         {ok, Socket} ->
             ProtoState1 = emqtt_protocol:set_socket(Socket),
-            emqtt_protocol:send_connect(),
+            emqtt_protocol:connect(ProtoState1),
             Logger:info("[Client ~p]: connected with ~p:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#{socket = Socket, 
                                                      proto_state = ProtoState1}};
@@ -345,12 +345,13 @@ waiting_for_connack(Event, State = #state{ name = Name, logger = Logger }) ->
 %% @private
 %% @doc Message Handler for state that connected to MQTT broker.
 %%--------------------------------------------------------------------
-connected({publish, Msg}, State=#state{socket = Socket}) ->
-    emqttc_protocol:send_message(Msg),
+connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
+    emqttc_protocol:publish(ProtoState, Msg),
     {next_state, connected, State};
 
-connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers }) ->
-    emqttc_protocol:subscribe(Topics),
+connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
+                                                     proto_state = ProtoState }) ->
+    emqttc_protocol:subscribe(ProtoState, Topics),
     %%TODO: Monitor subs.
     Subscribers1 =
     lists:foldl(
@@ -368,8 +369,10 @@ connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers }
         end, Subscribers, Topics),
     {next_state, connected, State#state{ subscribe = Subscribers1 }};
 
-connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers, logger = Logger}) ->
-    emqttc_protocol:unsubscribe(Topics),
+connected({unsubscribe, From, Topics}, State=#state{ subscribers = Subscribers, 
+                                                     proto_state = ProtoState, 
+                                                     logger = Logger}) ->
+    emqttc_protocol:unsubscribe(ProtoState, Topics),
     %%TODO: UNMONITOR
     Subscribers1 = 
     lists:foldl(fun(Topic, Acc) ->
@@ -387,7 +390,7 @@ connected(disconnect, State=#state{proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
     %%TODO: close socket?
     %%
-    {next_state, disconnected, State#state{socket = undefined}};
+    {next_state, connected, State#state{socket = undefined}};
 
 connected(Event, State = #state{name = Name, logger = Logger}) -> 
     Logger:warning("[Client ~p | CONNECTED] unexpected event: ~p", [Name, Event]),
@@ -396,47 +399,19 @@ connected(Event, State = #state{name = Name, logger = Logger}) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Sync Message Handler for state that connected to MQTT broker.
-%% @end
 %%--------------------------------------------------------------------
-connected({publish, Msg}, From, 
-	  State=#state{sock=Sock, msgid=MsgId, ref=Ref}) ->
-    #mqtt_message{retain     = Retain,
-	      qos        = Qos,
-	      topic      = Topic,
-	      dup        = Dup,
-	      payload    = Payload} = Msg,
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type 	 = ?PUBLISH,
-					 qos    = Qos,
-					 retain = Retain,
-					 dup    = Dup},
-	       variable = #mqtt_frame_publish{topic_name = Topic,
-					      message_id = if Qos == ?QOS_0 ->
-								   undefined;
-							      true ->
-								   MsgId
-							   end},
-	       payload = Payload},
+connected({publish, Msg}, From, State = #state{proto_state = ProtoState}) ->
+    {ok, MsgId, ProtoState} = emqttc_protocol:publish(ProtoState, Msg),
+    %%TODO: right?
+    {reply, {ok, MsgId}, connected, State};
 
-    Ref2 = dict:append(publish, From, Ref),
-    case send_frame(Sock, Frame) of
-	ok -> 
-	    {next_state, connected, State#state{msgid=MsgId+1, ref=Ref2}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;
+connected(ping, From, State = #state{proto_state = ProtoState}) ->
+    emqttc_protocol:ping(ProtoState),
+    %%TODO: response to From
+    {next_state, connected, State};
 
-connected(ping, From, State=#state{sock=Sock, ref = Ref}) ->
-    case send_ping(Sock) of
-	ok ->
-	    Ref2 = dict:append(ping, From, Ref),
-	    {next_state, connected, State#state{ref = Ref2}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;	    
-
-connected(Event, _From, State) ->
-    io:format("unsupported event: ~p~n", [Event]),
+connected(Event, _From, State = #state { name = Name, logger = Logger }) ->
+    Logger:warning("[Clieng ~p] unexpected event: ~p", [Name, Event]),
     {reply, {error, unsupport}, connected, State}.
 
 %%--------------------------------------------------------------------
@@ -450,7 +425,6 @@ connected(Event, _From, State) ->
 %%                   {next_state, NextStateName, NextState} |
 %%                   {next_state, NextStateName, NextState, Timeout} |
 %%                   {stop, Reason, NewState}
-%% @end
 %%--------------------------------------------------------------------
 
 %% connack message from broker(without remaining length).
