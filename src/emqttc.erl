@@ -329,7 +329,6 @@ connect(State = #state{name = Name,
             schedule(reconnect, State),
             {next_state, disconnected, State} 
     end.
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Message Handler for state that waiting_for_connack from MQTT broker.
@@ -349,94 +348,49 @@ waiting_for_connack(Event, State = #state{ name = Name, logger = Logger }) ->
 connected({publish, Msg}, State=#state{socket = Socket}) ->
     emqttc_protocol:send_message(Msg),
     {next_state, connected, State};
-    #mqtt_message{retain     = Retain,
-	      qos        = Qos,
-	      topic      = Topic,
-	      dup        = Dup,
-	      payload    = Payload} = Msg,
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type 	 = ?PUBLISH,
-					 qos    = Qos,
-					 retain = Retain,
-					 dup    = Dup},
-	       variable = #mqtt_frame_publish{topic_name = Topic,
-					      message_id = if Qos == ?QOS_0 ->
-								   undefined;
-							      true ->
-								   MsgId
-							   end},
-	       payload = Payload},
 
-    case send_frame(Sock, Frame) of
-	ok -> 
-	    {next_state, connected, State#state{msgid=MsgId+1}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;
+connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers }) ->
+    emqttc_protocol:subscribe(Topics),
+    %%TODO: Monitor subs.
+    Subscribers1 =
+    lists:foldl(
+        fun(Topic, Acc) ->
+            case maps:find(Topic, Acc) of
+                {ok, Subs} ->
+                    case lists:member(From, Subs) of
+                        true -> Acc;
+                        false -> maps:put(Topic, [From | Subs], Acc)
+                    end;
 
-    %ok = send_frame(Sock, Frame),
-    %{next_state, connected, State#state{msgid=MsgId+1}};
+                error ->
+                    maps:put(Topic, [From], Acc)
+            end
+        end, Subscribers, Topics),
+    {next_state, connected, State#state{ subscribe = Subscribers1 }};
 
-connected({puback, MsgId}, State=#state{sock=Sock}) ->
-    send_puback(Sock, ?PUBACK, MsgId),
-    {next_state, connected, State};
+connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers, logger = Logger}) ->
+    emqttc_protocol:unsubscribe(Topics),
+    %%TODO: UNMONITOR
+    Subscribers1 = 
+    lists:foldl(fun(Topic, Acc) ->
+                    case maps:find(Topic, Acc) of
+                        {ok, Subs} ->
+                            maps:put(Topic, lists:delete(From, Subs));
+                        error ->
+                            Logger:warning("Topic '~s' not exited", [Topic]),
+                            Acc
+                    end
+                end, Subscribers, Topics),
+    {next_state, connected, State#state{ subscribe = Subscribers1 }};
 
-connected({pubrec, MsgId}, State=#state{sock=Sock}) ->
-    send_puback(Sock, ?PUBREC, MsgId),
-    {next_state, connected, State};
+connected(disconnect, State=#state{proto_state = ProtoState}) ->
+    emqttc_protocol:disconnect(ProtoState),
+    %%TODO: close socket?
+    %%
+    {next_state, disconnected, State#state{socket = undefined}};
 
-connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
-    send_puback(Sock, ?PUBCOMP, MsgId),
-    {next_state, connected, State};
-
-connected({subscribe, Topics}, State=#state{topics = QueuedTopics, 
-					    msgid = MsgId,sock = Sock}) ->
-    TotalTopics = lists:usort(QueuedTopics ++ Topics),
-    Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- TotalTopics],
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type = ?SUBSCRIBE,
-					 dup = 0,
-					 qos = 1,
-					 retain = false},
-	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
-						topic_table = Topics1}},
-    case send_frame(Sock, Frame) of
-	ok -> 
-	    {next_state, connected, State#state{msgid=MsgId+1}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;
-
-connected({unsubscribe, Topics}, State=#state{sock = Sock, msgid = MsgId}) ->
-    Topics1 = [#mqtt_topic{name=Topic, qos=Qos} || {Topic, Qos} <- Topics],
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type = ?UNSUBSCRIBE,
-					 dup = 0,
-					 qos = 0,
-					 retain = false},
-	       variable = #mqtt_frame_subscribe{message_id  = MsgId,
-						topic_table = Topics1}},
-    case send_frame(Sock, Frame) of
-	ok -> 
-	    {next_state, connected, State#state{msgid=MsgId+1}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;
-
-connected(disconnect, State=#state{sock=Sock}) ->
-    case send_disconnect(Sock) of
-	ok ->
-	    {next_state, connected, State};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;	    
-
-connected({add_event_handler, Handler, Args},
-	  State = #state{event_mgr_pid = EventPid}) ->
-    ok = emqttc_event:add_handler(EventPid, Handler, Args),
-    {next_state, connecting, State};    
-
-connected(_Event, State) -> 
+connected(Event, State = #state{name = Name, logger = Logger}) -> 
+    Logger:warning("[Client ~p | CONNECTED] unexpected event: ~p", [Name, Event]),
     {next_state, connected, State}.
 
 %%--------------------------------------------------------------------
@@ -471,15 +425,6 @@ connected({publish, Msg}, From,
 	{error, _Reason} ->
 	    {next_state, disconnected, State#state{sock = undefined}}
     end;
-
-connected({pubrel, MsgId}, From, State=#state{sock=Sock, ref=Ref}) ->
-    case send_puback(Sock, ?PUBREL, MsgId) of
-	ok ->
-	    Ref2 = dict:append(pubrel, From, Ref),
-	    {next_state, connected, State#state{ref=Ref2}};
-	{error, _Reason} ->
-	    {next_state, disconnected, State#state{sock = undefined}}
-    end;	    
 
 connected(ping, From, State=#state{sock=Sock, ref = Ref}) ->
     case send_ping(Sock) of

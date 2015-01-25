@@ -132,3 +132,21 @@ add_event_handler(C, Handler) ->
       Args :: [term()].
 add_event_handler(C, Handler, Args) ->
     gen_fsm:send_event(C, {add_event_handler, Handler, Args}).
+
+connected({puback, MsgId}, State=#state{sock=Sock}) ->
+    send_puback(Sock, ?PUBACK, MsgId),
+    {next_state, connected, State};
+
+connected({pubrec, MsgId}, State=#state{sock=Sock}) ->
+    send_puback(Sock, ?PUBREC, MsgId),
+    {next_state, connected, State};
+
+connected({pubcomp, MsgId}, State=#state{sock=Sock}) ->
+    send_puback(Sock, ?PUBCOMP, MsgId),
+    {next_state, connected, State};
+
+
+connected({add_event_handler, Handler, Args},
+	  State = #state{event_mgr_pid = EventPid}) ->
+    ok = emqttc_event:add_handler(EventPid, Handler, Args),
+    {next_state, connecting, State};    
