@@ -36,12 +36,8 @@
 -export([ start_link/0, start_link/1, start_link/2]).
 
 %api
--export([connect/1, 
+-export([connect/1,
          publish/2, publish/3, publish/4, 
-         %pubrel/2, 
-         %puback/2, 
-         %pubrec/2, 
-         %pubcomp/2, 
          subscribe/2, 
          unsubscribe/2, 
          ping/1, 
@@ -59,7 +55,7 @@
          terminate/3]).
 
 % fsm state
--export([ connecting/2, connecting/3, 
+-export([connecting/2, connecting/3, 
          waiting_for_connack/2, 
          connected/2, connected/3, disconnected/2, disconnected/3]).
 
@@ -210,13 +206,13 @@ subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, [{Topic, ?QOS_0}]);
 
 subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qos) ->
-    gen_fsm:send_event(Client, {subscribe, Topics}).
+    gen_fsm:send_event(Client, {subscribe, self(), Topics}).
 
 %%--------------------------------------------------------------------
 %% @doc Subscribe topic with qos.
 %%--------------------------------------------------------------------
 subscribe(Client, Topic, Qos) when is_binary(Topic), ?IS_QOS(Qos) ->
-    gen_fsm:send_event(Client, {subscribe, [{Topic, Qos}]).
+    subscribe(Client, [{Topic, Qos}]).
 
 %%--------------------------------------------------------------------
 %% @doc Unsubscribe topics
@@ -330,7 +326,7 @@ connect(State = #state{name = Name,
                                                      proto_state = ProtoState1}};
         {error, Reason} ->
             Logger:info("[Client ~p] connection failure: ~p", [Name, Reason]),
-            schedule_reconnect(),
+            schedule(reconnect, State),
             {next_state, disconnected, State} 
     end.
 
@@ -338,8 +334,7 @@ connect(State = #state{name = Name,
 %% @private
 %% @doc Message Handler for state that waiting_for_connack from MQTT broker.
 %%--------------------------------------------------------------------
-
-waiting_for_connack({subscribe, NewTopics}, State=#state{topics = Topics} ) ->
+waiting_for_connack({subscribe, From, NewTopics}, State=#state{topics = Topics} ) ->
     NewState = State#state{topics = Topics ++ NewTopics},
     {next_state, waiting_for_connack, NewState};    
 

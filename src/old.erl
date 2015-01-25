@@ -1,3 +1,10 @@
+
+%pubrel/2, 
+%puback/2, 
+%pubrec/2, 
+%pubcomp/2, 
+
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Message Handler for state that disconnecting from MQTT broker.
