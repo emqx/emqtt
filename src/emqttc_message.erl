@@ -24,8 +24,6 @@
 
 -author('feng@emqtt.io').
 
--include("emqttc.hrl").
-
 -include("emqttc_packet.hrl").
 
 -export([from_packet/1, to_packet/1]).

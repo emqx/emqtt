@@ -22,8 +22,6 @@
 
 -module(emqttc_protocol).
 
--include("emqttc.hrl").
-
 -include("emqttc_packet.hrl").
 
 %% ------------------------------------------------------------------

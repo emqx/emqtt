@@ -22,8 +22,6 @@
 
 -module(emqttc_session).
 
--include("emqttc.hrl").
-
 -include("emqttc_packet.hrl").
 
 %% ------------------------------------------------------------------
