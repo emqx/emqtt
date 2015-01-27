@@ -30,7 +30,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([initial_state/2,
+-export([initial_state/0,
          parse_opts/2,
          set_socket/2,
          client_id/1]).
@@ -41,11 +41,10 @@
          send_publish/2,
          send_subscribe/2,
          send_unsubscribe/2,
+         send_ping/2,
          send_packet/2, 
          redeliver/2, 
          shutdown/2]).
-
--export([info/1]).
 
 -record(will_msg, { retain = false, qos = ?QOS_0, topic, msg}).
 
@@ -62,13 +61,17 @@
     keep_alive,
     username,
     password,
+    will_topic,
     will_msg,
+    will_qos, 
+    will_retain,
     packet_id = 1,
     subscriptions  :: map(),
     awaiting_ack   :: map(),
     awaiting_rel   :: map(),
     awaiting_comp  :: map(),
-    session = undefined
+    session = undefined,
+    logger
 }).
 
 %%----------------------------------------------------------------------------
@@ -120,6 +123,8 @@ parse_opts(ProtoState, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
     parse_opts(ProtoState # proto_state { will_qos = Qos }, Opts);
 parse_opts(ProtoState, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
     parse_opts(ProtoState # proto_state { will_retain = Retain }, Opts);
+parse_opts(ProtoState, [{logger, Logger} | Opts]) ->
+    parse_opts(ProtoState # proto_state { logger = Logger }, Opts);
 parse_opts(ProtoState, [_Opt | Opts]) ->
     parse_opts(ProtoState, Opts).
 
@@ -127,22 +132,34 @@ set_socket(ProtoState, Socket) ->
     {ok, SockName} = emqttc_socket:sockname_s(Socket),
     ProtoState # proto_state {
         socket = Socket,
-        socket_name = SockName,
+        socket_name = SockName
     }.
 
 client_id(#proto_state { client_id = ClientId }) -> ClientId.
 
-info(#proto_state{ proto_vsn    = ProtoVsn,
-                   proto_name   = ProtoName,
-				   client_id	= ClientId,
-				   clean_sess	= CleanSess,
-				   will_msg		= WillMsg }) ->
-	[ {proto_vsn,  ProtoVsn},
-      {proto_name, ProtoName},
-	  {client_id,  ClientId},
-	  {clean_sess, CleanSess},
-	  {will_msg,   WillMsg} ].
+send_connect(ProtoState) ->
+    'TODO',
+    {ok, ProtoState}.
 
+send_disconnect(ProtoState) ->
+    'TODO',
+    {ok, ProtoState}.
+
+send_publish(ProtoState, Msg) ->
+    'TODO',
+    {ok, ProtoState}.
+
+send_subscribe(ProtoState, Sub) ->
+    'TODO',
+    {ok, ProtoState}.
+
+send_unsubscribe(ProtoState, Sub) ->
+    'TODO',
+    {ok, ProtoState}.
+
+send_ping(ProtoState, ping) ->
+    'TODO',
+    {ok, ProtoState}.
 
 %%CONNECT – Client requests a connection to a Server
 handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session = Session}) ->
@@ -150,7 +167,7 @@ handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session =
 	{ok, State};
 
 handle_packet(?PUBLISH, Packet = #mqtt_packet {
-                                     header = #mqtt_packet_header {qos = ?QOS_0}}, connected, 
+                                     header = #mqtt_packet_header {qos = ?QOS_0}},
                                  State = #proto_state{session = Session}) ->
     emqttc_session:publish(Session, {?QOS_0, emqttc_message:from_packet(Packet)}),
 	{ok, State};
@@ -304,8 +321,8 @@ validate_clientid(#mqtt_packet_connect { proto_ver =?MQTT_PROTO_V311, client_id 
     when size(ClientId) =:= 0 ->
     true;
 
-validate_clientid(#mqtt_packet_connect { proto_ver = Ver, clean_sess = CleanSess, client_id = ClientId, logger = Logger}) -> 
-    Logger:warning("Invalid ClientId: ~s, ProtoVer: ~p, CleanSess: ~s", [ClientId, Ver, CleanSess]),
+validate_clientid(#mqtt_packet_connect { proto_ver = Ver, clean_sess = CleanSess, client_id = ClientId}) -> 
+    %%Logger:warning("Invalid ClientId: ~s, ProtoVer: ~p, CleanSess: ~s", [ClientId, Ver, CleanSess]),
     false.
 
 validate_packet(#mqtt_packet { header  = #mqtt_packet_header { type = ?PUBLISH }, 

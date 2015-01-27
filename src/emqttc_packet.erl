@@ -96,14 +96,14 @@ parse_frame(Bin, #mqtt_packet_header{ type = Type,
         {?PUBCOMP, <<FrameBin:Length/binary, Rest/binary>>} ->
             <<PacketId:16/big>> = FrameBin,
             wrap(Header, #mqtt_packet_puback{ packet_id = PacketId }, Rest);
-        {?SUBACK, <<FrameBin:Length/binary, Rest/binary>>}
+        {?SUBACK, <<FrameBin:Length/binary, Rest/binary>>} ->
             <<PacketId:16/big, Rest1/binary>> = FrameBin,
             wrap(Header, #mqtt_packet_suback { packet_id = PacketId, 
                                                qos_table = parse_qos(Rest1, []) }, Rest);
-        {?UNSUBACK, <<FrameBin:Length/binary, Rest/binary>>}
+        {?UNSUBACK, <<FrameBin:Length/binary, Rest/binary>>} ->
             <<PacketId:16/big>> = FrameBin,
             wrap(Header, #mqtt_packet_suback { packet_id = PacketId }, Rest);
-        {?PINGRESP, Rest}
+        {?PINGRESP, Rest} ->
             Length = 0,
             wrap(Header, Rest);
         {_, TooShortBin} ->
@@ -174,8 +174,8 @@ serialise_variable(#mqtt_packet_header  { type = ?CONNECT },
                      (opt(Password)):1,
                      (opt(WillRetain)):1,
                      WillQos:2,
-                     (opt(WillFlag)):1
-                     (opt(CleanSess)):1
+                     (opt(WillFlag)):1,
+                     (opt(CleanSess)):1,
                      0:1,
                      KeepAlive:16/big-unsigned-integer>>,
      PayloadBin = serialise_utf(ClientId),
@@ -192,8 +192,8 @@ serialise_variable(#mqtt_packet_header  { type = ?CONNECT },
     {VariableBin, PayloadBin2};
 
 serialise_variable(#mqtt_packet_header { type      = Subs},
-                   #mqtt_packet_suback { packet_id   = PacketId,
-                                         topic_table = Topics },
+                   #mqtt_packet_subscribe { packet_id   = PacketId, 
+                                            topic_table = Topics },
                    <<>>)
     when Subs =:= ?SUBSCRIBE orelse Subs =:= ?UNSUBSCRIBE ->
     {<<PacketId:16/big>>, serialise_topics(Subs, Topics)};
@@ -236,10 +236,10 @@ serialise_header(#mqtt_packet_header{ type   = Type,
       LenBin/binary, VariableBin/binary, PayloadBin/binary>>.
 
 serialise_topics(?SUBSCRIBE, Topics) ->
-    << <<(serialise_utf(Name))/binary, ?Reserved:6, Qos:2>> || #mqtt_topic{name = Name, qos = Qos} <- Topics >>;
+    << <<(serialise_utf(Name))/binary, ?RESERVED:6, Qos:2>> || #mqtt_topic{name = Name, qos = Qos} <- Topics >>;
 
 serialise_topics(?UNSUBSCRIBE, Topics) ->
-    << serialise_utf(Name) || #mqtt_topic{name = Name, qos = undefined} <- Topics >>.
+    << <<(serialise_utf(Name))/binary>> || #mqtt_topic{name = Name, qos = undefined} <- Topics >>.
 
 serialise_utf(String) ->
     StringBin = unicode:characters_to_binary(String),

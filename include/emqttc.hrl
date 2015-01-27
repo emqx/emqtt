@@ -28,7 +28,7 @@
 -define(QOS_1, 1).
 -define(QOS_2, 2).
 
--define(IS_QOS(I), (I >= ?QOS_0 andalso I =< QOS_2)).
+-define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
 
 -type mqtt_qos()    :: ?QOS_0 | ?QOS_1 | ?QOS_2.
 
