@@ -8,3 +8,5 @@ deps
 log
 eunit.coverage.xml
 .rebar
+*.swp
+oldsrc/
