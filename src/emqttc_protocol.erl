@@ -30,7 +30,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([initial_state/2,
+-export([initial_state/0,
          parse_opts/2,
          set_socket/2,
          client_id/1]).
@@ -41,11 +41,10 @@
          send_publish/2,
          send_subscribe/2,
          send_unsubscribe/2,
+         send_ping/2,
          send_packet/2, 
          redeliver/2, 
          shutdown/2]).
-
--export([info/1]).
 
 -record(will_msg, { retain = false, qos = ?QOS_0, topic, msg}).
 
@@ -62,13 +61,17 @@
     keep_alive,
     username,
     password,
+    will_topic,
     will_msg,
+    will_qos, 
+    will_retain,
     packet_id = 1,
     subscriptions  :: map(),
     awaiting_ack   :: map(),
     awaiting_rel   :: map(),
     awaiting_comp  :: map(),
-    session = undefined
+    session = undefined,
+    logger
 }).
 
 %%----------------------------------------------------------------------------
@@ -120,6 +123,8 @@ parse_opts(ProtoState, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
     parse_opts(ProtoState # proto_state { will_qos = Qos }, Opts);
 parse_opts(ProtoState, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
     parse_opts(ProtoState # proto_state { will_retain = Retain }, Opts);
+parse_opts(ProtoState, [{logger, Logger} | Opts]) ->
+    parse_opts(ProtoState # proto_state { logger = Logger }, Opts);
 parse_opts(ProtoState, [_Opt | Opts]) ->
     parse_opts(ProtoState, Opts).
 
@@ -127,22 +132,44 @@ set_socket(ProtoState, Socket) ->
     {ok, SockName} = emqttc_socket:sockname_s(Socket),
     ProtoState # proto_state {
         socket = Socket,
-        socket_name = SockName,
+        socket_name = SockName
     }.
 
 client_id(#proto_state { client_id = ClientId }) -> ClientId.
 
-info(#proto_state{ proto_vsn    = ProtoVsn,
-                   proto_name   = ProtoName,
-				   client_id	= ClientId,
-				   clean_sess	= CleanSess,
-				   will_msg		= WillMsg }) ->
-	[ {proto_vsn,  ProtoVsn},
-      {proto_name, ProtoName},
-	  {client_id,  ClientId},
-	  {clean_sess, CleanSess},
-	  {will_msg,   WillMsg} ].
+send_connect(ProtoState = #proto_state{ client_id = ClientId,
+                                        proto_ver = ProtoVer, 
+                                        proto_name = ProtoName,
+                                        will_retain = WillRetain,
+                                        will_qos = WillQos,
+                                        will_topic = WillTopic,
+                                        will_msg = WillMsg,
+                                        clean_sess = CleanSess,
+                                        keep_alive = KeepAlive,
+                                        username = Username,
+                                        password = Password
+                                      } ) ->
+    Packet = #mqtt_packet { header = #mqtt_packet_header { type = ?CONNECT },
+                            variable = make_packet(?CONNECT, ProtoState),
+                            payload = <<>> },
+    send_packet(Packet, ProtoState).
 
+
+send_disconnect(ProtoState) ->
+    Packet = #mqtt_packet { header = #mqtt_packet_header { type = ?DISCONNECT } },
+    send_packet(Packet, ProtoState).
+
+send_publish(ProtoState, Msg) ->
+    send_message({self(), Msg}, ProtoState).
+
+send_subscribe(ProtoState, Topics) ->
+    send_packet(make_packet(?SUBSCRIBE, Topics), ProtoState).
+
+send_unsubscribe(ProtoState, Topics) ->
+    send_packet(make_packet(?UNSUBSCRIBE, Topics), ProtoState).
+
+send_ping(ProtoState, ping) ->
+    send_packet(make_packet(?PINGREQ), ProtoState).
 
 %%CONNECT – Client requests a connection to a Server
 handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session = Session}) ->
@@ -150,7 +177,7 @@ handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session =
 	{ok, State};
 
 handle_packet(?PUBLISH, Packet = #mqtt_packet {
-                                     header = #mqtt_packet_header {qos = ?QOS_0}}, connected, 
+                                     header = #mqtt_packet_header {qos = ?QOS_0}},
                                  State = #proto_state{session = Session}) ->
     emqttc_session:publish(Session, {?QOS_0, emqttc_message:from_packet(Packet)}),
 	{ok, State};
@@ -220,6 +247,41 @@ handle_packet(?DISCONNECT, #mqtt_packet{}, State) ->
 
 make_packet(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
     #mqtt_packet{ header = #mqtt_packet_header { type = Type } }.
+
+make_packet(?CONNECT, ProtoState = #proto_state{ client_id = ClientId,
+                           proto_ver = ProtoVer,
+                           proto_name = ProtoName,
+                           will_retain = WillRetain,
+                           will_qos = WillQos,
+                           will_topic = WillTopic,
+                           will_msg = WillMsg,
+                           clean_sess = CleanSess,
+                           keep_alive = KeepAlive,
+                           username = Username,
+                           password = Password }) ->
+    ClientId1 =
+    if
+        ClientId =:= undefined ->
+            clientid(<<>>, ProtoState);
+        true ->
+            ClientId
+    end,
+
+    #mqtt_packet_connect{ client_id  = ClientId1,
+                          proto_ver  = ProtoVer,
+                          proto_name = ProtoName,
+                          will_flag  = if 
+                                           WillTopic =/= undefined andalso WillMsg =/= undefined -> true; 
+                                           true -> false
+                                       end, 
+                          will_retain = WillRetain,
+                          will_qos    = WillQos,
+                          clean_sess  = CleanSess,
+                          keep_alive  = KeepAlive,
+                          will_topic  = WillTopic,
+                          will_msg    = WillMsg,
+                          username    = Username,
+                          password    = Password };
 
 make_packet(PubAck, PacketId) when PubAck >= ?PUBACK andalso PubAck =< ?PUBCOMP ->
   #mqtt_packet { header = #mqtt_packet_header { type = PubAck, qos = puback_qos(PubAck) }, 
@@ -304,8 +366,8 @@ validate_clientid(#mqtt_packet_connect { proto_ver =?MQTT_PROTO_V311, client_id 
     when size(ClientId) =:= 0 ->
     true;
 
-validate_clientid(#mqtt_packet_connect { proto_ver = Ver, clean_sess = CleanSess, client_id = ClientId, logger = Logger}) -> 
-    Logger:warning("Invalid ClientId: ~s, ProtoVer: ~p, CleanSess: ~s", [ClientId, Ver, CleanSess]),
+validate_clientid(#mqtt_packet_connect { proto_ver = Ver, clean_sess = CleanSess, client_id = ClientId}) -> 
+    %%Logger:warning("Invalid ClientId: ~s, ProtoVer: ~p, CleanSess: ~s", [ClientId, Ver, CleanSess]),
     false.
 
 validate_packet(#mqtt_packet { header  = #mqtt_packet_header { type = ?PUBLISH }, 

@@ -28,7 +28,7 @@
 -define(QOS_1, 1).
 -define(QOS_2, 2).
 
--define(IS_QOS(I), (I >= ?QOS_0 andalso I =< QOS_2)).
+-define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
 
 -type mqtt_qos()    :: ?QOS_0 | ?QOS_1 | ?QOS_2.
 
@@ -36,7 +36,6 @@
 %% MQTT Message
 %%------------------------------------------------------------------------------
 -record(mqtt_message, {
-    from            :: undefined | pid(),
     msgid           :: undefined | integer(),
     qos    = 0      :: mqtt_qos(),
     retain = false  :: boolean(),
