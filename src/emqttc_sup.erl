@@ -51,14 +51,14 @@ start_link() ->
 init([]) ->
     Ets = ets:new(childno_db, [set, public]),
 
-    ChildNo = {emqttc_childno, {emqttc_childno, start_link, [Ets]},
-	       permanent, 2000, worker, [emqttc_childno]},
+    %ChildNo = {emqttc_childno, {emqttc_childno, start_link, [Ets]},
+	%       permanent, 2000, worker, [emqttc_childno]},
 
-    SockSup = {emqttc_sock_sup, {emqttc_sock_sup, start_link, []},
-	       permanent, 2000, supervisor, [emqttc_sock_sup]},
+    %SockSup = {emqttc_sock_sup, {emqttc_sock_sup, start_link, []},
+	%       permanent, 2000, supervisor, [emqttc_sock_sup]},
 
-    SubEvent = {emqttc_event, {emqttc_event, start_link, []},
-		permanent, 2000, worker, [emqttc_event]},
+    %SubEvent = {emqttc_event, {emqttc_event, start_link, []},
+	%	permanent, 2000, worker, [emqttc_event]},
 
-    {ok, { {one_for_one, 5, 10}, [ChildNo, SockSup, SubEvent]} }.
+    {ok, { {one_for_one, 5, 10}, []} }.
 

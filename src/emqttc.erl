@@ -334,11 +334,12 @@ connect(State = #state{name = Name,
 %% @doc Message Handler for state that waiting_for_connack from MQTT broker.
 %%--------------------------------------------------------------------
 waiting_for_connack({subscribe, From, NewTopics}, State=#state{topics = Topics} ) ->
+    %%TODO:...
     NewState = State#state{topics = Topics ++ NewTopics},
     {next_state, waiting_for_connack, NewState};    
 
 waiting_for_connack(Event, State = #state{ name = Name, logger = Logger }) ->
-    Logger:warning("[Client ~p waiting_for_connack] unexpected event: ~p", [Event]),
+    Logger:warning("[Client ~p waiting_for_connack] unexpected event: ~p", [Name, Event]),
     {next_state, waiting_for_connack, State}.
 
 %%--------------------------------------------------------------------
@@ -408,7 +409,8 @@ connected({publish, Msg}, From, State = #state{proto_state = ProtoState}) ->
 connected(ping, From, State = #state{proto_state = ProtoState}) ->
     emqttc_protocol:ping(ProtoState),
     %%TODO: response to From
-    {next_state, connected, State};
+    {reply, pong, connected, State};
+    %{next_state, connected, State};
 
 connected(Event, _From, State = #state { name = Name, logger = Logger }) ->
     Logger:warning("[Clieng ~p] unexpected event: ~p", [Name, Event]),
@@ -428,100 +430,23 @@ connected(Event, _From, State = #state { name = Name, logger = Logger }) ->
 %%--------------------------------------------------------------------
 
 %% connack message from broker(without remaining length).
-handle_info({tcp, _Sock, <<?CONNACK:4/integer, _:4/integer,
-			 _:8/integer, ReturnCode:8/unsigned-integer>>},
-	    waiting_for_connack, State) ->
-    case ReturnCode of
-	?CONNACK_ACCEPT ->
-	    io:format("-------connack: Connection Accepted~n"),
-	    ok = gen_fsm:send_event(self(), {subscribe, []}),
-	    {next_state, connected, State};
-	?CONNACK_PROTO_VER ->
-	    io:format("-------connack: NG(unacceptable protocol version)~n"),
-	    {next_state, waiting_for_connack, State};
-	?CONNACK_INVALID_ID ->
-	    io:format("-------connack: NG(identifier rejected)~n"),
-	    {next_state, waiting_for_connack, State};
-	?CONNACK_SERVER ->
-	    io:format("-------connack: NG(server unavailable)~n"),
-	    {next_state, waiting_for_connack, State};
-	?CONNACK_CREDENTIALS ->
-	    io:format("-------connack: NG(bad user name or password)~n"),
-	    {next_state, waiting_for_connack, State};
-	?CONNACK_AUTH ->
-	    io:format("-------connack: NG(not authorized)~n"),
-	    {next_state, waiting_for_connack, State}
-    end;
+handle_info({tcp, _Sock, Data, EventState, State = #state{name = Name, logger = Logger}) ->
 
-%% suback message from broker.
-handle_info({tcp, _Sock, <<?SUBACK:4/integer, _:4/integer, _/binary>>},
-	    connected, State) ->
-    {next_state, connected, State};
+    Logger:debug("[~p ~s] RECV: ~p", [Name, EventState, Data]),
+    process_received_bytes(Data, EventState, State);
 
-%% pub message from broker(QoS = 0)(without remaining length).
-handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
-			   _:1/integer, ?QOS_0:2/integer, _:1/integer,
-			   TopicSize:16/big-unsigned-integer,
-			   Topic:TopicSize/binary,
-			   Payload/binary>>},
-	    connected, State = #state{event_mgr_pid = EventPid}) ->
-    gen_event:notify(EventPid, {publish, Topic, Payload}),
-    {next_state, connected, State};
-
-%% pub message from broker(QoS = 1 or 2)(without remaining length).
-handle_info({tcp, _Sock, <<?PUBLISH:4/integer,
-			   _:1/integer, Qos:2/integer, _:1/integer,
-			   TopicSize:16/big-unsigned-integer,
-			   Topic:TopicSize/binary,
-			   MsgId:16/big-unsigned-integer,
-			   Payload/binary>>},
-	    connected, State = #state{event_mgr_pid = EventPid}) 
-  when Qos =:= ?QOS_1; Qos =:= ?QOS_2 ->
-
-    gen_event:notify(EventPid, {publish, Topic, Payload, Qos, MsgId}),
-    {next_state, connected, State};
-
-%% pubrec message from broker(without remaining length).
-handle_info({tcp, _Sock, <<?PUBACK:4/integer,
-			   _:1/integer, _:2/integer, _:1/integer,
-			   MsgId:16/big-unsigned-integer>>},
-	    connected, State=#state{ref=Ref}) ->
-    Ref2 = reply({ok, MsgId}, publish, Ref),
-    {next_state, connected, State#state{ref=Ref2}};
-
-%% pubrec message from broker(without remaining length).
-handle_info({tcp, _Sock, <<?PUBREC:4/integer,
-			   _:1/integer, _:2/integer, _:1/integer,
-			   MsgId:16/big-unsigned-integer>>},
-	    connected, State=#state{ref=Ref}) ->
-    Ref2 = reply({ok, MsgId}, publish, Ref),
-    {next_state, connected, State#state{ref=Ref2}};
-
-%% pubcomp message from broker(without remaining length).
-handle_info({tcp, _Sock, <<?PUBCOMP:4/integer,
-			   _:1/integer, _:2/integer, _:1/integer,
-			   MsgId:16/big-unsigned-integer>>},
-	    connected, State=#state{ref=Ref}) ->
-    Ref2 = reply({ok, MsgId}, pubrel, Ref),
-    {next_state, connected, State#state{ref=Ref2}};
-
-%% pingresp message from broker(without remaining length).
-handle_info({tcp, _Sock, <<?PINGRESP:4/integer,
-			   _:1/integer, _:2/integer, _:1/integer>>},
-	    connected, State=#state{ref = Ref}) ->
-    Ref2 = reply(ok, ping, Ref),
-    {next_state, connected, State#state{ref = Ref2}};
-
-handle_info({tcp, error, Reason}, _, State) ->
-    io:format("tcp error: ~p.~n", [Reason]),
+handle_info({tcp, error, Reason}, _, State = #state{logger = Logger}) ->
+    Logger:error("Tcp error: ~p", [Reason]),
+    %TODO: reconnect??
     {next_state, disconnected, State};
 
 handle_info({tcp, _Sock, Data}, connected, State) when is_binary(Data) ->
     <<_Code:4/integer, _:4/integer, _/binary>> = Data,
     {next_state, connected, State};
 
-handle_info({tcp_closed, _Sock}, _, State) ->
-    io:format("tcp_closed state goto disconnected.~n"),
+handle_info({tcp_closed, Socket}, _, State = #state{logger = Logger, socket = Socket}) ->
+    %%TODO: Reconnect.
+    Logger:warning("tcp_closed state goto disconnected"),
     {next_state, disconnected, State};
 
 handle_info({timeout, reconnect}, connecting, S) ->
@@ -561,7 +486,6 @@ handle_event(_Event, StateName, State) ->
 %%                   {reply, Reply, NextStateName, NextState, Timeout} |
 %%                   {stop, Reason, NewState} |
 %%                   {stop, Reason, Reply, NewState}
-%% @end
 %%--------------------------------------------------------------------
 handle_sync_event(status, _From, StateName, State) ->
     Statistics = [{N, get(N)} || N <- [inserted]],
@@ -579,13 +503,9 @@ handle_sync_event(stop, _From, _StateName, State) ->
 %% Reason. The return value is ignored.
 %%
 %% @spec terminate(Reason, StateName, State) -> void()
-%% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _StateName, #state{sock_pid = undefined}) ->
-    ok;
-
-terminate(_Reason, _StateName, _State = #state{sock_pid = Pid}) ->
-    emqttc_sock_sup:stop_sock(Pid),    
+terminate(_Reason, _StateName, _State = #state{proto_state = ProtoState}) ->
+    emqttc_protocol:shutdown(ProtoState),
     ok.
 
 %%--------------------------------------------------------------------
@@ -595,7 +515,6 @@ terminate(_Reason, _StateName, _State = #state{sock_pid = Pid}) ->
 %%
 %% @spec code_change(OldVsn, StateName, State, Extra) ->
 %%                   {ok, StateName, NewState}
-%% @end
 %%--------------------------------------------------------------------
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
@@ -604,62 +523,74 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-send_puback(Sock, Type, MsgId) ->
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type = Type},
-	       variable = #mqtt_frame_publish{message_id = MsgId}},
-    send_frame(Sock, Frame).
+process_received_bytes(<<>>, EventState, State) ->
+    {next_state, EventState, State};
 
-send_disconnect(Sock) ->
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type = ?DISCONNECT,
-					 qos = 0,
-					 retain = false,
-					 dup = 0}},
-    send_frame(Sock, Frame).
-
-send_ping(Sock) ->
-    Frame = #mqtt_frame{
-	       fixed = #mqtt_frame_fixed{type = ?PINGREQ,
-					 qos = 1,
-					 retain = false,
-					 dup = 0}},
-    send_frame(Sock, Frame).
-
--spec send_frame(gen_tcp:socket(), #mqtt_frame{}) -> ok | {error, term()}.
-send_frame(Sock, Frame) ->
-    case gen_tcp:send(Sock, emqtt_frame:serialise(Frame)) of
-	ok -> ok;
-	{error, Reason} ->
-	    io:format("socket error when send frame: ~p~n", [Reason]),
-	    {error, Reason}
+process_received_bytes(Bytes, EventState,
+                       State = #state{ name        = Name,
+                                       parse_state = ParseState,
+                                       proto_state = ProtoState}) ->
+    case emqtt_packet:parse(Bytes, ParseState) of
+    {more, ParseState1} ->
+        %%TODO: socket controll...
+        {next_state, EventState, State#state{ parse_state = ParseState1 }};
+    {ok, Packet, Rest} ->
+        process_packet(Packet, EventState, State);
+    {error, Error} ->
+        Logger:error("[~p] MQTT detected framing error ~p", [Name, Error]),
+        stop({shutdown, Error}, State)
     end.
 
-reply(Reply, Name, Ref) ->
-    case dict:find(Name, Ref) of
-	{ok, []} ->
-	    Ref;
-	{ok, [From | FromTail]} ->
-	    gen_fsm:reply(From, Reply),
-	    dict:store(Name, FromTail, Ref)
+process_packet(Packet = #mqtt_packet { header = #mqtt_packet_header { type = Type }}), EventState, State) ->
+    process_packet(Type, Packet, EventState, State).
+
+%%A Client can only receive one CONNACK
+process_packet(?CONNACK, #mqtt_packet {
+        variable = #mqtt_packet_connack {
+            return_code  = ReturnCode } }, waiting_for_connack,
+    State = #state{name = Name, logger = Logger}) ->
+    Logger:info("[~s] RECV CONNACK: ~p", [Name, ReturnCode]),
+    if 
+        ReturnCode =:= ?CONNACK_ACCEPT ->
+            {next_state, connected, State};
+        true ->
+            stop({error, connack_error(ReturnCode)}, State}
+    end;
+
+process_packet(?CONNACK, _Packet, connected, State) ->
+    {error, {protocol, unexpeced_connack}, State};
+
+process_packet(?PINGRESP, _Packet, connected, State = #state{name = Name, logger = Logger}) ->
+    Logger:info("[~s] RECV PINGRESP", [Name]),
+    {ok, connected, State};
+
+process_packet(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
+    Logger:info("[~s] RECV: ~p", [Name, Packet]),
+    case emqtt_protocol:handle_packet(Type, Packet, ProtoState) of
+        {ok, NewProtoState} ->
+            process_received_bytes(Rest, connected, State#state{ 
+                    parse_state = emqtt_packet:initial_state(), 
+                    proto_state = NewProtoState });
+        {error, Error} ->
+            Logger:error("[~p] MQTT protocol error ~p", [Name, Error]),
+            stop({shutdown, Error}, State);
+        {error, Error, ProtoState1} ->
+            stop({shutdown, Error}, State#state{proto_state = ProtoState1});
+        {stop, Reason, ProtoState1} ->
+            stop(Reason, State#state{proto_state = ProtoState1})
     end.
 
+stop(Reason, State ) ->
+    {stop, Reason, State}.
 
-send_connect(#state{sock=Sock, username=Username, password=Password,
-		    client_id=ClientId, clean_session = CleanSession,
-		    keep_alive=KeepAlive}) ->
-    Frame = 
-	#mqtt_frame{
-	   fixed = #mqtt_frame_fixed{
-		      type = ?CONNECT,
-		      dup = 0,
-		      qos = 1,
-		      retain = false},
-	   variable = #mqtt_frame_connect{
-			 username   = Username,
-			 password   = Password,
-			 proto_ver  = ?MQTT_PROTO_MAJOR,
-			 clean_sess = CleanSession,
-			 keep_alive = KeepAlive,
-			 client_id  = ClientId}},
-    send_frame(Sock, Frame).
+connack_error(?CONNACK_PROTO_VER) ->
+    connack_proto_ver;
+connack_error(?CONNACK_INVALID_ID ) ->
+    connack_invalid_id;
+connack_error(?CONNACK_SERVER) ->
+    connack_server;
+connack_error(?CONNACK_CREDENTIALS) ->
+    connack_credentials;
+connack_error(?CONNACK_AUTH) ->
+    connack_auth.
+

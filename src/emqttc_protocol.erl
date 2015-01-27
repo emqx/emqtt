@@ -35,7 +35,7 @@
          set_socket/2,
          client_id/1]).
 
--export([handle_packet/2, 
+-export([handle_packet/3, 
          send_connect/1,
          send_disconnect/1,
          send_publish/2,
@@ -67,7 +67,8 @@
     subscriptions  :: map(),
     awaiting_ack   :: map(),
     awaiting_rel   :: map(),
-    awaiting_comp  :: map()
+    awaiting_comp  :: map(),
+    session = undefined
 }).
 
 %%----------------------------------------------------------------------------
@@ -78,7 +79,7 @@
 
 -spec(send_message({pid() | tuple(), mqtt_message()}, proto_state()) -> {ok, proto_state()}).
 
--spec(handle_packet(mqtt_packet(), proto_state()) -> {ok, proto_state()} | {error, any()}). 
+-spec(handle_packet(mqtt_packet(), atom(), proto_state()) -> {ok, proto_state()} | {error, any()}). 
 
 -endif.
 
@@ -146,63 +147,8 @@ info(#proto_state{ proto_vsn    = ProtoVsn,
 
 %%CONNECT – Client requests a connection to a Server
 
-%%A Client can only send the CONNECT Packet once over a Network Connection. 
-handle_packet(?PACKET_TYPE(Packet, ?CONNECT), State = #proto_state{connected = false}) ->
-    handle_packet(?CONNECT, Packet, State#proto_state{connected = true});
-
-handle_packet(?PACKET_TYPE(_Packet, ?CONNECT), State = #proto_state{connected = true}) ->
-    {error, protocol_bad_connect, State};
-
-%%Received other packets when CONNECT not arrived.
-handle_packet(_Packet, State = #proto_state{connected = false}) ->
-    {error, protocol_not_connected, State};
-
-handle_packet(?PACKET_TYPE(Packet, Type),
-				State = #proto_state { peer_name = PeerName, client_id = ClientId }) ->
-	lager:info("RECV from ~s@~s: ~s", [ClientId, PeerName, emqtt_packet:dump(Packet)]),
-	case validate_packet(Packet) of	
-	ok ->
-		handle_packet(Type, Packet, State);
-	{error, Reason} ->
-		{error, Reason, State}
-	end.
-
-handle_packet(?CONNECT, Packet = #mqtt_packet { 
-                                    variable = #mqtt_packet_connect { 
-                                         username   = Username, 
-                                         password   = Password, 
-                                         clean_sess = CleanSess, 
-                                         keep_alive = KeepAlive, 
-                                         client_id  = ClientId } = Var }, 
-              State = #proto_state{ peer_name = PeerName } ) ->
-    lager:info("RECV from ~s@~s: ~s", [ClientId, PeerName, emqtt_packet:dump(Packet)]),
-    {ReturnCode1, State1} =
-    case validate_connect(Var) of
-        ?CONNACK_ACCEPT ->
-            case emqtt_auth:check(Username, Password) of
-                true ->
-                    ClientId1 = clientid(ClientId, State), 
-                    start_keepalive(KeepAlive),
-                    emqtt_cm:register(ClientId1, self()),
-                    {?CONNACK_ACCEPT, State#proto_state{ will_msg   = willmsg(Var), 
-                                                         clean_sess = CleanSess,
-                                                         client_id  = ClientId1 }};
-                false ->
-                    lager:error("~s@~s: username '~s' login failed - no credentials", [ClientId, PeerName, Username]),
-                    {?CONNACK_CREDENTIALS, State#proto_state{client_id = ClientId}}
-            end;
-        ReturnCode ->
-            {ReturnCode, State#proto_state{client_id = ClientId}}
-    end,
-    send_packet( #mqtt_packet {
-                    header = #mqtt_packet_header { type = ?CONNACK }, 
-                    variable = #mqtt_packet_connack{ return_code = ReturnCode1 }}, State1 ),
-    %%Starting session
-    {ok, Session} = emqtt_session:start({CleanSess, ClientId, self()}),
-    {ok, State1#proto_state { session = Session }};
-
 handle_packet(?PUBLISH, Packet = #mqtt_packet {
-                                     header = #mqtt_packet_header {qos = ?QOS_0}}, 
+                                     header = #mqtt_packet_header {qos = ?QOS_0}}, connected, 
                                  State = #proto_state{session = Session}) ->
     emqtt_session:publish(Session, {?QOS_0, emqtt_message:from_packet(Packet)}),
 	{ok, State};
@@ -296,10 +242,10 @@ send_message({_From, Message = #mqtt_message{ qos = Qos }}, State = #proto_state
     {Message1, NewSession} = emqtt_session:store(Session, Message),
 	send_packet(emqtt_message:to_packet(Message1), State#proto_state{session = NewSession}).
 
-send_packet(Packet, State = #proto_state{socket = Sock, peer_name = PeerName, client_id = ClientId}) ->
-	lager:info("SENT to ~s@~s: ~s", [ClientId, PeerName, emqtt_packet:dump(Packet)]),
+send_packet(Packet, State = #proto_state{socket = Sock, socket_name = SocketName, client_id = ClientId, logger = Logger}) ->
+    Logger:info("[~s@~s] SENT : ~s", [ClientId, SocketName, emqtt_packet:dump(Packet)]),
     Data = emqtt_packet:serialise(Packet),
-    lager:debug("SENT to ~s: ~p", [PeerName, Data]),
+    Logger:debug("[~s@~s] SENT: ~p", [ClientId, SocketName, Data]),
     %%FIXME Later...
     erlang:port_command(Sock, Data),
     {ok, State}.
@@ -310,17 +256,16 @@ send_packet(Packet, State = #proto_state{socket = Sock, peer_name = PeerName, cl
 redeliver({?PUBREL, PacketId}, State) ->
     send_packet( make_packet(?PUBREL, PacketId), State).
 
-shutdown(Error, #proto_state{peer_name = PeerName, client_id = ClientId, will_msg = WillMsg}) ->
+shutdown(Error, #proto_state{socket_name = SocketName, client_id = ClientId, will_msg = WillMsg}) ->
     send_willmsg(WillMsg),
-    try_unregister(ClientId, self()),
-	lager:info("Protocol ~s@~s Shutdown: ~p", [ClientId, PeerName, Error]),
+	lager:info("Protocol ~s@~s Shutdown: ~p", [ClientId, SocketName, Error]),
     ok.
 
 willmsg(Packet) when is_record(Packet, mqtt_packet_connect) ->
     emqtt_message:from_packet(Packet).
 
-clientid(<<>>, #proto_state{peer_name = PeerName}) ->
-    <<"eMQTT/", (base64:encode(PeerName))/binary>>;
+clientid(<<>>, #proto_state{socket_name = SocketName}) ->
+    <<"emqttc/", (base64:encode(SocketName))/binary>>;
 
 clientid(ClientId, _State) -> ClientId.
 
