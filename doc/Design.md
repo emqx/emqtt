@@ -18,6 +18,18 @@ emqttc_protocol | mqtt protocol process
 
 ```
 
+## Dispatch
+
+Sub ----------
+            \|/
+Sub -----> Client<------Pub------Broker
+            /|\
+Sub ----------
+
+
+Pub------>Client------->Broker
+
+
 
 
 

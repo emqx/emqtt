@@ -20,20 +20,36 @@
 %% SOFTWARE.
 %%------------------------------------------------------------------------------
 %%
-%% The Original Code is from RabbitMQ.
+%% The Original Code is from emqtt.
 %%
 
 %%------------------------------------------------------------------------------
 %% MQTT Protocol Version and Levels
 %%------------------------------------------------------------------------------
--define(MQTT_PROTO_V31, 3).
+-define(MQTT_PROTO_V31,  3).
 -define(MQTT_PROTO_V311, 4).
 
 -define(PROTOCOL_NAMES, [
-    {?MQTT_PROTO_V31, <<"MQIsdp">>}, 
-    {?MQTT_PROTO_V311, <<"MQTT">>}
-]).
+        {?MQTT_PROTO_V31, <<"MQIsdp">>}, 
+        {?MQTT_PROTO_V311, <<"MQTT">>} ]).
 
+-type mqtt_vsn() :: ?MQTT_PROTO_V31 | ?MQTT_PROTO_V311.
+
+%%------------------------------------------------------------------------------
+%% QoS Levels
+%%------------------------------------------------------------------------------
+
+-define(QOS_0, 0).
+-define(QOS_1, 1).
+-define(QOS_2, 2).
+
+-define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
+
+-type mqtt_qos() :: ?QOS_0 | ?QOS_1 | ?QOS_2.
+
+%%------------------------------------------------------------------------------
+%% Max ClientId Length
+%%------------------------------------------------------------------------------
 -define(MAX_CLIENTID_LEN, 1024).
 
 %%------------------------------------------------------------------------------
@@ -55,6 +71,8 @@
 -define(PINGRESP,    13).   %% PING response
 -define(DISCONNECT,  14).   %% Client is disconnecting
 
+-type mqtt_packet_type() :: ?RESERVED..?DISCONNECT.
+
 %%------------------------------------------------------------------------------
 %% MQTT Connect Return Codes
 %%------------------------------------------------------------------------------
@@ -65,65 +83,70 @@
 -define(CONNACK_CREDENTIALS, 4).    %% Username or password is malformed
 -define(CONNACK_AUTH,        5).    %% Client is not authorized to connect
 
+-type mqtt_connack() :: ?CONNACK_ACCEPT..?CONNACK_AUTH.
+
 %%------------------------------------------------------------------------------
-%% MQTT Erlang Types
+%% MQTT Parser and Serialiser
 %%------------------------------------------------------------------------------
--type mqtt_vsn()        :: ?MQTT_PROTO_V31 | ?MQTT_PROTO_V311.
-
--type mqtt_connack()    :: ?CONNACK_ACCEPT..?CONNACK_AUTH.
-
--type mqtt_packet_type():: ?RESERVED..?DISCONNECT.
-
--type mqtt_packet_id()  :: 1..16#ffff | undefined.
+-define(MAX_LEN, 16#fffffff).
+-define(HIGHBIT, 2#10000000).
+-define(LOWBITS, 2#01111111).
 
 %%------------------------------------------------------------------------------
 %% MQTT Packet Fixed Header
 %%------------------------------------------------------------------------------
+
 -record(mqtt_packet_header, {
-    type   = ?RESERVED  :: mqtt_packet_type(),
-    dup    = false      :: boolean(),
-    qos    = ?QOS_0     :: mqtt_qos(),
-    retain = false      :: boolean() }).
+        type   = ?RESERVED  :: mqtt_packet_type(),
+        dup    = false      :: boolean(),
+        qos    = ?QOS_0     :: mqtt_qos(),
+        retain = false      :: boolean() }).
 
 %%------------------------------------------------------------------------------
 %% MQTT Packets
 %%------------------------------------------------------------------------------
+
+-type mqtt_packet_id() :: 1..16#ffff | undefined.
+
 -record(mqtt_packet_connect,  { 
-    client_id   = <<>>              :: binary(),
-    proto_ver   = ?MQTT_PROTO_V311  :: mqtt_vsn(),
-    proto_name  = <<"MQTT">>        :: binary(),
-    will_retain = false             :: boolean(),
-    will_qos    = ?QOS_0            :: mqtt_qos(),
-    will_flag   = false             :: boolean(),
-    clean_sess  = false             :: boolean(),
-    keep_alive  = 60                :: non_neg_integer(),
-    will_topic  = undefined         :: undefined | binary(),
-    will_msg    = undefined         :: undefined | binary(),
-    username    = undefined         :: undefined | binary(),
-    password    = undefined         :: undefined | binary() }).
+        client_id   = <<>>              :: binary(),
+        proto_ver   = ?MQTT_PROTO_V311  :: mqtt_vsn(),
+        proto_name  = <<"MQTT">>        :: binary(),
+        will_retain = false             :: boolean(),
+        will_qos    = ?QOS_0            :: mqtt_qos(),
+        will_flag   = false             :: boolean(),
+        clean_sess  = false             :: boolean(),
+        keep_alive  = 60                :: non_neg_integer(),
+        will_topic  = undefined         :: undefined | binary(),
+        will_msg    = undefined         :: undefined | binary(),
+        username    = undefined         :: undefined | binary(),
+        password    = undefined         :: undefined | binary() }).
 
 -record(mqtt_packet_connack, {
-    ack_flags = ?RESERVED   :: 0 | 1,
-	return_code             :: mqtt_connack()}).
+        ack_flags = ?RESERVED   :: 0 | 1, 
+        return_code             :: mqtt_connack() }).
 
--record(mqtt_packet_publish,  {
-    topic_name  :: binary(),
-    packet_id   :: mqtt_packet_id() }).
+-record(mqtt_packet_publish, {
+        topic_name  :: binary(), 
+        packet_id   :: mqtt_packet_id() }).
 
--record(mqtt_packet_puback,  { 
-    packet_id   :: mqtt_packet_id() }).
+-record(mqtt_packet_puback, { 
+        packet_id   :: mqtt_packet_id() }).
 
--record(mqtt_topic, {
-    name    :: binary(),
-    qos     :: mqtt_qos() }).
+-record(mqtt_packet_subscribe, { 
+        packet_id   :: mqtt_packet_id(), 
+        topic_table :: list({binary(), mqtt_qos()}) }).
 
--record(mqtt_packet_subscribe, {
-    packet_id   :: mqtt_packet_id(),
-    topic_table :: list(#mqtt_topic{}) }).
+-record(mqtt_packet_unsubscribe, { 
+        packet_id   :: mqtt_packet_id(), 
+        topics      :: list(binary()) }).
 
--record(mqtt_packet_suback, {
-    packet_id   :: mqtt_packet_id(),
-    qos_table   :: list(mqtt_qos() | 128) }).
+-record(mqtt_packet_suback, { 
+        packet_id   :: mqtt_packet_id(), 
+        qos_table   :: list(mqtt_qos() | 128) }).
+
+-record(mqtt_packet_unsuback, {
+        packet_id   :: mqtt_packet_id() }).
 
 %%------------------------------------------------------------------------------
 %% MQTT Control Packet
@@ -133,8 +156,22 @@
     variable  :: #mqtt_packet_connect{} | #mqtt_packet_connack{} 
                | #mqtt_packet_publish{} | #mqtt_packet_puback{} 
                | #mqtt_packet_subscribe{} | #mqtt_packet_suback{}
+               | #mqtt_packet_unsubscribe{} | #mqtt_packet_unsuback{}
                | mqtt_packet_id(), 
     payload   :: binary() }).
 
 -type mqtt_packet() :: #mqtt_packet{}.
+
+%%------------------------------------------------------------------------------
+%% MQTT Message
+%%------------------------------------------------------------------------------
+-record(mqtt_message, {
+        qos    = ?QOS_0 :: mqtt_qos(), 
+        retain = false  :: boolean(), 
+        dup    = false  :: boolean(), 
+        msgid           :: mqtt_packet_id(),
+        topic           :: binary(), 
+        payload         :: binary() }).
+
+-type mqtt_message() :: #mqtt_message{}.
 
