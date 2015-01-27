@@ -20,7 +20,7 @@
 %% SOFTWARE.
 %%------------------------------------------------------------------------------
 
--module(emqtt_message).
+-module(emqttc_message).
 
 -author('feng@emqtt.io').
 

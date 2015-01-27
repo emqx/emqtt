@@ -19,6 +19,55 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %% SOFTWARE.
 %%------------------------------------------------------------------------------
--module(emqtt_keepalive).
+-module(emqttc_keepalive).
+
+-author('feng@emqtt.io').
+
+-export([new/3, resume/1, cancel/1]).
+
+-record(keepalive, {socket, send_oct, timeout_sec, timeout_msg, timer_ref}).
+
+%%TODO: refactor socket keepalive...
+
+%%
+%% @doc create a keepalive.
+%%
+new(Socket, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
+    {ok, [{send_oct, SendOct}]} = inet:getstat(Socket, [send_oct]),
+	Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
+	#keepalive { socket      = Socket, 
+                 send_oct    = SendOct, 
+                 timeout_sec = TimeoutSec, 
+                 timeout_msg = TimeoutMsg,
+                 timer_ref   = Ref }.
+
+%%
+%% @doc try to resume keepalive, called when timeout.
+%%
+resume(KeepAlive = #keepalive { socket      = Socket, 
+                                send_oct    = SendOct, 
+                                timeout_sec = TimeoutSec, 
+                                timeout_msg = TimeoutMsg, 
+                                timer_ref   = Ref }) ->
+    {ok, [{send_oct, NewSendOct}]} = inet:getstat(Socket, [send_oct]),
+    if
+        NewSendOct =:= SendOct -> 
+            timeout;
+        true ->
+            %need?
+            cancel(Ref),
+            NewRef = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
+            {resumed, KeepAlive#keepalive { send_oct = NewSendOct, timer_ref = NewRef }}
+    end.
+
+%%
+%% @doc cancel keepalive
+%%
+cancel(#keepalive { timer_ref = Ref }) ->
+    cancel(Ref);
+cancel(undefined) -> 
+	undefined;
+cancel(Ref) -> 
+	catch erlang:cancel_timer(Ref).
 
 

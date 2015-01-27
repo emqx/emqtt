@@ -27,7 +27,7 @@
 
 -behavior(gen_fsm).
 
--include("emqtt_packet.hrl").
+-include("emqttc_packet.hrl").
 
 %% start application.
 -export([start/0]).
@@ -319,8 +319,8 @@ connect(State = #state{name = Name,
     Logger:info("[Client ~p]: connecting to ~p:~p", [Name, Host, Port]),
     case emqttc_socket:connect(Host, Port) of
         {ok, Socket} ->
-            ProtoState1 = emqtt_protocol:set_socket(Socket),
-            emqtt_protocol:connect(ProtoState1),
+            ProtoState1 = emqttc_protocol:set_socket(Socket),
+            emqttc_protocol:send_connect(ProtoState1),
             Logger:info("[Client ~p]: connected with ~p:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#{socket = Socket, 
                                                      proto_state = ProtoState1}};
@@ -440,10 +440,6 @@ handle_info({tcp, error, Reason}, _, State = #state{logger = Logger}) ->
     %TODO: reconnect??
     {next_state, disconnected, State};
 
-handle_info({tcp, _Sock, Data}, connected, State) when is_binary(Data) ->
-    <<_Code:4/integer, _:4/integer, _/binary>> = Data,
-    {next_state, connected, State};
-
 handle_info({tcp_closed, Socket}, _, State = #state{logger = Logger, socket = Socket}) ->
     %%TODO: Reconnect.
     Logger:warning("tcp_closed state goto disconnected"),
@@ -452,6 +448,18 @@ handle_info({tcp_closed, Socket}, _, State = #state{logger = Logger, socket = So
 handle_info({timeout, reconnect}, connecting, S) ->
     io:format("connect(handle_info)~n"),
     connect(S);
+
+handle_info({dispatch, Msg}, connected, State = #state{logger = Logger}) ->
+    Logger:info("Dispatch: ~p", [Msg]),
+    {next_state, connected, State};
+
+%%TODO: 
+handle_info({redeliver, Pkg}, connected, State = #state{logger = Logger}) ->
+    Logger:info("Redeliver: ~p", [Pkg]),
+    {next_state, connected, State};
+    
+handle_info({session, expired}, State) ->
+    stop({shutdown, {session, expired}}, State);
 
 handle_info(_Info, StateName, State) ->
     {next_state, StateName, State}.
@@ -530,7 +538,7 @@ process_received_bytes(Bytes, EventState,
                        State = #state{ name        = Name,
                                        parse_state = ParseState,
                                        proto_state = ProtoState}) ->
-    case emqtt_packet:parse(Bytes, ParseState) of
+    case emqttc_packet:parse(Bytes, ParseState) of
     {more, ParseState1} ->
         %%TODO: socket controll...
         {next_state, EventState, State#state{ parse_state = ParseState1 }};
@@ -566,10 +574,10 @@ process_packet(?PINGRESP, _Packet, connected, State = #state{name = Name, logger
 
 process_packet(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
     Logger:info("[~s] RECV: ~p", [Name, Packet]),
-    case emqtt_protocol:handle_packet(Type, Packet, ProtoState) of
+    case emqttc_protocol:handle_packet(Type, Packet, ProtoState) of
         {ok, NewProtoState} ->
             process_received_bytes(Rest, connected, State#state{ 
-                    parse_state = emqtt_packet:initial_state(), 
+                    parse_state = emqttc_packet:initial_state(), 
                     proto_state = NewProtoState });
         {error, Error} ->
             Logger:error("[~p] MQTT protocol error ~p", [Name, Error]),
