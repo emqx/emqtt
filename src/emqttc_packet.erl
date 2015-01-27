@@ -186,10 +186,8 @@ serialise_variable(#mqtt_packet_header  { type = ?CONNECT },
                    WillMsg/binary>>;
          false -> PayloadBin
      end,
-     PayloadBin2 = <<PayloadBin1/binary,
-                   (serialise_utf(Username))/binary,
-                   (serialise_utf(Password))/binary>>,
-    {VariableBin, PayloadBin2};
+     UserPasswd = << <<(serialise_utf(B))/binary>> || B <- [Username, Password], B =/= undefined >>,
+    {VariableBin, <<PayloadBin1/binary, UserPasswd/binary>>};
 
 serialise_variable(#mqtt_packet_header { type      = Subs},
                    #mqtt_packet_subscribe { packet_id   = PacketId, 
@@ -220,7 +218,7 @@ serialise_variable(#mqtt_packet_header { type      = PubAck },
 
 serialise_variable(#mqtt_packet_header { },
                    undefined,
-                   <<>> = _PayloadBin) ->
+                   undefined = _PayloadBin) ->
     {<<>>, <<>>}.
 
 serialise_header(#mqtt_packet_header{ type   = Type,

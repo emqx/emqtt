@@ -35,7 +35,7 @@
 -export([start/0]).
 
 %start one mqtt client
--export([ start_link/0, start_link/1, start_link/2]).
+-export([start_link/0, start_link/1, start_link/2]).
 
 %api
 -export([connect/1,
@@ -190,7 +190,7 @@ connect(Client) ->
 %% @doc Publish message to broker with default qos.
 %%--------------------------------------------------------------------
 publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
-    publish(Client, #mqtt_message{from = self(), topic = Topic, payload = Payload}).
+    publish(Client, #mqtt_message{topic = Topic, payload = Payload}).
 
 %%--------------------------------------------------------------------
 %% @doc Publish message to broker with qos or opts.
@@ -199,8 +199,7 @@ publish(Client, Topic, Payload, QoS) when is_binary(Topic), is_binary(Payload), 
     publish(Client, Topic, Payload, [{qos, QoS}]);
 
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
-    publish(Client, #mqtt_message{from = self(),
-                                  qos = proplists:get_value(qos, PubOpts, ?QOS_0), 
+    publish(Client, #mqtt_message{qos = proplists:get_value(qos, PubOpts, ?QOS_0), 
                                   retain = proplists:get_value(retain, PubOpts, false), 
                                   topic = Topic, payload = Payload }).
 
@@ -212,7 +211,6 @@ publish(Client, Msg = #mqtt_message{qos = ?QOS_1}) ->
 
 publish(Client, Msg = #mqtt_message{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(Client, {publish, Msg}).
-
 
 %%--------------------------------------------------------------------
 %% @doc Subscribe topics or topic with qos0.
@@ -239,6 +237,9 @@ unsubscribe(Client, [Topic | _] = Topics) when is_binary(Topic) ->
 %% @doc Send ping to broker.
 %%--------------------------------------------------------------------
 ping(Client) ->
+    gen_fsm:send_event(Client, ping).
+
+sync_ping(Client) ->
     gen_fsm:sync_send_event(Client, ping).
 
 %%--------------------------------------------------------------------
@@ -246,7 +247,6 @@ ping(Client) ->
 %%--------------------------------------------------------------------
 disconnect(Client) ->
     gen_fsm:send_event(Client, disconnect).
-
 
 %%%===================================================================
 %%% gen_fms callbacks
@@ -262,14 +262,14 @@ disconnect(Client) ->
 %% @spec init(Args) -> {ok, StateName, State} |
 %%                     {ok, StateName, State, Timeout} |
 %%                     ignore |
-%%                     {stop, StopReason}
+%%                     {stop, StopReason}.
 %%--------------------------------------------------------------------
 init([undefined, MqttOpts]) ->
     init([self(), MqttOpts, []]);
 
 init([Name, MqttOpts, ClientOpts]) ->
 
-    Logger = gen_logger:new(proplists:get_value(logger, ClientOpts, {otp, info})),
+    Logger = gen_logger:new(proplists:get_value(logger, ClientOpts, {stdout, debug})),
 
     case proplists:get_value(client_id, MqttOpts) of
         undefined -> Logger:warning("ClientId is NULL!, are you sure to use empty clientID defined in MQTT V3.1.1?");
@@ -330,6 +330,7 @@ connect_broker(State = #state{name = Name,
                        socket = undefined, 
                        logger = Logger }) ->
 
+    io:format("Host: ~s:~p~n", [Host, Port]),
     Logger:info("[Client ~p]: connecting to ~p:~p", [Name, Host, Port]),
     case emqttc_socket:connect(Host, Port) of
         {ok, Socket} ->
@@ -337,6 +338,7 @@ connect_broker(State = #state{name = Name,
             emqttc_protocol:send_connect(ProtoState1),
             Logger:info("[Client ~p]: connected with ~p:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#state{socket = Socket, 
+                                                          parse_state = emqttc_packet:initial_state(), 
                                                           proto_state = ProtoState1} };
         {error, Reason} ->
             Logger:info("[Client ~p] connection failure: ~p", [Name, Reason]),
@@ -592,7 +594,7 @@ process_packet(?CONNACK, #mqtt_packet {
         variable = #mqtt_packet_connack {
             return_code  = ReturnCode } }, waiting_for_connack,
     State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[~s] RECV CONNACK: ~p", [Name, ReturnCode]),
+    Logger:info("[~p] RECV CONNACK: ~p", [Name, ReturnCode]),
     if 
         ReturnCode =:= ?CONNACK_ACCEPT ->
             {next_state, connected, State};
@@ -604,11 +606,11 @@ process_packet(?CONNACK, _Packet, connected, State) ->
     {error, {protocol, unexpeced_connack}, State};
 
 process_packet(?PINGRESP, _Packet, connected, State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[~s] RECV PINGRESP", [Name]),
+    Logger:info("[~p] RECV PINGRESP", [Name]),
     {ok, connected, State};
 
 process_packet(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
-    Logger:info("[~s] RECV: ~p", [Name, Packet]),
+    Logger:info("[~p] RECV: ~p", [Name, Packet]),
     case emqttc_protocol:handle_packet(Type, Packet, ProtoState) of
         {ok, NewProtoState} ->
             {ok, NewProtoState};

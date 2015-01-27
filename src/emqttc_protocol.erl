@@ -137,29 +137,39 @@ set_socket(ProtoState, Socket) ->
 
 client_id(#proto_state { client_id = ClientId }) -> ClientId.
 
-send_connect(ProtoState) ->
-    'TODO',
-    {ok, ProtoState}.
+send_connect(ProtoState = #proto_state{ client_id = ClientId,
+                                        proto_ver = ProtoVer, 
+                                        proto_name = ProtoName,
+                                        will_retain = WillRetain,
+                                        will_qos = WillQos,
+                                        will_topic = WillTopic,
+                                        will_msg = WillMsg,
+                                        clean_sess = CleanSess,
+                                        keep_alive = KeepAlive,
+                                        username = Username,
+                                        password = Password
+                                      } ) ->
+    Packet = #mqtt_packet { header = #mqtt_packet_header { type = ?CONNECT },
+                            variable = make_packet(?CONNECT, ProtoState),
+                            payload = <<>> },
+    send_packet(Packet, ProtoState).
+
 
 send_disconnect(ProtoState) ->
-    'TODO',
-    {ok, ProtoState}.
+    Packet = #mqtt_packet { header = #mqtt_packet_header { type = ?DISCONNECT } },
+    send_packet(Packet, ProtoState).
 
 send_publish(ProtoState, Msg) ->
-    'TODO',
-    {ok, ProtoState}.
+    send_message({self(), Msg}, ProtoState).
 
-send_subscribe(ProtoState, Sub) ->
-    'TODO',
-    {ok, ProtoState}.
+send_subscribe(ProtoState, Topics) ->
+    send_packet(make_packet(?SUBSCRIBE, Topics), ProtoState).
 
-send_unsubscribe(ProtoState, Sub) ->
-    'TODO',
-    {ok, ProtoState}.
+send_unsubscribe(ProtoState, Topics) ->
+    send_packet(make_packet(?UNSUBSCRIBE, Topics), ProtoState).
 
 send_ping(ProtoState, ping) ->
-    'TODO',
-    {ok, ProtoState}.
+    send_packet(make_packet(?PINGREQ), ProtoState).
 
 %%CONNECT – Client requests a connection to a Server
 handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session = Session}) ->
@@ -237,6 +247,41 @@ handle_packet(?DISCONNECT, #mqtt_packet{}, State) ->
 
 make_packet(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
     #mqtt_packet{ header = #mqtt_packet_header { type = Type } }.
+
+make_packet(?CONNECT, ProtoState = #proto_state{ client_id = ClientId,
+                           proto_ver = ProtoVer,
+                           proto_name = ProtoName,
+                           will_retain = WillRetain,
+                           will_qos = WillQos,
+                           will_topic = WillTopic,
+                           will_msg = WillMsg,
+                           clean_sess = CleanSess,
+                           keep_alive = KeepAlive,
+                           username = Username,
+                           password = Password }) ->
+    ClientId1 =
+    if
+        ClientId =:= undefined ->
+            clientid(<<>>, ProtoState);
+        true ->
+            ClientId
+    end,
+
+    #mqtt_packet_connect{ client_id  = ClientId1,
+                          proto_ver  = ProtoVer,
+                          proto_name = ProtoName,
+                          will_flag  = if 
+                                           WillTopic =/= undefined andalso WillMsg =/= undefined -> true; 
+                                           true -> false
+                                       end, 
+                          will_retain = WillRetain,
+                          will_qos    = WillQos,
+                          clean_sess  = CleanSess,
+                          keep_alive  = KeepAlive,
+                          will_topic  = WillTopic,
+                          will_msg    = WillMsg,
+                          username    = Username,
+                          password    = Password };
 
 make_packet(PubAck, PacketId) when PubAck >= ?PUBACK andalso PubAck =< ?PUBCOMP ->
   #mqtt_packet { header = #mqtt_packet_header { type = PubAck, qos = puback_qos(PubAck) }, 

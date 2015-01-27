@@ -36,7 +36,6 @@
 %% MQTT Message
 %%------------------------------------------------------------------------------
 -record(mqtt_message, {
-    from            :: undefined | pid(),
     msgid           :: undefined | integer(),
     qos    = 0      :: mqtt_qos(),
     retain = false  :: boolean(),
