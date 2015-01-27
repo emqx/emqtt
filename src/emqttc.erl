@@ -27,6 +27,8 @@
 
 -behavior(gen_fsm).
 
+-include("emqttc.hrl").
+
 -include("emqttc_packet.hrl").
 
 %% start application.

@@ -49,7 +49,7 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    Ets = ets:new(childno_db, [set, public]),
+    %Ets = ets:new(childno_db, [set, public]),
 
     %ChildNo = {emqttc_childno, {emqttc_childno, start_link, [Ets]},
 	%       permanent, 2000, worker, [emqttc_childno]},

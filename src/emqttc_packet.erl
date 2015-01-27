@@ -25,6 +25,8 @@
 
 -module(emqttc_packet).
 
+-include("emqttc.hrl").
+
 -include("emqttc_packet.hrl").
 
 -export([initial_state/0]).

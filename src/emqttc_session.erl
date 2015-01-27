@@ -29,7 +29,7 @@
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
--export([create/1, resume/3, publish/2, puback/2, subscribe/2, unsubscribe/2, destroy/2]).
+-export([create/1, resume/3, publish/2, puback/2, subscribe/2, unsubscribe/2, destroy/1]).
 
 -export([store/2]).
 
@@ -43,7 +43,8 @@
         awaiting_rel :: map(),
         awaiting_comp :: map(),
         expires,
-        expire_timer }).
+        expire_timer,
+        logger }).
 
 %% ------------------------------------------------------------------
 %% Start Session
@@ -83,9 +84,9 @@ resume(SessState = #session_state{ client_id = ClientId,
                 ClientPid ! {dispatch, {self(), Msg}}
         end, emqttc_queue:all(Queue)),
 
-    State#session_state{ client_pid = ClientPid, 
+    SessState#session_state{ client_pid = ClientPid, 
                          msg_queue = emqttc_queue:clear(Queue), 
-                         expire_timer = undefined };
+                         expire_timer = undefined }.
 
 %%TODO: session....
 publish(Session, {?QOS_0, Message}) ->
@@ -97,7 +98,7 @@ publish(Session, {?QOS_1, Message}) ->
 publish(SessState = #session_state{awaiting_rel = AwaitingRel}, 
     {?QOS_2, Message = #mqtt_message{ msgid = MsgId }}) ->
     %% store in awaiting_rel
-    SessState#session_state{awaiting_rel = maps:put(MsgId, Message, AwaitingRel)};
+    SessState#session_state{awaiting_rel = maps:put(MsgId, Message, AwaitingRel)}.
 
 %%--------------------------------------------------------------------
 %% @doc PUBACK
@@ -126,7 +127,7 @@ puback(SessState = #session_state{ client_id = ClientId,
 %%--------------------------------------------------------------------
 %% @doc PUBREL
 %%--------------------------------------------------------------------
-puback(SessState = #session_state{client_id = ClientId, awaiting_rel = Awaiting}, {?PUBREL, PacketId}) ->
+puback(SessState = #session_state{client_id = ClientId, client_pid = ClientPid, awaiting_rel = Awaiting}, {?PUBREL, PacketId}) ->
     case maps:find(PacketId, Awaiting) of
         {ok, Msg} -> ClientPid ! {dispatch, Msg}; %%TODO: this is not right...
         error -> todo %Logger:warning("Session ~s: PUBREL PacketId '~p' not found!", [ClientId, PacketId])
@@ -142,7 +143,7 @@ puback(SessState = #session_state{ client_id = ClientId,
         true -> ok;
         false -> todo %Logger:warning("Session ~s: PUBREC PacketId '~p' not exist", [ClientId, PacketId])
     end,
-    SessState#session_state{ awaiting_comp  = maps:remove(PacketId, AwaitingComp) };
+    SessState#session_state{ awaiting_comp  = maps:remove(PacketId, AwaitingComp) }.
 
 %%--------------------------------------------------------------------
 %% @doc SUBSCRIBE
@@ -155,7 +156,7 @@ subscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, Top
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
     %%TODO: should be gen_event and notification...
-    {ok, SessState#session_state{submap = SubMap1}, GrantedQos};
+    {ok, SessState#session_state{submap = SubMap1}}.%, GrantedQos}.
 
 %%--------------------------------------------------------------------
 %% @doc UNSUBSCRIBE
@@ -168,7 +169,7 @@ unsubscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, T
     end,
     %%unsubscribe from topic tree
     SubMap1 = lists:foldl(fun(Topic, Acc) -> maps:remove(Topic, Acc) end, SubMap, Topics),
-    {ok, SessState#session_state{submap = SubMap1}};
+    {ok, SessState#session_state{submap = SubMap1}}.
 
 %store message(qos1) that sent to client
 store(SessState = #session_state{ message_id = MsgId, awaiting_ack = Awaiting}, 

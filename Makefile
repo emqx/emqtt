@@ -6,7 +6,8 @@ REBAR=./rebar
 REBAR_GEN=../../rebar
 DIALYZER=dialyzer
 
-all: update-deps get-deps clean compile xref edoc
+#update-deps 
+all: get-deps clean compile xref edoc
 
 get-deps:
 	@$(REBAR) get-deps

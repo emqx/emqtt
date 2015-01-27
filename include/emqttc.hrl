@@ -20,17 +20,31 @@
 %% SOFTWARE.
 %%------------------------------------------------------------------------------
 
+%%------------------------------------------------------------------------------
+%% QoS Levels
+%%------------------------------------------------------------------------------
+
+-define(QOS_0, 0).
+-define(QOS_1, 1).
+-define(QOS_2, 2).
+
+-define(IS_QOS(I), (I >= ?QOS_0 andalso I =< QOS_2)).
+
+-type mqtt_qos()    :: ?QOS_0 | ?QOS_1 | ?QOS_2.
+
+%%------------------------------------------------------------------------------
+%% MQTT Message
+%%------------------------------------------------------------------------------
 -record(mqtt_message, {
     from            :: undefined | pid(),
     msgid           :: undefined | integer(),
-    qos    = ?QOS_0 :: mqtt_qos(),
+    qos    = 0      :: mqtt_qos(),
     retain = false  :: boolean(),
     dup    = false  :: boolean(),
     topic           :: binary(),
     payload         :: binary()
 }).
 
--type mqtt_message() :: #mqtt_message().
+-type mqtt_message() :: #mqtt_message{}.
 
--define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
 
