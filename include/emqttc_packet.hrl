@@ -71,6 +71,21 @@
 -define(PINGRESP,    13).   %% PING response
 -define(DISCONNECT,  14).   %% Client is disconnecting
 
+-define(TYPE_NAMES, ['CONNECT',
+                     'CONNACK',
+                     'PUBLISH',
+                     'PUBACK',
+                     'PUBREC',
+                     'PUBREL',
+                     'PUBCOMP',
+                     'SUBSCRIBE',
+                     'SUBACK',
+                     'UNSUBSCRIBE',
+                     'UNSUBACK',
+                     'PINGREQ',
+                     'PINGRESP',
+                     'DISCONNECT' ]).
+
 -type mqtt_packet_type() :: ?RESERVED..?DISCONNECT.
 
 %%------------------------------------------------------------------------------

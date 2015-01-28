@@ -44,33 +44,27 @@
          redeliver/2, 
          shutdown/2]).
 
--record(will_msg, { retain = false, qos = ?QOS_0, topic, msg}).
-
 %% ------------------------------------------------------------------
 %% Protocol State
 %% ------------------------------------------------------------------
 -record(proto_state, {
-    socket,
-    socket_name,
-    proto_ver,
-    proto_name,
-    client_id,
-    clean_sess,
-    keep_alive,
-    username,
-    password,
-    will_topic,
-    will_msg,
-    will_qos, 
-    will_retain,
-    packet_id = 1,
-    subscriptions  :: map(),
-    awaiting_ack   :: map(),
-    awaiting_rel   :: map(),
-    awaiting_comp  :: map(),
-    session = undefined,
-    logger
+          socket,
+          socket_name,
+          proto_ver,
+          proto_name,
+          client_id,
+          clean_sess,
+          keep_alive,
+          will,
+          username,
+          password,
+          session,
+          logger
 }).
+
+-type proto_state() :: #proto_state{}.
+
+-export_type([proto_state/0]).
 
 %%----------------------------------------------------------------------------
 
@@ -91,38 +85,40 @@
 
 -define(PUBACK_PACKET(PacketId), #mqtt_packet_puback { packet_id = PacketId }).
 
+-define(DEFAULT_KEEPALIVE, 60).
+
 initial_state() ->
 	#proto_state {
         proto_ver   = ?MQTT_PROTO_V311,
         proto_name  = <<"MQTT">>,
         clean_sess  = false,
-        keep_alive  = 60,
-        will_qos    = ?QOS_0,
-        will_retain = false
+        keep_alive  = ?DEFAULT_KEEPALIVE,
+        will        = #mqtt_message{}
 	}. 
 
 parse_opts(ProtoState, []) ->
     ProtoState;
 parse_opts(ProtoState, [{client_id, ClientId} | Opts]) when is_binary(ClientId) ->
-    parse_opts(ProtoState # proto_state {client_id = ClientId}, Opts);
+    parse_opts(ProtoState#proto_state {client_id = ClientId}, Opts);
 parse_opts(ProtoState, [{clean_sess, CleanSess} | Opts]) when is_boolean(CleanSess) ->
-    parse_opts(ProtoState # proto_state {clean_sess = CleanSess}, Opts);
+    parse_opts(ProtoState#proto_state {clean_sess = CleanSess}, Opts);
 parse_opts(ProtoState, [{keep_alive, KeepAlive} | Opts]) when is_integer(KeepAlive) ->
-    parse_opts(ProtoState # proto_state {keep_alive = KeepAlive}, Opts);
+    parse_opts(ProtoState#proto_state {keep_alive = KeepAlive}, Opts);
 parse_opts(ProtoState, [{username, Username} | Opts]) when is_binary(Username)->
-    parse_opts(ProtoState # proto_state { username = Username}, Opts);
+    parse_opts(ProtoState#proto_state { username = Username}, Opts);
 parse_opts(ProtoState, [{password, Password} | Opts]) when is_binary(Password) ->
-    parse_opts(ProtoState # proto_state { password = Password }, Opts);
-parse_opts(ProtoState, [{will_topic, Topic} | Opts]) when is_binary(Topic) ->
-    parse_opts(ProtoState # proto_state { will_topic = Topic }, Opts);
-parse_opts(ProtoState, [{will_msg, Msg} | Opts]) when is_binary(Msg) ->
-    parse_opts(ProtoState # proto_state { will_msg = Msg }, Opts);
-parse_opts(ProtoState, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
-    parse_opts(ProtoState # proto_state { will_qos = Qos }, Opts);
-parse_opts(ProtoState, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
-    parse_opts(ProtoState # proto_state { will_retain = Retain }, Opts);
+    parse_opts(ProtoState#proto_state { password = Password }, Opts);
+parse_opts(ProtoState = proto_state{will = Will}, [{will_topic, Topic} | Opts]) when is_binary(Topic) ->
+    parse_opts(ProtoState#proto_state{will = Will#mqtt_message{topic = Topic}}, Opts);
+parse_opts(ProtoState = proto_state{will = Will}, [{will_msg, Msg} | Opts]) when is_binary(Msg) ->
+    parse_opts(ProtoState#proto_state{will = Will#mqtt_message{ payload = Msg}}, Opts); %TODO: right?
+parse_opts(ProtoState = proto_state{will = Will}, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
+    parse_opts(ProtoState#proto_state{will = Will#mqtt_message{qos = Qos}}, Opts);
+parse_opts(ProtoState = proto_state{will = Will}, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
+    parse_opts(ProtoState#proto_state{will = Will#mqtt_message{retain = Retain}}, Opts);
+
 parse_opts(ProtoState, [{logger, Logger} | Opts]) ->
-    parse_opts(ProtoState # proto_state { logger = Logger }, Opts);
+    parse_opts(ProtoState#proto_state { logger = Logger }, Opts);
 parse_opts(ProtoState, [_Opt | Opts]) ->
     parse_opts(ProtoState, Opts).
 
@@ -243,8 +239,6 @@ handle_packet(?DISCONNECT, #mqtt_packet{}, State) ->
     % clean willmsg
     {stop, normal, State#proto_state{will_msg = undefined}}.
 
-make_packet(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
-    #mqtt_packet{ header = #mqtt_packet_header { type = Type } }.
 
 make_packet(?CONNECT, ProtoState = #proto_state{ client_id = ClientId,
                            proto_ver = ProtoVer,
@@ -279,16 +273,8 @@ make_packet(?CONNECT, ProtoState = #proto_state{ client_id = ClientId,
                           will_topic  = WillTopic,
                           will_msg    = WillMsg,
                           username    = Username,
-                          password    = Password };
+                          password    = Password }.
 
-make_packet(PubAck, PacketId) when PubAck >= ?PUBACK andalso PubAck =< ?PUBCOMP ->
-  #mqtt_packet { header = #mqtt_packet_header { type = PubAck, qos = puback_qos(PubAck) }, 
-                 variable = #mqtt_packet_puback { packet_id = PacketId}}.
-
-puback_qos(?PUBACK) ->  ?QOS_0;
-puback_qos(?PUBREC) ->  ?QOS_0;
-puback_qos(?PUBREL) ->  ?QOS_1;
-puback_qos(?PUBCOMP) -> ?QOS_0.
 
 %% qos0 message
 send_message({_From, Message = #mqtt_message{ qos = ?QOS_0 }}, State) ->

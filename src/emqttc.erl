@@ -37,18 +37,15 @@
 
 %api
 -export([connect/1,
-         publish/2, publish/3, publish/4, 
          subscribe/2, 
          unsubscribe/2, 
-         ping/1, 
+         publish/3, publish/4, 
+         ping/1,
          disconnect/1
-         %add_event_handler/2, 
-         %add_event_handler/3, 
-         %set_socket/2
         ]).
 
 %% gen_fsm callbacks
--export([init/1, 
+-export([init/1,
          handle_info/3, 
          handle_event/3, 
          handle_sync_event/4, 
@@ -58,14 +55,12 @@
 % fsm state
 -export([connecting/2, connecting/3, 
          waiting_for_connack/2, 
-         connected/2, connected/3, disconnected/2, disconnected/3]).
-
+         connected/2, connected/3,
+         disconnected/2, disconnected/3]).
 
 %%----------------------------------------------------------------------------
 
 -ifdef(use_specs).
-
--type mqttc_opts()  :: [ mqttc_opt() ].
 
 -type mqttc_opt()   :: {host, inet:ip_address() | binary() | string} 
                      | {port, inet:port_number}
@@ -80,8 +75,6 @@
                      | {will_qos, mqtt_qos()},
                      | {will_retain, boolean()}.
 
--type mqtt_pubopts() :: [ mqtt_pubopt() ].
-
 -type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
 
 -spec start() -> ok.
@@ -90,13 +83,14 @@
       Client    :: pid().
 
 -spec start_link(MqttOpts) -> {ok, Client} | ignore | {error, any()} when 
-      MqttOpts  :: mqttc_opts(),
+      MqttOpts  :: [mqttc_opt()],
       Client    :: pid().
 
 -spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
       Name      :: atom(),
-      MqttOpts  :: mqttc_opts().
+      MqttOpts  :: [mqttc_opt()].
 
+%%TODO: need this?
 -spec connect(Client) -> ok when
       Client    :: pid() | atom().
 
@@ -110,7 +104,7 @@
       Client    :: pid() | atom(),
       Topic     :: binary(),
       Payload   :: binary(),
-      PubOpts   :: mqtt_qos() | mqtt_pubopts(),
+      PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
       MsgId     :: mqtt_packet_id().
 
 -spec publish(Client, Message) -> ok | {ok, MsgId} when
@@ -139,20 +133,16 @@
 
 %%----------------------------------------------------------------------------
 
--record(state, { name       :: atom(),
-                 host       :: inet:ip_address() | binary() | string(), 
-                 port       :: inet:port_number(), 
-                 socket     :: gen_tcp:socket(), 
-                 %ref        :: dict:dict(),
-                 %event_mgr_pid :: pid() 
-                 parse_state,
-                 proto_state,
-                 subscribers,
-                 logger     :: tuple(),
-                 auto_conn  :: boolean(),
-                 reconn     :: non_neg_integer() }).
-
--define(RECONNECT_INTERVAL, 3000).
+-record(state, {name           :: atom(),
+                host           :: inet:ip_address() | string(), 
+                port           :: inet:port_number(), 
+                socket         :: gen_tcp:socket(), 
+                parse_state    :: none | fun(),
+                proto_state    :: emqttc_protocol:proto_state(),
+                subscribers    :: map(),
+                logger         :: gen_logger:logmod(),
+                auto_connect   :: boolean(),
+                reconnect      :: false | emqttc_reconnect:reconnect() }).
 
 %%--------------------------------------------------------------------
 %% @doc Start emqttc application
@@ -263,44 +253,46 @@ disconnect(Client) ->
 %%                     {stop, StopReason}.
 %%--------------------------------------------------------------------
 init([undefined, MqttOpts]) ->
-    init([self(), MqttOpts, []]);
+    init([self(), MqttOpts]);
 
-init([Name, MqttOpts, ClientOpts]) ->
+init([Name, MqttOpts]) ->
 
-    Logger = gen_logger:new(proplists:get_value(logger, ClientOpts, {stdout, debug})),
+    Logger = gen_logger:new(proplists:get_value(logger, MqttOpts, {stdout, debug})),
 
     case proplists:get_value(client_id, MqttOpts) of
-        undefined -> Logger:warning("ClientId is NULL!, are you sure to use empty clientID defined in MQTT V3.1.1?");
+        undefined -> Logger:warning("ClientId is NULL!");
         _ -> ok
     end,
 
     ProtoState = emqttc_protocol:parse_opts(
-                   emqttc_protocol:initial_state(), [{logger, Logger}|MqttOpts]),
+                   emqttc_protocol:initial_state(), [{logger, Logger} | MqttOpts]),
     
     State = parse_opts(#state{ name         = Name,
                                host         = "localhost",
                                port         = 1883,
                                proto_state  = ProtoState,
                                logger       = Logger,
-                               auto_conn    = true,
-                               reconn       = 5 }, MqttOpts),
+                               auto_connect = true,
+                               reconnect    = false }, MqttOpts),
     
-    %TODO:  {ok, Pid} = emqttc_event:start_link(),
-    
-    {ok, connecting, parse_opts(State, ClientOpts), 0}.
+    {ok, connecting, State, 0}.
 
 parse_opts(State, []) ->
     State;
 parse_opts(State, [{host, Host} | Opts]) ->
-    State#state{host = Host};
+    parse_opts(State#state{host = Host}, Opts);
 parse_opts(State, [{port, Port} | Opts]) ->
-    State#state{port = Port};
+    parse_opts(State#state{port = Port}, Opts);
 parse_opts(State, [{logger, Cfg} | Opts]) ->
-    State#state{logger = gen_logger:new(Cfg)};
-parse_opts(State, [{auto_conn, Auto} | Opts]) when is_boolean(Auto) ->
-    State#state{ auto_conn = Auto };
-parse_opts(State, [{reconn, Interval} | Opts]) when is_integer(Interval) ->
-    State#state{ reconn = Interval };
+    parse_opts(State#state{logger = gen_logger:new(Cfg)}, Opts);
+parse_opts(State, [{auto_connect, Auto} | Opts]) when is_boolean(Auto) ->
+    parse_opts(State#state{auto_connect = Auto}, Opts);
+parse_opts(State, [{reconnect, false} | Opts]) ->
+    parse_opts(State#state{reconnect = false}, Opts);
+parse_opts(State, [{reconnect, Interval} | Opts]) when is_integer(Interval) ->
+    parse_opts(State#state{reconnect = emqttc_reconnect:new(Interval)}, Opts);
+parse_opts(State, [{reconnect, {Interval, MaxRetries}} | Opts]) when is_integer(Interval) ->
+    parse_opts(State#state{reconnect = emqttc_reconnect:new(Interval, MaxRetries)}, Opts);
 parse_opts(State, [_Opt | Opts]) ->
     parse_opts(State, Opts).
 

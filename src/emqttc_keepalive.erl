@@ -25,13 +25,33 @@
 
 -export([new/3, resume/1, cancel/1]).
 
+%%TODO: refactor socket keepalive...
 -record(keepalive, {socket, send_oct, timeout_sec, timeout_msg, timer_ref}).
 
-%%TODO: refactor socket keepalive...
+%%----------------------------------------------------------------------------
 
-%%
+-ifdef(use_specs).
+
+-type keepalive() -> #keepalive{}.
+
+-spec new(Socket, TimeoutSec, TimeoutMsg) -> KeepAlive when
+      Socket        :: inet:socket(),
+      TimeoutSec    :: non_neg_integer(),
+      TimeoutMsg    :: tuple(),
+      KeepAlive     :: keepalive().
+
+-spec resume(KeepAlive) -> timeout | {resumed, KeepAlive} when 
+      KeepAlive  :: keepalive().
+
+-spec cancel(keepalive() | undefined | reference()) -> any().
+
+-endif.
+
+%%----------------------------------------------------------------------------
+
+%%----------------------------------------------------------------------------
 %% @doc create a keepalive.
-%%
+%%----------------------------------------------------------------------------
 new(Socket, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
     {ok, [{send_oct, SendOct}]} = inet:getstat(Socket, [send_oct]),
 	Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
@@ -41,9 +61,9 @@ new(Socket, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
                  timeout_msg = TimeoutMsg,
                  timer_ref   = Ref }.
 
-%%
+%%----------------------------------------------------------------------------
 %% @doc try to resume keepalive, called when timeout.
-%%
+%%----------------------------------------------------------------------------
 resume(KeepAlive = #keepalive { socket      = Socket, 
                                 send_oct    = SendOct, 
                                 timeout_sec = TimeoutSec, 
@@ -60,9 +80,9 @@ resume(KeepAlive = #keepalive { socket      = Socket,
             {resumed, KeepAlive#keepalive { send_oct = NewSendOct, timer_ref = NewRef }}
     end.
 
-%%
+%%----------------------------------------------------------------------------
 %% @doc cancel keepalive
-%%
+%%----------------------------------------------------------------------------
 cancel(#keepalive { timer_ref = Ref }) ->
     cancel(Ref);
 cancel(undefined) -> 

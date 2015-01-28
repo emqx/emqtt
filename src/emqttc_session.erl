@@ -35,7 +35,7 @@
         client_id   :: binary(),
         client_pid  :: pid(),
 		message_id  = 1,
-        submap      :: map(),
+        subscriptions  :: map(),
         msg_queue, %% do not receive rel
         awaiting_ack :: map(),
         awaiting_rel :: map(),
@@ -146,7 +146,7 @@ puback(SessState = #session_state{ client_id = ClientId,
 %%--------------------------------------------------------------------
 %% @doc SUBSCRIBE
 %%--------------------------------------------------------------------
-subscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, Topics) ->
+subscribe(SessState = #session_state{client_id = ClientId, subscriptions = SubMap}, Topics) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
     case Resubs of
         [] -> ok;
@@ -154,12 +154,12 @@ subscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, Top
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
     %%TODO: should be gen_event and notification...
-    {ok, SessState#session_state{submap = SubMap1}}.%, GrantedQos}.
+    {ok, SessState#session_state{subscriptions = SubMap1}}.%, GrantedQos}.
 
 %%--------------------------------------------------------------------
 %% @doc UNSUBSCRIBE
 %%--------------------------------------------------------------------
-unsubscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, Topics) ->
+unsubscribe(SessState = #session_state{client_id = ClientId, subscriptions = SubMap}, Topics) ->
     %%TODO: refactor later.
     case Topics -- maps:keys(SubMap) of
         [] -> ok;
@@ -167,7 +167,7 @@ unsubscribe(SessState = #session_state{client_id = ClientId, submap = SubMap}, T
     end,
     %%unsubscribe from topic tree
     SubMap1 = lists:foldl(fun(Topic, Acc) -> maps:remove(Topic, Acc) end, SubMap, Topics),
-    {ok, SessState#session_state{submap = SubMap1}}.
+    {ok, SessState#session_state{subscriptions = SubMap1}}.
 
 %store message(qos1) that sent to client
 store(SessState = #session_state{ message_id = MsgId, awaiting_ack = Awaiting}, 
@@ -184,7 +184,7 @@ store(SessState = #session_state{ message_id = MsgId, awaiting_ack = Awaiting},
 
 initial_state(ClientId) ->
     #session_state { client_id  = ClientId,
-                     submap     = #{}, 
+                     subscriptions     = #{}, 
                      awaiting_ack = #{},
                      awaiting_rel = #{},
                      awaiting_comp = #{} }.
