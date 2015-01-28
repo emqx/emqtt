@@ -28,7 +28,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([initial_state/0,
+-export([init/0,
          parse_opts/2,
          set_socket/2,
          client_id/1]).
@@ -66,19 +66,6 @@
 
 -export_type([proto_state/0]).
 
-%%----------------------------------------------------------------------------
-
--ifdef(use_specs).
-
--type(proto_state() :: #proto_state{}).
-
--spec(send_message({pid() | tuple(), mqtt_message()}, proto_state()) -> {ok, proto_state()}).
-
--spec(handle_packet(mqtt_packet(), atom(), proto_state()) -> {ok, proto_state()} | {error, any()}). 
-
--endif.
-
-%%----------------------------------------------------------------------------
 
 -define(PACKET_TYPE(Packet, Type), 
     Packet = #mqtt_packet { header = #mqtt_packet_header { type = Type }}).
@@ -87,14 +74,13 @@
 
 -define(DEFAULT_KEEPALIVE, 60).
 
-initial_state() ->
-	#proto_state {
+init() ->
+	#proto_state{
         proto_ver   = ?MQTT_PROTO_V311,
         proto_name  = <<"MQTT">>,
         clean_sess  = false,
         keep_alive  = ?DEFAULT_KEEPALIVE,
-        will        = #mqtt_message{}
-	}. 
+        will        = #mqtt_message{} }. 
 
 parse_opts(ProtoState, []) ->
     ProtoState;
@@ -166,6 +152,9 @@ send_ping(ProtoState, ping) ->
     send_packet(make_packet(?PINGREQ), ProtoState).
 
 %%CONNECT – Client requests a connection to a Server
+
+
+-spec handle_packet(mqtt_packet(), atom(), proto_state()) -> {ok, proto_state()} | {error, any()}.
 handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session = Session}) ->
     %%create or resume session
 	{ok, State};
@@ -277,6 +266,8 @@ make_packet(?CONNECT, ProtoState = #proto_state{ client_id = ClientId,
 
 
 %% qos0 message
+
+-spec send_message({pid() | tuple(), mqtt_message()}, proto_state()) -> {ok, proto_state()}.
 send_message({_From, Message = #mqtt_message{ qos = ?QOS_0 }}, State) ->
 	send_packet(emqttc_message:to_packet(Message), State);
 

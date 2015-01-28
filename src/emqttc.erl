@@ -22,12 +22,13 @@
 -module(emqttc).
 
 -author('feng@emqtt.io').
-
 -author('hiroe.orz@gmail.com').
 
 -behavior(gen_fsm).
 
 -include("emqttc_packet.hrl").
+
+-import(proplists, [get_value/2, get_value/3]).
 
 %% start application.
 -export([start/0]).
@@ -36,13 +37,12 @@
 -export([start_link/0, start_link/1, start_link/2]).
 
 %api
--export([connect/1,
-         subscribe/2, 
-         unsubscribe/2, 
+-export([connect/2,
+         subscribe/2, subscribe/3,
+         unsubscribe/2,
          publish/3, publish/4, 
          ping/1,
-         disconnect/1
-        ]).
+         disconnect/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -53,144 +53,113 @@
          terminate/3]).
 
 % fsm state
--export([connecting/2, connecting/3, 
-         waiting_for_connack/2, 
+-export([ready/2, ready/3,
+         connecting/2, connecting/3,
+         waiting_for_connack/2, waiting_for_connack/3,
          connected/2, connected/3,
          disconnected/2, disconnected/3]).
 
-%%----------------------------------------------------------------------------
-
--ifdef(use_specs).
-
 -type mqttc_opt()   :: {host, inet:ip_address() | binary() | string} 
-                     | {port, inet:port_number}
+                     | {port, inet:port_number()}
                      | {client_id, binary()}
                      | {clean_sess, boolean()}
                      | {keep_alive, non_neg_integer()}
-                     | {proto_vsn, mqtt_vsn()},
-                     | {username, binary()},
-                     | {password, binary()},
+                     | {proto_vsn, mqtt_vsn()}
+                     | {username, binary()}
+                     | {password, binary()}
                      | {will_topic, binary()}
-                     | {will_msg, binary()},
-                     | {will_qos, mqtt_qos()},
-                     | {will_retain, boolean()}.
+                     | {will_msg, binary()}
+                     | {will_qos, mqtt_qos()}
+                     | {will_retain, boolean()}
+                     | {logger, atom() | {atom(), atom()}}
+                     | {auto_connect, boolean()} 
+                     | {reconnector, emqttc_reconnector:reconnector() | false}.
 
 -type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
 
--spec start() -> ok.
 
--spec start_link() -> {ok, Client} | ignore | {error, any()} when
-      Client    :: pid().
-
--spec start_link(MqttOpts) -> {ok, Client} | ignore | {error, any()} when 
-      MqttOpts  :: [mqttc_opt()],
-      Client    :: pid().
-
--spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
-      Name      :: atom(),
-      MqttOpts  :: [mqttc_opt()].
-
-%%TODO: need this?
--spec connect(Client) -> ok when
-      Client    :: pid() | atom().
-
--spec publish(Client, Topic, Payload) -> ok | {ok, MsgId} when
-      Client    :: pid() | atom(),
-      Topic     :: binary(),
-      Payload   :: binary(),
-      MsgId     :: mqtt_packet_id().
-
--spec publish(Client, Topic, Payload, PubOpts) -> ok | {ok, MsgId} when
-      Client    :: pid() | atom(),
-      Topic     :: binary(),
-      Payload   :: binary(),
-      PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
-      MsgId     :: mqtt_packet_id().
-
--spec publish(Client, Message) -> ok | {ok, MsgId} when
-      Client    :: pid() | atom(),
-      Message   :: mqtt_message(),
-      MsgId     :: mqtt_packet_id().
-
--spec subscribe(Client, Topics) -> ok when
-      Client    :: pid() | atom(),
-      Topics    :: [ {binary(), mqtt_qos()} ] | {binary(), mqtt_qos()}.
-
--spec subscribe(Client, Topic, Qos) -> ok when
-      Client    :: pid() | atom(),
-      Topic     :: binary(),
-      Qos       :: mqtt_qos().
-
--spec unsubscribe(Client, Topics) -> ok when
-      Client    :: pid() | atom(),
-      Topics    :: [ binary() ] | binary().
-
--spec ping(Client) -> pong when Client :: pid() | atom().
-
--spec disconnect(Client) -> ok when Client :: pid() | atom().
-
--endif.
-
-%%----------------------------------------------------------------------------
-
--record(state, {name           :: atom(),
-                host           :: inet:ip_address() | string(), 
-                port           :: inet:port_number(), 
-                socket         :: gen_tcp:socket(), 
-                parse_state    :: none | fun(),
-                proto_state    :: emqttc_protocol:proto_state(),
-                subscribers    :: map(),
-                logger         :: gen_logger:logmod(),
-                auto_connect   :: boolean(),
-                reconnect      :: false | emqttc_reconnect:reconnect() }).
+-record(state, {name                :: atom(),
+                host = "localhost"  :: inet:ip_address() | string(), 
+                port = 1883         :: inet:port_number(), 
+                socket              :: inet:socket(), 
+                parse_state         :: none | fun(),
+                proto_state         :: emqttc_protocol:proto_state(),
+                subscribers         :: map(),
+                pending             :: list(),
+                logger              :: gen_logger:logmod(),
+                auto_connect = true :: boolean(),
+                reconnector         :: false | emqttc_reconnector:reconnector()}).
 
 %%--------------------------------------------------------------------
 %% @doc Start emqttc application
 %%--------------------------------------------------------------------
+-spec start() -> ok.
 start() ->
     application:start(emqttc).
 
 %%--------------------------------------------------------------------
 %% @doc Start emqttc client with default options.
 %%--------------------------------------------------------------------
+-spec start_link() -> {ok, Client :: pid()} | ignore | {error, any()}. 
 start_link() ->
     start_link([]).
 
 %%--------------------------------------------------------------------
 %% @doc Start emqttc client with options.
 %%--------------------------------------------------------------------
+-spec start_link(MqttOpts) -> {ok, Client} | ignore | {error, any()} when 
+      MqttOpts  :: [mqttc_opt()],
+      Client    :: pid().
 start_link(MqttOpts) when is_list(MqttOpts) ->
     gen_fsm:start_link(?MODULE, [undefined, MqttOpts], []).
 
 %%--------------------------------------------------------------------
 %% @doc Start emqttc client with name, options.
 %%--------------------------------------------------------------------
+-spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
+      Name      :: atom(),
+      MqttOpts  :: [mqttc_opt()].
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
     gen_fsm:start_link({local, Name}, ?MODULE, [Name, MqttOpts], []).
 
 %%--------------------------------------------------------------------
 %% @doc Connect to broker.
 %%--------------------------------------------------------------------
-connect(Client) ->
-    gen_fsm:send_event(Client, connect).
+-spec connect(Client, MqttOpts) -> ok when
+      Client    :: pid() | atom(),
+      MqttOpts  :: [mqttc_opt()].
+connect(Client, MqttOpts) ->
+    gen_fsm:send_event(Client, {connect, MqttOpts}).
 
 %%--------------------------------------------------------------------
 %% @doc Publish message to broker with default qos.
 %%--------------------------------------------------------------------
+-spec publish(Client, Topic, Payload) -> ok | {ok, MsgId} when
+      Client    :: pid() | atom(),
+      Topic     :: binary(),
+      Payload   :: binary(),
+      MsgId     :: mqtt_packet_id().
 publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{topic = Topic, payload = Payload}).
 
 %%--------------------------------------------------------------------
 %% @doc Publish message to broker with qos or opts.
 %%--------------------------------------------------------------------
-publish(Client, Topic, Payload, QoS) when is_binary(Topic), is_binary(Payload), is_integer(QoS) ->
-    publish(Client, Topic, Payload, [{qos, QoS}]);
-
+-spec publish(Client, Topic, Payload, PubOpts) -> ok | {ok, MsgId} when
+      Client    :: pid() | atom(),
+      Topic     :: binary(),
+      Payload   :: binary(),
+      PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
+      MsgId     :: mqtt_packet_id().
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{qos = proplists:get_value(qos, PubOpts, ?QOS_0), 
                                   retain = proplists:get_value(retain, PubOpts, false), 
                                   topic = Topic, payload = Payload }).
 
+-spec publish(Client, Message) -> ok | {ok, MsgId} when
+      Client    :: pid() | atom(),
+      Message   :: mqtt_message(),
+      MsgId     :: mqtt_packet_id().
 publish(Client, Msg = #mqtt_message{qos = ?QOS_0}) ->
     gen_fsm:send_event(Client, {publish, Msg});
 
@@ -201,38 +170,50 @@ publish(Client, Msg = #mqtt_message{qos = ?QOS_2}) ->
     gen_fsm:sync_send_event(Client, {publish, Msg}).
 
 %%--------------------------------------------------------------------
-%% @doc Subscribe topics or topic with qos0.
+%% @doc Subscribe topics or topic.
 %%--------------------------------------------------------------------
+-spec subscribe(Client, Topics) -> ok when
+      Client    :: pid() | atom(),
+      Topics    :: [{binary(), mqtt_qos()}] | {binary(), mqtt_qos()} | binary().
 subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, [{Topic, ?QOS_0}]);
-
+subscribe(Client, {Topic, QoS}) when is_binary(Topic) ->
+    subscribe(Client, [{Topic, QoS}]);
 subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qos) ->
     gen_fsm:send_event(Client, {subscribe, self(), Topics}).
 
 %%--------------------------------------------------------------------
 %% @doc Subscribe topic with qos.
 %%--------------------------------------------------------------------
+-spec subscribe(Client, Topic, Qos) -> ok when
+      Client    :: pid() | atom(),
+      Topic     :: binary(),
+      Qos       :: mqtt_qos().
 subscribe(Client, Topic, Qos) when is_binary(Topic), ?IS_QOS(Qos) ->
     subscribe(Client, [{Topic, Qos}]).
 
 %%--------------------------------------------------------------------
 %% @doc Unsubscribe topics
 %%--------------------------------------------------------------------
+-spec unsubscribe(Client, Topics) -> ok when
+      Client    :: pid() | atom(),
+      Topics    :: [binary()] | binary().
+unsubscribe(Client, Topic) when is_binary(Topic) ->
+    unsubscribe(Client, [Topic]);
 unsubscribe(Client, [Topic | _] = Topics) when is_binary(Topic) ->
     gen_fsm:send_event(Client, {unsubscribe, Topics}).
 
 %%--------------------------------------------------------------------
 %% @doc Send ping to broker.
 %%--------------------------------------------------------------------
+-spec ping(Client) -> pong when Client :: pid() | atom().
 ping(Client) ->
-    gen_fsm:send_event(Client, ping).
-
-sync_ping(Client) ->
     gen_fsm:sync_send_event(Client, ping).
 
 %%--------------------------------------------------------------------
 %% @doc Disconnect from broker.
 %%--------------------------------------------------------------------
+-spec disconnect(Client) -> ok when Client :: pid() | atom().
 disconnect(Client) ->
     gen_fsm:send_event(Client, disconnect).
 
@@ -253,13 +234,13 @@ disconnect(Client) ->
 %%                     {stop, StopReason}.
 %%--------------------------------------------------------------------
 init([undefined, MqttOpts]) ->
-    init([self(), MqttOpts]);
+    init([pid_to_list(self()), MqttOpts]);
 
 init([Name, MqttOpts]) ->
 
-    Logger = gen_logger:new(proplists:get_value(logger, MqttOpts, {stdout, debug})),
+    Logger = gen_logger:new(get_value(logger, MqttOpts, {stdout, debug})),
 
-    case proplists:get_value(client_id, MqttOpts) of
+    case get_value(client_id, MqttOpts) of
         undefined -> Logger:warning("ClientId is NULL!");
         _ -> ok
     end,
@@ -273,9 +254,11 @@ init([Name, MqttOpts]) ->
                                proto_state  = ProtoState,
                                logger       = Logger,
                                auto_connect = true,
-                               reconnect    = false }, MqttOpts),
-    
-    {ok, connecting, State, 0}.
+                               reconnector  = false }, MqttOpts),
+    case State#state.auto_connect of
+        true -> {ok, connecting, State, 0};
+        false -> {ok, ready, State}
+    end.
 
 parse_opts(State, []) ->
     State;
@@ -288,24 +271,36 @@ parse_opts(State, [{logger, Cfg} | Opts]) ->
 parse_opts(State, [{auto_connect, Auto} | Opts]) when is_boolean(Auto) ->
     parse_opts(State#state{auto_connect = Auto}, Opts);
 parse_opts(State, [{reconnect, false} | Opts]) ->
-    parse_opts(State#state{reconnect = false}, Opts);
+    parse_opts(State#state{reconnector = false}, Opts);
 parse_opts(State, [{reconnect, Interval} | Opts]) when is_integer(Interval) ->
-    parse_opts(State#state{reconnect = emqttc_reconnect:new(Interval)}, Opts);
+    parse_opts(State#state{reconnector = emqttc_reconnector:new(Interval)}, Opts);
 parse_opts(State, [{reconnect, {Interval, MaxRetries}} | Opts]) when is_integer(Interval) ->
-    parse_opts(State#state{reconnect = emqttc_reconnect:new(Interval, MaxRetries)}, Opts);
+    parse_opts(State#state{reconnector = emqttc_reconnector:new(Interval, MaxRetries)}, Opts);
 parse_opts(State, [_Opt | Opts]) ->
     parse_opts(State, Opts).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Message Handler for state that wait for connect request
+%%--------------------------------------------------------------------
+ready({connect, MqttOpts}, State) ->
+    NewState = parse_opts(State, MqttOpts),
+    connect(NewState);
+ready(_Event, State) ->
+    {next_state, ready, State}.
+ready(_Event, _From, State) ->
+    {reply, {error, not_connect}, ready, State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Message Handler for state that connecting to MQTT broker.
 %%--------------------------------------------------------------------
 connecting(timeout, State) ->
-    connect_broker(State);
+    connect(State);
 
-connecting(Event, State = #state{logger = Logger}) ->
-    Logger:warning("[CONNECTING] Unexpected event: ~p", [Event]),
-    {next_state, connecting, State}.
+connecting(Event, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s] Unexpected event: ~p", [Name, Event]),
+    {next_state, connecting, pending(Event, connecting, State)}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -314,54 +309,28 @@ connecting(Event, State = #state{logger = Logger}) ->
 connecting(_Event, _From, State) ->
     {reply, {error, connecting}, connecting, State}.
 
-connect_broker(State = #state{name = Name, 
-                       host = Host, port = Port, 
-                       proto_state = ProtoState,
-                       socket = undefined, 
-                       logger = Logger }) ->
-
-    io:format("Host: ~s:~p~n", [Host, Port]),
-    Logger:info("[Client ~p]: connecting to ~p:~p", [Name, Host, Port]),
-    case emqttc_socket:connect(Host, Port) of
-        {ok, Socket} ->
-            ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
-            emqttc_protocol:send_connect(ProtoState1),
-            Logger:info("[Client ~p]: connected with ~p:~p", [Name, Host, Port]),
-            {next_state, waiting_for_connack, State#state{socket = Socket, 
-                                                          parse_state = emqttc_packet:initial_state(), 
-                                                          proto_state = ProtoState1} };
-        {error, Reason} ->
-            Logger:info("[Client ~p] connection failure: ~p", [Name, Reason]),
-            schedule(reconnect, State),
-            {next_state, disconnected, State} 
-    end.
-
-schedule(reconnect, State) ->
-    erlang:send_after(5000, self(), {reconnect, 'TODO'}).
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Message Handler for state that waiting_for_connack from MQTT broker.
 %%--------------------------------------------------------------------
-waiting_for_connack({subscribe, From, NewTopics}, State=#state{} ) ->
-    %%TODO:...
-    %NewState = State#state{topics = Topics ++ NewTopics},
-    {next_state, waiting_for_connack, State};    
+waiting_for_connack(Event, State) ->
+    {next_state, waiting_for_connack, pending(Event, waiting_for_connack, State)}.
 
-waiting_for_connack(Event, State = #state{ name = Name, logger = Logger }) ->
-    Logger:warning("[Client ~p waiting_for_connack] unexpected event: ~p", [Name, Event]),
-    {next_state, waiting_for_connack, State}.
+waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger }) ->
+    Logger:warning("[Client ~s] Unexpected event: ~p", [Name, Event]),
+    {next_state, waiting_for_connack, pending(Event, waiting_for_connack, State)}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Message Handler for state that connected to MQTT broker.
 %%--------------------------------------------------------------------
 connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
-    emqttc_protocol:send_publish(ProtoState, Msg),
+    emqttc_protocol:publish(ProtoState, Msg),
     {next_state, connected, State};
 
 connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
                                                      proto_state = ProtoState }) ->
-    emqttc_protocol:send_subscribe(ProtoState, Topics),
+    emqttc_protocol:subscribe(ProtoState, Topics),
     %%TODO: Monitor subs.
     Subscribers1 =
     lists:foldl(
@@ -382,7 +351,7 @@ connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
 connected({unsubscribe, From, Topics}, State=#state{ subscribers = Subscribers, 
                                                      proto_state = ProtoState, 
                                                      logger = Logger}) ->
-    emqttc_protocol:send_unsubscribe(ProtoState, Topics),
+    emqttc_protocol:unsubscribe(ProtoState, Topics),
     %%TODO: UNMONITOR
     Subscribers1 = 
     lists:foldl(fun(Topic, Acc) ->
@@ -396,37 +365,37 @@ connected({unsubscribe, From, Topics}, State=#state{ subscribers = Subscribers,
                 end, Subscribers, Topics),
     {next_state, connected, State#state{ subscribers= Subscribers1 }};
 
-connected(disconnect, State=#state{proto_state = ProtoState}) ->
-    emqttc_protocol:send_disconnect(ProtoState),
+connected(disconnect, State=#state{socket = Socket, proto_state = ProtoState}) ->
+    emqttc_protocol:disconnect(ProtoState),
+    emqttc_socket:close(Socket),
     %%TODO: close socket?
     %%
-    {next_state, connected, State#state{socket = undefined}};
+    %%TODO: STOP normal
+    {stop, normal, State#state{socket = undefined}};
 
 connected(Event, State = #state{name = Name, logger = Logger}) -> 
-    Logger:warning("[Client ~p | CONNECTED] unexpected event: ~p", [Name, Event]),
+    Logger:error("[Client ~p | CONNECTED] unexpected event: ~p", [Name, Event]),
     {next_state, connected, State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc Sync Message Handler for state that connected to MQTT broker.
 %%--------------------------------------------------------------------
-connected({publish, Msg}, From, State = #state{proto_state = ProtoState}) ->
-    {ok, MsgId, ProtoState} = emqttc_protocol:send_publish(ProtoState, Msg),
-    %%TODO: right?
+connected({publish, Msg}, _From, State = #state{proto_state = ProtoState}) ->
+    {ok, MsgId, ProtoState} = emqttc_protocol:publish(ProtoState, Msg),
     {reply, {ok, MsgId}, connected, State};
 
-connected(ping, From, State = #state{proto_state = ProtoState}) ->
-    emqttc_protocol:send_ping(ProtoState, ping),
+connected(ping, _From, State = #state{proto_state = ProtoState}) ->
+    emqttc_protocol:ping(ProtoState, ping),
     %%TODO: response to From
     {reply, pong, connected, State};
-    %{next_state, connected, State};
 
 connected(Event, _From, State = #state { name = Name, logger = Logger }) ->
-    Logger:warning("[Clieng ~p] unexpected event: ~p", [Name, Event]),
+    Logger:error("[Clieng ~p] unexpected event: ~p", [Name, Event]),
     {reply, {error, unsupport}, connected, State}.
 
 disconnected(Event, State = #state{logger = Logger}) ->
-    Logger:warning("bad event: ~p", [Event]),
+    Logger:error("bad event: ~p", [Event]),
     {next_state, disconnected, State}.
 
 disconnected(Event, _From, State = #state{logger = Logger}) ->
@@ -548,6 +517,39 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+connect(State = #state{name = Name, 
+                       host = Host, port = Port, 
+                       proto_state = ProtoState,
+                       socket = undefined, 
+                       logger = Logger }) ->
+    Logger:info("[Client ~s]: connecting to ~p:~p", [Name, Host, Port]),
+    case emqttc_socket:connect(Host, Port) of
+        {ok, Socket} ->
+            ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
+            emqttc_protocol:send_connect(ProtoState1),
+            Logger:info("[Client ~p]: connected with ~p:~p", [Name, Host, Port]),
+            {next_state, waiting_for_connack, State#state{socket = Socket, 
+                                                          parse_state = emqttc_packet:initial_state(), 
+                                                          proto_state = ProtoState1} };
+        {error, Reason} ->
+            Logger:info("[Client ~p] connection failure: ~p", [Name, Reason]),
+            schedule(reconnect, State),
+            {next_state, disconnected, State} 
+    end.
+
+pending(Event = {subscribe, _From, _Topics}, _StateName, State = #state{pending = Pending}) ->
+    State#state{pending = [Event | Pending]};
+
+pending(Event = {publish, _Msg}, _StateName, State = #state{pending = Pending}) ->
+    State#state{pending = [Event | Pending]};
+
+pending(Event, StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s ~s] Unexpected event: ~p", [Name, StateName, Event]),
+    State.
+
+schedule(reconnect, State) ->
+    erlang:send_after(5000, self(), {reconnect, 'TODO'}).
 
 process_received_bytes(<<>>, EventState, State) ->
     {next_state, EventState, State};

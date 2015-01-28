@@ -19,7 +19,7 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %% SOFTWARE.
 %%------------------------------------------------------------------------------
--module(emqttc_reconnect).
+-module(emqttc_reconnector).
 
 -author('feng@emqtt.io').
 
@@ -33,7 +33,7 @@
 
 -define(IS_MAX_RETRIES(Max), (is_integer(Max) orelse Max =:= infinity)).
 
--record(reconnect, {
+-record(reconnector, {
           min_interval  = ?MIN_INTERVAL, 
           max_interval  = ?MAX_INTERVAL,
           max_retries   = infinity, 
@@ -45,9 +45,9 @@
 
 -ifdef(use_specs).
 
--type reconnect() :: #reconnect{}.
+-type reconnector() :: #reconnector{}.
 
--export_type([reconnect/0]).
+-export_type([reconnector/0]).
 
 %%TODO:...
 -spec new() -> reconnect().
@@ -82,16 +82,16 @@ new({Interval, MaxRetries}) when is_integer(Interval), ?IS_MAX_RETRIES(MaxRetrie
     new(Interval, MaxRetries).
 
 new(Interval, MaxRetries) when is_integer(Interval), ?IS_MAX_RETRIES(MaxRetries) ->
-    #reconnect{ min_interval = Interval, max_retries = MaxRetries }.
+    #reconnector{ min_interval = Interval, max_retries = MaxRetries }.
 
 %%----------------------------------------------------------------------------
 %% @doc execute reconnect 
 %%----------------------------------------------------------------------------
-execute(#reconnect{retries = Retries, max_retries = MaxRetries}, _TimoutMsg) when 
+execute(#reconnector{retries = Retries, max_retries = MaxRetries}, _TimoutMsg) when 
     MaxRetries =/= infinity andalso (Retries > MaxRetries) ->
     {stop, retries_exhausted};
 
-execute(Reconn=#reconnect{min_interval = MinInterval, 
+execute(Reconn=#reconnector{min_interval = MinInterval, 
                           max_interval = MaxInterval, 
                           interval     = Interval, 
                           retries      = Retries,
@@ -106,14 +106,14 @@ execute(Reconn=#reconnect{min_interval = MinInterval,
         true -> Interval1
     end,
     NewTimer = erlang:send_after(Interval2, self(), TimeoutMsg),
-    {ok, Reconn#reconnect{ interval = Interval2, retries = Retries+1, timer = NewTimer }}.
+    {ok, Reconn#reconnector{ interval = Interval2, retries = Retries+1, timer = NewTimer }}.
     
 %%----------------------------------------------------------------------------
 %% @doc reset reconnect
 %%----------------------------------------------------------------------------
-reset(Reconn = #reconnect{min_interval = MinInterval, timer = Timer}) ->
+reset(Reconn = #reconnector{min_interval = MinInterval, timer = Timer}) ->
     cancel(Timer),
-    Reconn#reconnect{interval = MinInterval, retries = 0, timer = undefined}.
+    Reconn#reconnector{interval = MinInterval, retries = 0, timer = undefined}.
 
 cancel(undefined) ->ok;
 cancel(Timer) when is_reference(Timer) -> erlang:cancel_timer(Timer).
