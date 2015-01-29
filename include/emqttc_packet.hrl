@@ -177,6 +177,9 @@
 
 -type mqtt_packet() :: #mqtt_packet{}.
 
+-define(PACKET_TYPE(Packet, Type), 
+    Packet = #mqtt_packet{header = #mqtt_packet_header{type = Type}}).
+
 %%------------------------------------------------------------------------------
 %% MQTT Message
 %%------------------------------------------------------------------------------

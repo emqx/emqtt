@@ -24,7 +24,7 @@
 
 -module(emqttc_socket).
 
--export([connect/2]).
+-export([connect/2, send/2, close/1]).
 
 -export([sockname/1, sockname_s/1]).
 
@@ -45,6 +45,12 @@ connect(Host, Port) ->
 	{ok, Sock} -> {ok, Sock};
 	{error, Reason} -> {error, Reason}
     end.
+
+send(Socket, Data) ->
+    erlang:port_command(Socket, Data).
+
+close(Socket) ->
+    gen_tcp:close(Socket).
 
 sockname(Sock) when is_port(Sock) -> inet:sockname(Sock).
 

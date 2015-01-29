@@ -245,8 +245,7 @@ init([Name, MqttOpts]) ->
         _ -> ok
     end,
 
-    ProtoState = emqttc_protocol:parse_opts(
-                   emqttc_protocol:initial_state(), [{logger, Logger} | MqttOpts]),
+    ProtoState = emqttc_protocol:init([{logger, Logger} | MqttOpts]),
     
     State = parse_opts(#state{ name         = Name,
                                host         = "localhost",
