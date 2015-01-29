@@ -324,12 +324,12 @@ waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger })
 %% @doc Message Handler for state that connected to MQTT broker.
 %%--------------------------------------------------------------------
 connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
-    emqttc_protocol:publish(ProtoState, Msg),
+    emqttc_protocol:publish(Msg, ProtoState),
     {next_state, connected, State};
 
 connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
                                                      proto_state = ProtoState }) ->
-    emqttc_protocol:subscribe(ProtoState, Topics),
+    emqttc_protocol:subscribe(Topics, ProtoState),
     %%TODO: Monitor subs.
     Subscribers1 =
     lists:foldl(
@@ -350,7 +350,7 @@ connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
 connected({unsubscribe, From, Topics}, State=#state{ subscribers = Subscribers, 
                                                      proto_state = ProtoState, 
                                                      logger = Logger}) ->
-    emqttc_protocol:unsubscribe(ProtoState, Topics),
+    emqttc_protocol:unsubscribe(Topics, ProtoState),
     %%TODO: UNMONITOR
     Subscribers1 = 
     lists:foldl(fun(Topic, Acc) ->
@@ -381,11 +381,11 @@ connected(Event, State = #state{name = Name, logger = Logger}) ->
 %% @doc Sync Message Handler for state that connected to MQTT broker.
 %%--------------------------------------------------------------------
 connected({publish, Msg}, _From, State = #state{proto_state = ProtoState}) ->
-    {ok, MsgId, ProtoState1} = emqttc_protocol:publish(ProtoState, Msg),
+    {ok, MsgId, ProtoState1} = emqttc_protocol:publish(Msg, ProtoState),
     {reply, {ok, MsgId}, connected, State#state{proto_state = ProtoState1}};
 
 connected(ping, _From, State = #state{proto_state = ProtoState}) ->
-    emqttc_protocol:ping(ProtoState, ping),
+    emqttc_protocol:ping(ProtoState),
     %%TODO: response to From
     {reply, pong, connected, State};
 
@@ -499,7 +499,7 @@ handle_sync_event(stop, _From, _StateName, State) ->
 %% @spec terminate(Reason, StateName, State) -> void()
 %%--------------------------------------------------------------------
 terminate(Reason, _StateName, _State = #state{proto_state = ProtoState}) ->
-    emqttc_protocol:shutdown(ProtoState, Reason),
+    emqttc_protocol:shutdown(Reason, ProtoState),
     ok.
 
 %%--------------------------------------------------------------------
@@ -605,7 +605,7 @@ process_packet(?PINGRESP, _Packet, connected, State = #state{name = Name, logger
 
 process_packet(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
     Logger:info("[~p] RECV: ~p", [Name, Packet]),
-    case emqttc_protocol:handle_packet(Packet, ProtoState) of
+    case emqttc_protocol:handle_packet(Type, Packet, ProtoState) of
         {ok, NewProtoState} ->
             {ok, NewProtoState};
         {error, Error} ->

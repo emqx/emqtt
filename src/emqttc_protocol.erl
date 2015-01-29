@@ -28,7 +28,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([init/0,
+-export([init/1,
          set_socket/2,
          client_id/1]).
 
@@ -37,7 +37,7 @@
          publish/2,
          subscribe/2,
          unsubscribe/2,
-         ping/2,
+         ping/1,
          disconnect/1,
          send/2, 
          handle_packet/3, 
@@ -47,20 +47,19 @@
 %% ------------------------------------------------------------------
 %% Protocol State
 %% ------------------------------------------------------------------
--record(proto_state, {
-          socket,
-          socket_name,
-          proto_ver,
-          proto_name,
-          client_id,
-          clean_sess,
-          keep_alive,
-          will,
-          username,
-          password,
-          session,
-          logger
-}).
+-record(proto_state, {socket,
+                      socket_name,
+                      proto_ver,
+                      proto_name,
+                      client_id,
+                      clean_sess,
+                      keep_alive,
+                      will_flag,
+                      will_msg,
+                      username,
+                      password,
+                      session,
+                      logger}).
 
 -type proto_state() :: #proto_state{}.
 
@@ -68,38 +67,52 @@
 
 -define(KEEPALIVE, 60).
 
+%% ------------------------------------------------------------------
+%% @doc Init Protocol State
+%% ------------------------------------------------------------------
+-spec init(MqttOpts) -> State when
+    MqttOpts :: list(tuple()),
+    State    :: proto_state().
 init(MqttOpts) ->
-	parse_opts(MqttOpts, #proto_state{ client_id   = random_id(),
-                                       proto_ver   = ?MQTT_PROTO_V311,
-                                       proto_name  = <<"MQTT">>,
-                                       clean_sess  = false,
-                                       keep_alive  = ?KEEPALIVE,
-                                       will        = #mqtt_message{} }).
+	init(MqttOpts, #proto_state{ client_id   = random_id(),
+                                 proto_ver   = ?MQTT_PROTO_V311,
+                                 proto_name  = <<"MQTT">>,
+                                 clean_sess  = false,
+                                 keep_alive  = ?KEEPALIVE,
+                                 will_flag   = false,
+                                 will_msg    = #mqtt_message{} }).
 
-parse_opts([], State) ->
+init([], State) ->
     State;
-parse_opts([{client_id, ClientId} | Opts], State) when is_binary(ClientId) ->
-    parse_opts(Opts, State#proto_state {client_id = ClientId}, Opts);
-parse_opts(State, [{clean_sess, CleanSess} | Opts]) when is_boolean(CleanSess) ->
-    parse_opts(Opts, State#proto_state {clean_sess = CleanSess}, Opts);
-parse_opts(State, [{keep_alive, KeepAlive} | Opts]) when is_integer(KeepAlive) ->
-    parse_opts(Opts, State#proto_state {keep_alive = KeepAlive}, Opts);
-parse_opts(State, [{username, Username} | Opts]) when is_binary(Username)->
-    parse_opts(Opts, State#proto_state { username = Username}, Opts);
-parse_opts(State, [{password, Password} | Opts]) when is_binary(Password) ->
-    parse_opts(Opts, State#proto_state { password = Password }, Opts);
-parse_opts(State = #proto_state{will = Will}, [{will_topic, Topic} | Opts]) when is_binary(Topic) ->
-    parse_opts(Opts, State#proto_state{will = Will#mqtt_message{topic = Topic}}, Opts);
-parse_opts(State = #proto_state{will = Will}, [{will_msg, Msg} | Opts]) when is_binary(Msg) ->
-    parse_opts(Opts, State#proto_state{will = Will#mqtt_message{ payload = Msg}}, Opts); %TODO: right?
-parse_opts(State = #proto_state{will = Will}, [{will_qos, Qos} | Opts]) when ?IS_QOS(Qos) ->
-    parse_opts(Opts, State#proto_state{will = Will#mqtt_message{qos = Qos}}, Opts);
-parse_opts(State = #proto_state{will = Will}, [{will_retain, Retain} | Opts]) when is_boolean(Retain) ->
-    parse_opts(Opts, State#proto_state{will = Will#mqtt_message{retain = Retain}}, Opts);
-parse_opts(State, [{logger, Logger} | Opts]) ->
-    parse_opts(Opts, State#proto_state { logger = Logger }, Opts);
-parse_opts([_Opt | Opts], State) ->
-    parse_opts(Opts, State).
+init([{client_id, ClientId} | Opts], State) when is_binary(ClientId) ->
+    init(Opts, State#proto_state{client_id = ClientId});
+init([{clean_sess, CleanSess} | Opts], State) when is_boolean(CleanSess) ->
+    init(Opts, State#proto_state{clean_sess = CleanSess});
+init([{keep_alive, KeepAlive} | Opts], State) when is_integer(KeepAlive) ->
+    init(Opts, State#proto_state{keep_alive = KeepAlive});
+init([{username, Username} | Opts], State) when is_binary(Username)->
+    init(Opts, State#proto_state{ username = Username});
+init([{password, Password} | Opts], State) when is_binary(Password) ->
+    init(Opts, State#proto_state{ password = Password });
+init([{will_msg, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
+    init(Opts, State#proto_state{will_msg = init_willmsg(WillOpts, WillMsg)});
+init([{logger, Logger} | Opts], State) ->
+    init(Opts, State#proto_state { logger = Logger });
+init([_Opt | Opts], State) ->
+    init(Opts, State).
+
+init_willmsg([], WillMsg) ->
+    WillMsg;
+init_willmsg([{topic, Topic} | Opts], WillMsg) when is_binary(Topic) ->
+    init_willmsg(Opts, WillMsg#mqtt_message{topic = Topic});
+init_willmsg([{payload, Payload} | Opts], WillMsg) when is_binary(Payload) ->
+    init_willmsg(Opts, WillMsg#mqtt_message{payload = Payload});
+init_willmsg([{qos, Qos} | Opts], WillMsg) when ?IS_QOS(Qos) ->
+    init_willmsg(Opts, WillMsg#mqtt_message{qos = Qos});
+init_willmsg([{retain, Retain} | Opts], WillMsg) when is_boolean(Retain) ->
+    init_willmsg(Opts, WillMsg#mqtt_message{retain = Retain});
+init_willmsg([_Opt | Opts], State) ->
+    init_willmsg(Opts, State).
 
 random_id() ->
     random:seed(now()),
@@ -114,66 +127,73 @@ set_socket(State, Socket) ->
         socket_name = SockName
     }.
 
-client_id(#proto_state {client_id = ClientId}) -> ClientId.
+client_id(#proto_state{client_id = ClientId}) -> 
+    ClientId.
 
-connect(State = #proto_state{client_id = ClientId,
-                                  proto_ver = ProtoVer, 
-                                  proto_name = ProtoName,
-                                  clean_sess = CleanSess,
-                                  keep_alive = KeepAlive,
-                                  will = Will,
-                                  username = Username,
-                                  password = Password}) ->
+connect(State = #proto_state{client_id  = ClientId,
+                             proto_ver  = ProtoVer, 
+                             proto_name = ProtoName,
+                             clean_sess = CleanSess,
+                             keep_alive = KeepAlive,
+                             will_flag  = WillFlag,
+                             will_msg   = #mqtt_message{qos = WillQos, 
+                                                        retain = WillRetain, 
+                                                        topic = WillTopic, 
+                                                        payload = WillMsg},
+                             username   = Username,
+                             password   = Password}) ->
 
-    #mqtt_message{qos = WillQos, retain = WillRetain, topic = WillTopic, payload = WillMsg} = Will,
 
-    WillFlag = not (WillTopic =:= undefined orelse WillMsg =:= undefined),
+    Connect = #mqtt_packet_connect{client_id  = ClientId,
+                                   proto_ver  = ProtoVer,
+                                   proto_name = ProtoName,
+                                   will_flag  = WillFlag,
+                                   will_retain = WillRetain,
+                                   will_qos    = WillQos,
+                                   clean_sess  = CleanSess,
+                                   keep_alive  = KeepAlive,
+                                   will_topic  = WillTopic,
+                                   will_msg    = WillMsg,
+                                   username    = Username,
+                                   password    = Password},
 
-    ConnectPkt = #mqtt_packet_connect{client_id  = ClientId1,
-                                      proto_ver  = ProtoVer,
-                                      proto_name = ProtoName,
-                                      will_flag  = WillFlag,
-                                      will_retain = WillRetain,
-                                      will_qos    = WillQos,
-                                      clean_sess  = CleanSess,
-                                      keep_alive  = KeepAlive,
-                                      will_topic  = WillTopic,
-                                      will_msg    = WillMsg,
-                                      username    = Username,
-                                      password    = Password},
-
-    send_packet(#mqtt_packet{header = #mqtt_packet_header{type = ?CONNECT}, 
-                             variable = ConnectPkt}, State).
+    send(emqttc_packet:make(?CONNECT, Connect), State).
 
 
 disconnect(State) ->
-    send(State, emqttc_packet:make(?DISCONNECT)).
+    send(emqttc_packet:make(?DISCONNECT), State).
 
 % qos0 sent directly
-publish(State, Message = #mqtt_message{qos = ?QOS_0}) ->
-	send(State, emqttc_message:to_packet(Message));
+publish(Message = #mqtt_message{qos = ?QOS_0}, State) ->
+	send(emqttc_message:to_packet(Message), State);
 
 %% qos1, qos2 messages should be stored first
-publish(State = #proto_state{session = Session}, Message = #mqtt_message{qos = Qos}}) 
+publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{session = Session}) 
     when (Qos =:= ?QOS_1) orelse (Qos =:= ?QOS_2) ->
     {Message1, NewSession} = emqttc_session:store(Session, Message),
 	send(emqttc_message:to_packet(Message1), State#proto_state{session = NewSession}).
 
-subscribe(State, Topics) ->
-    %%FIXME:
-    send(State, emqttc_packet:make(?SUBSCRIBE, {1, Topics})).
+subscribe(Topics, State) ->
+    %FIXME...
+    PacketId = 1,
+    Subscribe = #mqtt_packet_subscribe{packet_id = PacketId, 
+                                       topic_table = Topics},
+    send(emqttc_packet:make(?SUBSCRIBE, Subscribe), State).
 
-unsubscribe(State, Topics) ->
-    send(State, emqttc_packet:make(?UNSUBSCRIBE, Topics)).
+unsubscribe(Topics, State) ->
+    %FIXME...
+    PacketId = 1,
+    Unsubscribe = #mqtt_packet_unsubscribe{packet_id = PacketId,
+                                           topics    = Topics },
+    send(emqttc_packet:make(?UNSUBSCRIBE, Unsubscribe), State).
 
 ping(State) ->
     send(State, emqttc_packet:make(?PINGREQ)).
 
 %%CONNECT – Client requests a connection to a Server
 
--spec handle_packet(mqtt_packet(), atom(), proto_state()) -> {ok, proto_state()} | {error, any()}.
 handle_packet(?CONNACK, Packet = #mqtt_packet {}, State = #proto_state{session = Session}) ->
-    %%create or resume session
+    %%TODO: create or resume session
 	{ok, State};
 
 handle_packet(?PUBLISH, Packet = #mqtt_packet {
@@ -187,30 +207,31 @@ handle_packet(?PUBLISH, Packet = #mqtt_packet {
                                      variable = #mqtt_packet_publish{packet_id = PacketId }}, 
                                  State = #proto_state { session = Session }) ->
     emqttc_session:publish(Session, {?QOS_1, emqttc_message:from_packet(Packet)}),
-    send_packet( make_packet(?PUBACK,  PacketId),  State);
+    send( emqttc_packet:make(?PUBACK,  PacketId),  State);
 
 handle_packet(?PUBLISH, Packet = #mqtt_packet { 
                                      header = #mqtt_packet_header { qos = ?QOS_2 }, 
                                      variable = #mqtt_packet_publish { packet_id = PacketId } }, 
                                  State = #proto_state { session = Session }) ->
     NewSession = emqttc_session:publish(Session, {?QOS_2, emqttc_message:from_packet(Packet)}),
-	send_packet( make_packet(?PUBREC, PacketId), State#proto_state {session = NewSession} );
+	send( emqttc_packet:make(?PUBREC, PacketId), State#proto_state {session = NewSession} );
 
-handle_packet(Puback, #mqtt_packet{variable = ?PUBACK_PACKET(PacketId) }, 
-    State = #proto_state { session = Session }) 
+handle_packet(Puback, #mqtt_packet{variable = Packet }, State = #proto_state{session = Session}) 
     when Puback >= ?PUBACK andalso Puback =< ?PUBCOMP ->
+
+    #mqtt_packet_puback{packet_id = PacketId} = Packet,
 
     NewSession = emqttc_session:puback(Session, {Puback, PacketId}),
     NewState = State#proto_state {session = NewSession},
     if 
         Puback =:= ?PUBREC ->
-            send_packet( make_packet(?PUBREL, PacketId), NewState);
+            send(emqttc_packet:make(?PUBREL, PacketId), NewState);
         Puback =:= ?PUBREL ->
-            send_packet( make_packet(?PUBCOMP, PacketId), NewState);
+            send(emqttc_packet:make(?PUBCOMP, PacketId), NewState);
         true ->
             ok
     end,
-	{ok, NewState};
+	{ok, NewState}.
 
 
 %%

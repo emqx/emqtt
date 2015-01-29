@@ -37,22 +37,17 @@ type_name(Type) when Type > ?RESERVED andalso Type =< ?DISCONNECT ->
 make(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
     #mqtt_packet{header = #mqtt_packet_header{ type = Type } }.
 
-make(?SUBSCRIBE, {PacketId, Topics}) ->
-    #mqtt_packet{header = #mqtt_packet_header{ type = ?SUBSCRIBE },
-                 variable = #mqtt_packet_subscribe{ packet_id = PacketId, 
-                                                    topic_table = Topics }};
-
-make(?UNSUBSCRIBE, {PacketId, Topics}) ->
-    #mqtt_packet{header = #mqtt_packet_header{ type = ?SUBSCRIBE },
-                 variable = #mqtt_packet_unsubscribe{ packet_id = PacketId, 
-                                                      topics    = Topics }};
-
-make(PubAck, PacketId) when PubAck >= ?PUBACK andalso PubAck =< ?PUBCOMP ->
-  #mqtt_packet{header = #mqtt_packet_header{
+make(PubAck, PacketId) when PubAck >= ?PUBACK, PubAck =< ?PUBCOMP, is_integer(PacketId) ->
+    #mqtt_packet{header = #mqtt_packet_header{
                             type = PubAck,
                             qos = puback_qos(PubAck) }, 
-               variable = #mqtt_packet_puback{
-                            packet_id = PacketId }}.
+                 variable = #mqtt_packet_puback{
+                            packet_id = PacketId }};
+
+make(Type, Variable) when Type > ?RESERVED, Type =< ?DISCONNECT ->
+    #mqtt_packet{header   = #mqtt_packet_header{ type = Type },
+                 variable = Variable}.
+
 
 puback_qos(?PUBREL) ->  ?QOS_1;
 puback_qos(_PUBACK) ->  ?QOS_0.
