@@ -53,8 +53,7 @@
          terminate/3]).
 
 % fsm state
--export([ready/2, ready/3,
-         connecting/2, connecting/3,
+-export([connecting/2, connecting/3,
          waiting_for_connack/2, waiting_for_connack/3,
          connected/2, connected/3,
          disconnected/2, disconnected/3]).
@@ -72,19 +71,19 @@
                      | {will_qos, mqtt_qos()}
                      | {will_retain, boolean()}
                      | {logger, atom() | {atom(), atom()}}
-                     | {auto_connect, boolean()} 
                      | {reconnector, emqttc_reconnector:reconnector() | false}.
 
 -type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
 
 
 -record(state, {name                :: atom(),
-                host = "localhost"  :: inet:ip_address() | string(), 
-                port = 1883         :: inet:port_number(), 
-                socket              :: inet:socket(), 
+                host = "localhost"  :: inet:ip_address() | string(),
+                port = 1883         :: inet:port_number(),
+                socket              :: inet:socket(),
                 parse_state         :: none | fun(),
                 proto_state         :: emqttc_protocol:proto_state(),
-                subscribers         :: map(),
+                pubsub_map          :: map(),
+                ping_reqs = []      :: list(), 
                 pending             :: list(),
                 logger              :: gen_logger:logmod(),
                 auto_connect = true :: boolean(),
@@ -152,22 +151,16 @@ publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
       PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
       MsgId     :: mqtt_packet_id().
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
-    publish(Client, #mqtt_message{qos = proplists:get_value(qos, PubOpts, ?QOS_0), 
-                                  retain = proplists:get_value(retain, PubOpts, false), 
-                                  topic = Topic, payload = Payload }).
+    publish(Client, #mqtt_message{qos     = get_value(qos, PubOpts, ?QOS_0),
+                                  retain  = get_value(retain, PubOpts, false),
+                                  topic   = Topic,
+                                  payload = Payload }).
 
--spec publish(Client, Message) -> ok | {ok, MsgId} when
+-spec publish(Client, Message) -> ok when
       Client    :: pid() | atom(),
-      Message   :: mqtt_message(),
-      MsgId     :: mqtt_packet_id().
-publish(Client, Msg = #mqtt_message{qos = ?QOS_0}) ->
-    gen_fsm:send_event(Client, {publish, Msg});
-
-publish(Client, Msg = #mqtt_message{qos = ?QOS_1}) ->
-    gen_fsm:sync_send_event(Client, {publish, Msg});
-
-publish(Client, Msg = #mqtt_message{qos = ?QOS_2}) ->
-    gen_fsm:sync_send_event(Client, {publish, Msg}).
+      Message   :: mqtt_message().
+publish(Client, Msg) when is_record(Msg, mqtt_message) ->
+    gen_fsm:send_event(Client, {publish, Msg}).
 
 %%--------------------------------------------------------------------
 %% @doc Subscribe topics or topic.
@@ -247,48 +240,33 @@ init([Name, MqttOpts]) ->
 
     ProtoState = emqttc_protocol:init([{logger, Logger} | MqttOpts]),
     
-    State = parse_opts(#state{ name         = Name,
-                               host         = "localhost",
-                               port         = 1883,
-                               proto_state  = ProtoState,
-                               logger       = Logger,
-                               auto_connect = true,
-                               reconnector  = false }, MqttOpts),
-    case State#state.auto_connect of
-        true -> {ok, connecting, State, 0};
-        false -> {ok, ready, State}
-    end.
+    State = init(MqttOpts, #state{ name         = Name,
+                                   host         = "localhost",
+                                   port         = 1883,
+                                   proto_state  = ProtoState,
+                                   logger       = Logger,
+                                   reconnector  = false }),
+     {ok, connecting, State, 0}.
 
-parse_opts(State, []) ->
+init([], State) ->
     State;
-parse_opts(State, [{host, Host} | Opts]) ->
-    parse_opts(State#state{host = Host}, Opts);
-parse_opts(State, [{port, Port} | Opts]) ->
-    parse_opts(State#state{port = Port}, Opts);
-parse_opts(State, [{logger, Cfg} | Opts]) ->
-    parse_opts(State#state{logger = gen_logger:new(Cfg)}, Opts);
-parse_opts(State, [{auto_connect, Auto} | Opts]) when is_boolean(Auto) ->
-    parse_opts(State#state{auto_connect = Auto}, Opts);
-parse_opts(State, [{reconnect, false} | Opts]) ->
-    parse_opts(State#state{reconnector = false}, Opts);
-parse_opts(State, [{reconnect, Interval} | Opts]) when is_integer(Interval) ->
-    parse_opts(State#state{reconnector = emqttc_reconnector:new(Interval)}, Opts);
-parse_opts(State, [{reconnect, {Interval, MaxRetries}} | Opts]) when is_integer(Interval) ->
-    parse_opts(State#state{reconnector = emqttc_reconnector:new(Interval, MaxRetries)}, Opts);
-parse_opts(State, [_Opt | Opts]) ->
-    parse_opts(State, Opts).
+init([{host, Host} | Opts], State) ->
+    init(Opts, State#state{host = Host});
+init([{port, Port} | Opts], State) ->
+    init(Opts, State#state{port = Port});
+init([{logger, Cfg} | Opts], State) ->
+    init(Opts, State#state{logger = gen_logger:new(Cfg)});
+init([{reconnect, ReconnOpt} | Opts], State) ->
+    init(Opts, State#state{reconnector = init_reconnector(ReconnOpt)});
+init([_Opt | Opts], State) ->
+    init(Opts, State).
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc Message Handler for state that wait for connect request
-%%--------------------------------------------------------------------
-ready({connect, MqttOpts}, State) ->
-    NewState = parse_opts(State, MqttOpts),
-    connect(NewState);
-ready(_Event, State) ->
-    {next_state, ready, State}.
-ready(_Event, _From, State) ->
-    {reply, {error, not_connect}, ready, State}.
+init_reconnector(false) ->
+    false;
+init_reconnector(Interval) when is_integer(Interval) ->
+    emqttc_reconnector:new(Interval);
+init_reconnector({Interval, MaxRetries}) when is_integer(Interval) -> 
+    emqttc_reconnector:new(Interval, MaxRetries).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -305,7 +283,8 @@ connecting(Event, State = #state{name = Name, logger = Logger}) ->
 %% @private
 %% @doc Sync message Handler for state that connecting to MQTT broker.
 %%--------------------------------------------------------------------
-connecting(_Event, _From, State) ->
+connecting(Event, _From, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s] Unexpected event: ~p", [Name, Event]),
     {reply, {error, connecting}, connecting, State}.
 
 %%--------------------------------------------------------------------
@@ -327,70 +306,71 @@ connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
     emqttc_protocol:publish(Msg, ProtoState),
     {next_state, connected, State};
 
-connected({subscribe, From, Topics}, State = #state{ subscribers = Subscribers,
-                                                     proto_state = ProtoState }) ->
+connected({subscribe, From, Topics}, State = #state{pubsub_map = PubSubMap,
+                                                    proto_state = ProtoState }) ->
     emqttc_protocol:subscribe(Topics, ProtoState),
-    %%TODO: Monitor subs.
-    Subscribers1 =
+    PubSubMap1 =
     lists:foldl(
-        fun(Topic, Acc) ->
-            case maps:find(Topic, Acc) of
+        fun(Topic, Map) ->
+            case maps:find(Topic, Map) of 
                 {ok, Subs} ->
-                    case lists:member(From, Subs) of
-                        true -> Acc;
-                        false -> maps:put(Topic, [From | Subs], Acc)
-                    end;
-
+                    case lists:keyfind(From, 1, Subs) of
+                        {From, _MonRef} -> 
+                            Map;
+                        false -> 
+                            MonRef = erlang:monitor(process, From),
+                            maps:put(Topic, [{From, MonRef}| Subs], Map)
+                    end; 
                 error ->
-                    maps:put(Topic, [From], Acc)
+                    MonRef = erlang:monitor(process, From),
+                    maps:put(Topic, [{From, MonRef}], Map)
             end
-        end, Subscribers, Topics),
-    {next_state, connected, State#state{ subscribers = Subscribers1 }};
+        end, PubSubMap, Topics),
+    {next_state, connected, State#state{ pubsub_map = PubSubMap1 }};
 
-connected({unsubscribe, From, Topics}, State=#state{ subscribers = Subscribers, 
-                                                     proto_state = ProtoState, 
-                                                     logger = Logger}) ->
+connected({unsubscribe, From, Topics}, State=#state{pubsub_map  = PubSubMap, 
+                                                    proto_state = ProtoState}) ->
     emqttc_protocol:unsubscribe(Topics, ProtoState),
-    %%TODO: UNMONITOR
-    Subscribers1 = 
-    lists:foldl(fun(Topic, Acc) ->
-                    case maps:find(Topic, Acc) of
-                        {ok, Subs} ->
-                            maps:put(Topic, lists:delete(From, Subs), Acc);
-                        error ->
-                            Logger:warning("Topic '~s' not exited", [Topic]),
-                            Acc
-                    end
-                end, Subscribers, Topics),
-    {next_state, connected, State#state{ subscribers= Subscribers1 }};
+    PubSubMap1 = 
+    lists:foldl(
+        fun(Topic, Map) ->
+            case maps:find(Topic, Map) of
+                {ok, Subs} ->
+                    case lists:keyfind(From, 1, Subs) of
+                        {From, MonRef} ->
+                            erlang:demonitor(process, MonRef),
+                            maps:put(Topic, lists:keydelete(From, 1, Subs), Map);
+                        false ->
+                            Map
+                    end;
+                error ->
+                    Map
+            end
+        end, PubSubMap, Topics),
+    {next_state, connected, State#state{pubsub_map = PubSubMap1}};
 
 connected(disconnect, State=#state{socket = Socket, proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
     emqttc_socket:close(Socket),
-    %%TODO: close socket?
-    %%
-    %%TODO: STOP normal
     {stop, normal, State#state{socket = undefined}};
 
-connected(Event, State = #state{name = Name, logger = Logger}) -> 
-    Logger:error("[Client ~p | CONNECTED] unexpected event: ~p", [Name, Event]),
+connected(Event, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s/CONNECTED] unexpected event: ~p", [Name, Event]),
     {next_state, connected, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc Sync Message Handler for state that connected to MQTT broker.
-%%--------------------------------------------------------------------
-connected({publish, Msg}, _From, State = #state{proto_state = ProtoState}) ->
-    {ok, MsgId, ProtoState1} = emqttc_protocol:publish(Msg, ProtoState),
-    {reply, {ok, MsgId}, connected, State#state{proto_state = ProtoState1}};
-
-connected(ping, _From, State = #state{proto_state = ProtoState}) ->
+connected(ping, From, State = #state{ping_reqs = PingReqs, proto_state = ProtoState}) ->
     emqttc_protocol:ping(ProtoState),
-    %%TODO: response to From
-    {reply, pong, connected, State};
+    PingReqs1 =
+    case lists:keyfind(From, 1, PingReqs) of
+        {From, _MonRef} ->
+            PingReqs;
+        false ->
+            [{From, erlang:monitor(process, From)} | PingReqs]
+    end,
+    {next_state, connected, State#state{ping_reqs = PingReqs1}};
 
-connected(Event, _From, State = #state { name = Name, logger = Logger }) ->
-    Logger:error("[Clieng ~p] unexpected event: ~p", [Name, Event]),
+connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s/CONNECTED] unexpected event: ~p", [Name, Event]),
     {reply, {error, unsupport}, connected, State}.
 
 disconnected(Event, State = #state{logger = Logger}) ->
