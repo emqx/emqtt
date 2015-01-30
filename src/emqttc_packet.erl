@@ -52,7 +52,7 @@ make(PubAck, PacketId) when PubAck >= ?PUBACK, PubAck =< ?PUBCOMP, is_integer(Pa
                             packet_id = PacketId }};
 
 make(Type, Variable) when Type > ?RESERVED, Type =< ?DISCONNECT ->
-    #mqtt_packet{header   = #mqtt_packet_header{ type = Type },
+    #mqtt_packet{header   = #mqtt_packet_header{type = Type, qos = packet_qos(Type)},
                  variable = Variable}.
 
 

@@ -568,41 +568,26 @@ handle_received_packet(?PACKET_TYPE(Packet, ?CONNACK), waiting_for_connack,
                        State = #state{name = Name, pending = Pending, proto_state = ProtoState, logger = Logger}) ->
     #mqtt_packet_connack{return_code  = ReturnCode} = Packet#mqtt_packet.variable,
     Logger:info("[Client ~s] RECV CONNACK: ~p", [Name, ReturnCode]),
-    {ok, ProtoState1} = emqttc_protocol:handle_connack(ReturnCode, ProtoState),
+    {ok, ProtoState1} = emqttc_protocol:handle_packet(?CONNACK, Packet, ProtoState),
     if 
         ReturnCode =:= ?CONNACK_ACCEPT ->
             [gen_fsm:send_event(self(), Event) || Event <- Pending],
             {ok, connected, State#state{proto_state = ProtoState1}};
         true ->
-            {error, connack_error(ReturnCode), State}
+            {error, emqttc_packet:connack_name(ReturnCode), State}
     end;
 
-handle_received_packet(?PACKET_TYPE(Packet, ?PINGRESP), connected, 
+handle_received_packet(?PACKET_TYPE(_Packet, ?PINGRESP), connected, 
                        State = #state{name = Name, ping_reqs = PingReqs, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: PINGRESP", [Name]),
+    Logger:info("[Client ~s] RECV PINGRESP", [Name]),
     lists:foreach(fun({From, MonRef}) -> 
             erlang:demonitor(process, MonRef),
             gen_fsm:reply(From, pong)       
         end, PingReqs),
     {ok, connected, State#state{ping_reqs = []}};
 
-handle_received_packet(?PACKET_TYPE(Packet, ?PUBLISH), connected, 
-                       State = #state{name = Name, ping_reqs = PingReqs, logger = Logger}) ->
-
-    Logger:info("[~p] RECV: ~p", [Name, emqttc_pPacket]),
-
-(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
-    Logger:info("[~p] RECV: ~p", [Name, Packet]),
-    case emqttc_protocol:handle_packet(Type, Packet, ProtoState) of
-        {ok, NewProtoState} ->
-            {ok, NewProtoState};
-        {error, Error} ->
-            Logger:error("[~p] MQTT protocol error ~p", [Name, Error]),
-            stop({shutdown, Error}, State);
-        {error, Error, ProtoState1} ->
-            stop({shutdown, Error}, State#state{proto_state = ProtoState1});
-        {stop, Reason, ProtoState1} ->
-            stop(Reason, State#state{proto_state = ProtoState1})
-    end.
-
-
+handle_received_packet(?PACKET_TYPE(Packet, Type), connected,
+                       State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
+    Logger:info("[Client ~s] RECV: ~p", [Name, emqttc_packet:dump(Packet)]),
+    {ok, ProtoState1} = emqttc_protocol:handle_packet(Type, Packet, ProtoState),
+    {ok, connected, State#state{proto_state = ProtoState1}}.
