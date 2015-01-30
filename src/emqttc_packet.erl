@@ -24,7 +24,7 @@
 
 -include("emqttc_packet.hrl").
 
--export([protocol_name/1, type_name/1]).
+-export([protocol_name/1, type_name/1, connack_name/1]).
 
 -export([make/1, make/2, dump/1]).
 
@@ -33,6 +33,13 @@ protocol_name(Ver) when Ver =:= ?MQTT_PROTO_V31; Ver =:= ?MQTT_PROTO_V311->
 
 type_name(Type) when Type > ?RESERVED andalso Type =< ?DISCONNECT ->
     lists:nth(Type, ?TYPE_NAMES).
+
+connack_name(?CONNACK_ACCEPT)       -> 'CONNACK_ACCEPT';
+connack_name(?CONNACK_PROTO_VER)    -> 'CONNACK_PROTO_VER';
+connack_name(?CONNACK_INVALID_ID )  -> 'CONNACK_INVALID_ID';
+connack_name(?CONNACK_SERVER)       -> 'CONNACK_SERVER';
+connack_name(?CONNACK_CREDENTIALS)  -> 'CONNACK_CREDENTIALS';
+connack_name(?CONNACK_AUTH)         -> 'CONNACK_AUTH'.
 
 make(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
     #mqtt_packet{header = #mqtt_packet_header{ type = Type } }.

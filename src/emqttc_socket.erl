@@ -26,7 +26,7 @@
 
 -export([connect/2, send/2, close/1]).
 
--export([sockname/1, sockname_s/1]).
+-export([sockname/1, sockname_s/1, setopts/2]).
 
 -define(TIMEOUT, 3000).
 -define(RECONNECT_INTERVAL, 3000).
@@ -36,7 +36,7 @@
                      {packet,    raw}, 
                      {reuseaddr, true}, 
                      {nodelay,   true}, 
-                     {active, 	 true}, 
+                     {active, 	 once}, 
                      {reuseaddr, true}, 
                      {send_timeout,  3000} ]).
 
@@ -51,6 +51,9 @@ send(Socket, Data) ->
 
 close(Socket) ->
     gen_tcp:close(Socket).
+
+setopts(Socket, Opts) ->
+    inet:setopts(Socket, Opts).
 
 sockname(Sock) when is_port(Sock) -> inet:sockname(Sock).
 

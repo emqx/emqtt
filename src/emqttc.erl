@@ -24,8 +24,6 @@
 -author('feng@emqtt.io').
 -author('hiroe.orz@gmail.com').
 
--behavior(gen_fsm).
-
 -include("emqttc_packet.hrl").
 
 -import(proplists, [get_value/2, get_value/3]).
@@ -33,16 +31,17 @@
 %% start application.
 -export([start/0]).
 
-%start one mqtt client
+%% start one mqtt client
 -export([start_link/0, start_link/1, start_link/2]).
 
-%api
--export([connect/2,
-         subscribe/2, subscribe/3,
-         unsubscribe/2,
+%% api
+-export([subscribe/2, subscribe/3,
          publish/3, publish/4, 
+         unsubscribe/2,
          ping/1,
          disconnect/1]).
+
+-behavior(gen_fsm).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -52,7 +51,7 @@
          code_change/4, 
          terminate/3]).
 
-% fsm state
+%% fsm state
 -export([connecting/2, connecting/3,
          waiting_for_connack/2, waiting_for_connack/3,
          connected/2, connected/3,
@@ -85,8 +84,8 @@
                 pubsub_map          :: map(),
                 ping_reqs = []      :: list(), 
                 pending             :: list(),
+                keepalive           :: emqttc_keepalive:keepalive(),
                 logger              :: gen_logger:logmod(),
-                auto_connect = true :: boolean(),
                 reconnector         :: false | emqttc_reconnector:reconnector()}).
 
 %%--------------------------------------------------------------------
@@ -120,15 +119,6 @@ start_link(MqttOpts) when is_list(MqttOpts) ->
       MqttOpts  :: [mqttc_opt()].
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
     gen_fsm:start_link({local, Name}, ?MODULE, [Name, MqttOpts], []).
-
-%%--------------------------------------------------------------------
-%% @doc Connect to broker.
-%%--------------------------------------------------------------------
--spec connect(Client, MqttOpts) -> ok when
-      Client    :: pid() | atom(),
-      MqttOpts  :: [mqttc_opt()].
-connect(Client, MqttOpts) ->
-    gen_fsm:send_event(Client, {connect, MqttOpts}).
 
 %%--------------------------------------------------------------------
 %% @doc Publish message to broker with default qos.
@@ -355,7 +345,7 @@ connected(disconnect, State=#state{socket = Socket, proto_state = ProtoState}) -
     {stop, normal, State#state{socket = undefined}};
 
 connected(Event, State = #state{name = Name, logger = Logger}) ->
-    Logger:error("[Client ~s/CONNECTED] unexpected event: ~p", [Name, Event]),
+    Logger:error("[Client ~s/CONNECTED] Unexpected Event: ~p", [Name, Event]),
     {next_state, connected, State}.
 
 connected(ping, From, State = #state{ping_reqs = PingReqs, proto_state = ProtoState}) ->
@@ -370,14 +360,15 @@ connected(ping, From, State = #state{ping_reqs = PingReqs, proto_state = ProtoSt
     {next_state, connected, State#state{ping_reqs = PingReqs1}};
 
 connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
-    Logger:error("[Client ~s/CONNECTED] unexpected event: ~p", [Name, Event]),
+    Logger:error("[Client ~s/CONNECTED] Unexpected Event: ~p", [Name, Event]),
     {reply, {error, unsupport}, connected, State}.
 
-disconnected(Event, State = #state{logger = Logger}) ->
-    Logger:error("bad event: ~p", [Event]),
+disconnected(Event, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s/CONNECTED] Unexpected Event: ~p", [Name, Event]),
     {next_state, disconnected, State}.
 
-disconnected(Event, _From, State = #state{logger = Logger}) ->
+disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("Client ~s/CONNECTED] Unexpected event ~p", [Name, Event]),
     {reply, {error, disonnected}, disconnected, State}.
     
 %%--------------------------------------------------------------------
@@ -394,40 +385,54 @@ disconnected(Event, _From, State = #state{logger = Logger}) ->
 %%--------------------------------------------------------------------
 
 %% connack message from broker(without remaining length).
-handle_info({tcp, Socket, Data}, EventState, State = #state{name = Name, 
-                                                            socket = Socket, 
-                                                            logger = Logger}) ->
+handle_info({tcp, Socket, Data}, StateName, State = #state{name = Name, 
+                                                           socket = Socket, 
+                                                           logger = Logger}) ->
+    emqttc_socket:setopts(Socket, [{active, once}]),
+    Logger:debug("[Client ~s/~s] RECV: ~p", [Name, StateName, Data]),
+    process_received_bytes(Data, StateName, State);
 
-    Logger:debug("[~p ~s] RECV: ~p", [Name, EventState, Data]),
-    process_received_bytes(Data, EventState, State);
-
-handle_info({tcp, error, Reason}, _, State = #state{logger = Logger}) ->
-    Logger:error("Tcp error: ~p", [Reason]),
+handle_info({tcp, error, Reason}, StateName, State = #state{name = Name, logger = Logger}) ->
     %TODO: Reconnect??
-    {next_state, disconnected, State};
+    Logger:error("[Client ~s/~s] TCP Error: ~p", [Name, StateName, Reason]),
+    {next_state, StateName, State};
 
-handle_info({tcp_closed, Socket}, _, State = #state{logger = Logger, socket = Socket}) ->
-    %%TODO: Reconnect
-    Logger:warning("tcp_closed state goto disconnected"),
-    {next_state, disconnected, State#state{socket = undefined}};
+handle_info({tcp_closed, Socket}, StateName, State = #state{name = Name, socket = Socket, reconnector = Reconnector, logger = Logger}) ->
+    Logger:error("[Client ~s/~s] TCP Closed.", [Name, StateName]),
+    case Reconnector of
+        false -> {stop, {shutdown, tcp_closed}, State};
+        _ -> 
+            case emqttc_reconnector:execute(Reconnector, {timeout, reconnect}) of
+                {stop, _} -> 
+                    {stop, {shutdown, tcp_closed}, State};
+                {ok, Reconnector1} -> 
+                    {next_state, disconnected, State#state{socket = undefined,
+                                                           reconnector = Reconnector1}}
+            end
+    end;
 
-handle_info({timeout, reconnect}, connecting, S) ->
-    io:format("connect(handle_info)~n"),
-    connect(S);
+handle_info({reconnect, timeout}, disconnected, State = #state{name = Name, logger = Logger}) ->
+    Logger:info("[Client ~s] start to reconnecting.", [Name]),
+    connect(State);
 
-handle_info({dispatch, Msg}, connected, State = #state{logger = Logger}) ->
-    Logger:info("Dispatch: ~p", [Msg]),
-    {next_state, connected, State};
+handle_info({keepalive, start, TimeoutSec}, connected, State = #state{name = Name, socket = Socket, logger = Logger}) ->
+    Logger:info("[Client ~s] Start KeepAlive with ~p seconds", [Name, TimeoutSec]),
+    KeepAlive = emqtt_keepalive:new(Socket, TimeoutSec, {keepalive, timeout}),
+    {next_state, connected, State#state{keepalive = KeepAlive}};
 
-%%TODO: 
-handle_info({redeliver, Pkg}, connected, State = #state{logger = Logger}) ->
-    Logger:info("Redeliver: ~p", [Pkg]),
-    {next_state, connected, State};
-    
-handle_info({session, expired}, StateName, State) ->
-    stop({shutdown, {session, expired}}, State);
+handle_info({keepalive, timeout}, connected, State = #state{name = Name, proto_state = ProtoState, keepalive = KeepAlive, logger = Logger}) ->
+    case emqtt_keepalive:resume(KeepAlive) of
+    timeout ->
+        Logger:info("[Client ~s] Keepalive Timeout!", [Name]),
+        emqttc_protocol:ping(ProtoState),
+        {next_state, connected, State};
+    {resumed, KeepAlive1} ->
+        Logger:info("[Client ~s] Keepalive Resumed.", [Name]),
+        {next_state, connected, State#state{keepalive = KeepAlive1}}
+    end;
 
-handle_info(_Info, StateName, State) ->
+handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s/] BadInfo: ~p", [Name, Info]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -517,12 +522,15 @@ connect(State = #state{name = Name,
                 false -> 
                     {stop, {error, Reason}, State};
                 _ -> 
-                    case emqttc_reconnector:execute(Reconnector, {timeout, reconnect}) of
+                    case emqttc_reconnector:execute(Reconnector, {reconnect, timeout}) of
                         {ok, Reconnector1} -> {next_state, disconnected, State#state{reconnector = Reconnector1}};
                         {stop, Error} -> {stop, {error, Error}, State}
                     end
             end
     end.
+
+stop(Reason, State ) ->
+    {stop, Reason, State}.
 
 pending(Event = {subscribe, _From, _Topics}, _StateName, State = #state{pending = Pending}) ->
     State#state{pending = [Event | Pending]};
@@ -537,53 +545,53 @@ pending(Event, StateName, State = #state{name = Name, logger = Logger}) ->
 process_received_bytes(<<>>, EventState, State) ->
     {next_state, EventState, State};
 
-process_received_bytes(Bytes, EventState,
-                       State = #state{ name        = Name,
-                                       parse_state = ParseState,
-                                       proto_state = ProtoState,
-                                       logger      = Logger }) ->
+process_received_bytes(Bytes, StateName, State = #state{name        = Name, 
+                                                        parse_state = ParseState, 
+                                                        logger      = Logger }) ->
     case emqttc_parser:parse(Bytes, ParseState) of
     {more, ParseState1} ->
-        %%TODO: socket controll...
-        {next_state, EventState, State#state{parse_state = ParseState1}};
+        {next_state, StateName, State#state{parse_state = ParseState1}};
     {ok, Packet, Rest} ->
-        case process_packet(Packet, EventState, State) of
-            {next_state, EventState1, State1} -> %NewProtoState
-                process_received_bytes(Rest, EventState1, 
-                                       State1#state{parse_state = emqttc_parser:init()});
+        case handle_received_packet(Packet, StateName, State) of
+            {ok, NewStateName, NewState} ->
+                process_received_bytes(Rest, NewStateName, 
+                                       NewState#state{parse_state = emqttc_parser:init()});
             {error, Error, NewState} ->
                 stop({shutdown, Error}, NewState)
         end;
     {error, Error} ->
-        Logger:error("[~p] MQTT detected framing error ~p", [Name, Error]),
+        Logger:error("[Client ~s/~s] MQTT Framing error ~p", [Name, StateName, Error]),
         stop({shutdown, Error}, State)
     end.
 
-%%TODO: PACKET_HEADER...
-process_packet(Packet = #mqtt_packet { header = #mqtt_packet_header { type = Type }}, EventState, State) ->
-    process_packet(Type, Packet, EventState, State).
-
-%%A Client can only receive one CONNACK
-process_packet(?CONNACK, #mqtt_packet {
-        variable = #mqtt_packet_connack {
-            return_code  = ReturnCode } }, waiting_for_connack,
-    State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[~p] RECV CONNACK: ~p", [Name, ReturnCode]),
+handle_received_packet(?PACKET_TYPE(Packet, ?CONNACK), waiting_for_connack, 
+                       State = #state{name = Name, pending = Pending, proto_state = ProtoState, logger = Logger}) ->
+    #mqtt_packet_connack{return_code  = ReturnCode} = Packet#mqtt_packet.variable,
+    Logger:info("[Client ~s] RECV CONNACK: ~p", [Name, ReturnCode]),
+    {ok, ProtoState1} = emqttc_protocol:handle_connack(ReturnCode, ProtoState),
     if 
         ReturnCode =:= ?CONNACK_ACCEPT ->
-            {next_state, connected, State};
+            [gen_fsm:send_event(self(), Event) || Event <- Pending],
+            {ok, connected, State#state{proto_state = ProtoState1}};
         true ->
             {error, connack_error(ReturnCode), State}
     end;
 
-process_packet(?CONNACK, _Packet, connected, State) ->
-    {error, {protocol, unexpeced_connack}, State};
+handle_received_packet(?PACKET_TYPE(Packet, ?PINGRESP), connected, 
+                       State = #state{name = Name, ping_reqs = PingReqs, logger = Logger}) ->
+    Logger:info("[Client ~s] RECV: PINGRESP", [Name]),
+    lists:foreach(fun({From, MonRef}) -> 
+            erlang:demonitor(process, MonRef),
+            gen_fsm:reply(From, pong)       
+        end, PingReqs),
+    {ok, connected, State#state{ping_reqs = []}};
 
-process_packet(?PINGRESP, _Packet, connected, State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[~p] RECV PINGRESP", [Name]),
-    {next_state, connected, State};
+handle_received_packet(?PACKET_TYPE(Packet, ?PUBLISH), connected, 
+                       State = #state{name = Name, ping_reqs = PingReqs, logger = Logger}) ->
 
-process_packet(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
+    Logger:info("[~p] RECV: ~p", [Name, emqttc_pPacket]),
+
+(Type, Packet, connected, State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
     Logger:info("[~p] RECV: ~p", [Name, Packet]),
     case emqttc_protocol:handle_packet(Type, Packet, ProtoState) of
         {ok, NewProtoState} ->
@@ -597,17 +605,4 @@ process_packet(Type, Packet, connected, State = #state{name = Name, logger = Log
             stop(Reason, State#state{proto_state = ProtoState1})
     end.
 
-stop(Reason, State ) ->
-    {stop, Reason, State}.
-
-connack_error(?CONNACK_PROTO_VER) ->
-    connack_proto_ver;
-connack_error(?CONNACK_INVALID_ID ) ->
-    connack_invalid_id;
-connack_error(?CONNACK_SERVER) ->
-    connack_server;
-connack_error(?CONNACK_CREDENTIALS) ->
-    connack_credentials;
-connack_error(?CONNACK_AUTH) ->
-    connack_auth.
 
