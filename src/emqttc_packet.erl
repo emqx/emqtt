@@ -42,23 +42,21 @@ connack_name(?CONNACK_CREDENTIALS)  -> 'CONNACK_CREDENTIALS';
 connack_name(?CONNACK_AUTH)         -> 'CONNACK_AUTH'.
 
 make(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
-    #mqtt_packet{header = #mqtt_packet_header{ type = Type } }.
+    #mqtt_packet{header = #mqtt_packet_header{ type = Type }}.
 
 make(PubAck, PacketId) when PubAck >= ?PUBACK, PubAck =< ?PUBCOMP, is_integer(PacketId) ->
-    #mqtt_packet{header = #mqtt_packet_header{
-                            type = PubAck,
-                            qos = puback_qos(PubAck) }, 
-                 variable = #mqtt_packet_puback{
-                            packet_id = PacketId }};
+    #mqtt_packet{header = #mqtt_packet_header{type = PubAck, 
+                                              qos  = qos(PubAck)}, 
+                 variable = #mqtt_packet_puback{packet_id = PacketId }};
 
 make(Type, Variable) when Type > ?RESERVED, Type =< ?DISCONNECT ->
-    #mqtt_packet{header   = #mqtt_packet_header{type = Type, qos = packet_qos(Type)},
+    #mqtt_packet{header   = #mqtt_packet_header{type = Type, qos = qos(Type)},
                  variable = Variable}.
 
-
-puback_qos(?PUBREL) ->  ?QOS_1;
-puback_qos(_PUBACK) ->  ?QOS_0.
-
+qos(?PUBREL)        -> ?QOS_1;
+qos(?SUBSCRIBE)     -> ?QOS_1;
+qos(?UNSUBSCRIBE)   -> ?QOS_1;
+qos(_Type)          ->  ?QOS_0.
 
 dump(#mqtt_packet{header = Header, variable = Variable, payload = Payload}) ->
     dump_header(Header, dump_variable(Variable, Payload)).

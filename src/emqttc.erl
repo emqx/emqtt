@@ -81,9 +81,9 @@
                 socket              :: inet:socket(),
                 parse_state         :: none | fun(),
                 proto_state         :: emqttc_protocol:proto_state(),
-                pubsub_map          :: map(),
+                pubsub_map = #{}    :: map(),
                 ping_reqs = []      :: list(), 
-                pending             :: list(),
+                pending = []        :: list(),
                 keepalive           :: emqttc_keepalive:keepalive(),
                 logger              :: gen_logger:logmod(),
                 reconnector         :: false | emqttc_reconnector:reconnector()}).
@@ -388,7 +388,6 @@ disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
 handle_info({tcp, Socket, Data}, StateName, State = #state{name = Name, 
                                                            socket = Socket, 
                                                            logger = Logger}) ->
-    emqttc_socket:setopts(Socket, [{active, once}]),
     Logger:debug("[Client ~s/~s] RECV: ~p", [Name, StateName, Data]),
     process_received_bytes(Data, StateName, State);
 
@@ -417,11 +416,11 @@ handle_info({reconnect, timeout}, disconnected, State = #state{name = Name, logg
 
 handle_info({keepalive, start, TimeoutSec}, connected, State = #state{name = Name, socket = Socket, logger = Logger}) ->
     Logger:info("[Client ~s] Start KeepAlive with ~p seconds", [Name, TimeoutSec]),
-    KeepAlive = emqtt_keepalive:new(Socket, TimeoutSec, {keepalive, timeout}),
+    KeepAlive = emqttc_keepalive:new(Socket, TimeoutSec, {keepalive, timeout}),
     {next_state, connected, State#state{keepalive = KeepAlive}};
 
 handle_info({keepalive, timeout}, connected, State = #state{name = Name, proto_state = ProtoState, keepalive = KeepAlive, logger = Logger}) ->
-    case emqtt_keepalive:resume(KeepAlive) of
+    case emqttc_keepalive:resume(KeepAlive) of
     timeout ->
         Logger:info("[Client ~s] Keepalive Timeout!", [Name]),
         emqttc_protocol:ping(ProtoState),
@@ -567,7 +566,7 @@ process_received_bytes(Bytes, StateName, State = #state{name        = Name,
 handle_received_packet(?PACKET_TYPE(Packet, ?CONNACK), waiting_for_connack, 
                        State = #state{name = Name, pending = Pending, proto_state = ProtoState, logger = Logger}) ->
     #mqtt_packet_connack{return_code  = ReturnCode} = Packet#mqtt_packet.variable,
-    Logger:info("[Client ~s] RECV CONNACK: ~p", [Name, ReturnCode]),
+    Logger:info("[Client ~s] RECV CONNACK: ~s", [Name, emqttc_packet:connack_name(ReturnCode)]),
     {ok, ProtoState1} = emqttc_protocol:handle_packet(?CONNACK, Packet, ProtoState),
     if 
         ReturnCode =:= ?CONNACK_ACCEPT ->
@@ -588,6 +587,6 @@ handle_received_packet(?PACKET_TYPE(_Packet, ?PINGRESP), connected,
 
 handle_received_packet(?PACKET_TYPE(Packet, Type), connected,
                        State = #state{name = Name, logger = Logger, proto_state = ProtoState}) ->
-    Logger:info("[Client ~s] RECV: ~p", [Name, emqttc_packet:dump(Packet)]),
+    Logger:info("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, ProtoState1} = emqttc_protocol:handle_packet(Type, Packet, ProtoState),
     {ok, connected, State#state{proto_state = ProtoState1}}.

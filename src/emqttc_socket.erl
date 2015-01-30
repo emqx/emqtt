@@ -36,7 +36,7 @@
                      {packet,    raw}, 
                      {reuseaddr, true}, 
                      {nodelay,   true}, 
-                     {active, 	 once}, 
+                     {active, 	 true}, 
                      {reuseaddr, true}, 
                      {send_timeout,  3000} ]).
 

@@ -231,8 +231,17 @@ handle_packet(Puback, #mqtt_packet{variable = Packet }, State = #proto_state{ses
         true ->
             ok
     end,
-	{ok, NewState}.
+	{ok, NewState};
 
+handle_packet(?SUBACK, #mqtt_packet{variable = #mqtt_packet_suback{packet_id = PacketId}},
+              State = #proto_state{session = Session})  ->
+    %%TODO:...
+	{ok, State};
+
+handle_packet(?UNSUBACK, #mqtt_packet{variable = #mqtt_packet_unsuback{packet_id = PacketId}},
+              State = #proto_state{session = Session}) ->
+    %%TODO:...
+	{ok, State}.
 
 %%
 %% @doc redeliver PUBREL PacketId
