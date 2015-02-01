@@ -72,11 +72,7 @@ start_link() ->
     ignore |
     {error, Reason :: term()}).
 init([]) ->
-    RestartStrategy = one_for_one,
-    MaxRestarts = 1000,
-    MaxSecondsBetweenRestarts = 3600,
-    SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
-    {ok, {SupFlags, []}}.
+    {ok, {{one_for_one, 1000, 3600}, []}}.
 
 %%%=============================================================================
 %%% Internal functions

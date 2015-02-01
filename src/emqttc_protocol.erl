@@ -190,7 +190,7 @@ publish(Message = #mqtt_message{qos = ?QOS_0}, State) ->
 	send(emqttc_message:to_packet(Message), State);
 
 publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
-                packet_id = PacketId, awaiting_ack = Awaiting}) 
+                packet_id = PacketId, awaiting_ack = AwaitingAck})
         when (Qos =:= ?QOS_1) orelse (Qos =:= ?QOS_2) ->
     Message1 = Message#mqtt_message{msgid = PacketId},
     Message2 =
@@ -198,7 +198,7 @@ publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
         Qos =:= ?QOS_2 -> Message1#mqtt_message{dup = false};
         true -> Message1
     end,
-    Awaiting1 = maps:put(PacketId, Message2, Awaiting),
+    Awaiting1 = maps:put(PacketId, Message2, AwaitingAck),
 	send(emqttc_message:to_packet(Message2), next_packet_id(State#proto_state{awaiting_ack = Awaiting1})).
 
 puback(PacketId, State) when is_integer(PacketId) ->
@@ -210,26 +210,25 @@ pubrec(PacketId, State) when is_integer(PacketId) ->
 pubrel(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBREL, PacketId), State).
 
-%%TODO: should be merge with received(publish...
-store(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload), State = #proto_state{awaiting_rel = AwaitingRel}) ->
-    {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}}.
-
-subscribe(Topics, State = #proto_state{subscriptions = SubMap, logger = Logger}) ->
+subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
     case Resubs of
         [] -> ok;
         _  -> Logger:warning("[~s] resubscribe ~p", [logtag(State), Resubs])
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
-    {ok, State#proto_state{subscriptions = SubMap1}}.
+    %% send packet
+    send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
 
-unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, logger = Logger}) ->
+unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
     case Topics -- maps:keys(SubMap) of
         [] -> ok;
-        BadUnsubs -> Logger:warning("[~s] should not unsubscribe ~p", [logtag(State), BadUnsubs]) end,
-    %%unsubscribe from topic tree
+        BadUnsubs -> Logger:warning("[~s] should not unsubscribe ~p", [logtag(State), BadUnsubs])
+    end,
+    %% unsubscribe from topic tree
     SubMap1 = lists:foldl(fun(Topic, Acc) -> maps:remove(Topic, Acc) end, SubMap, Topics),
-    {ok, State#proto_state{subscriptions = SubMap1}}.
+    %% send packet
+    send(?UNSUBSCRIBE(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
 
 ping(State) ->
     send(?PACKET(?PINGREQ), State).
@@ -237,8 +236,16 @@ ping(State) ->
 disconnect(State) ->
     send(?PACKET(?DISCONNECT), State).
 
-received('CONNACK', State) ->
-    %%TODO: Resume Session... 
+
+%%TODO: should be merge with received(publish...
+store(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload), State = #proto_state{awaiting_rel = AwaitingRel}) ->
+    {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}}.
+
+received('CONNACK', State = #proto_state{clean_sess = false}) ->
+    %%TODO: Resume Session...
+    {ok, State};
+
+received({'PUBLISH', Msg}, State = #proto_state{awaiting_rel = AwaitingRel, logger = Logger}) ->
     {ok, State};
 
 received({'PUBACK', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck, logger = Logger}) ->
