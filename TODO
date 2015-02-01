@@ -5,3 +5,7 @@ MQTT 3.1.1 protocol specification support
 SSL Socket support
 
 Logger support
+
+KeepAlive
+
+Reconector

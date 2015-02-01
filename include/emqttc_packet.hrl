@@ -200,7 +200,7 @@
                  variable = #mqtt_packet_puback{packet_id = PacketId}}).
 
 -define(SUBSCRIBE_PACKET(PacketId, TopicTable), 
-    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE},
+    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE, qos = ?QOS_1},
                  variable = #mqtt_packet_subscribe{packet_id   = PacketId,
                                                    topic_table = TopicTable}}).
 -define(SUBACK_PACKET(PacketId, QosTable),
@@ -214,9 +214,6 @@
 -define(UNSUBACK_PACKET(PacketId),
     #mqtt_packet{header = #mqtt_packet_header{type = ?UNSUBACK},
                  variable = #mqtt_packet_unsuback{packet_id = PacketId}}).
-
--define(PINGRESP_PACKET,
-    #mqtt_packet{header = #mqtt_packet_header{type = ?PINGRESP}}).
 
 -define(PACKET(Type),
     #mqtt_packet{header = #mqtt_packet_header{type = Type}}).

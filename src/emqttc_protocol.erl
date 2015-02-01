@@ -236,7 +236,6 @@ ping(State) ->
 disconnect(State) ->
     send(?PACKET(?DISCONNECT), State).
 
-
 %%TODO: should be merge with received(publish...
 store(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload), State = #proto_state{awaiting_rel = AwaitingRel}) ->
     {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}}.

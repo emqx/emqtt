@@ -371,11 +371,6 @@ waiting_for_connack(Event = {Tag, _From, _Topics}, State)
         when Tag =:= subscribe orelse Tag =:= unsubscribe ->
     {next_state, waiting_for_connack, pend(Event, State)};
 
-waiting_for_connack(tcp_closed, State = #state{name = Name, logger = Logger}) ->
-    Logger:warning("[Client ~s] TCP closed when waiting for connack!", [Name]),
-    %%TODO: handle exception...
-    {next_state, disconnected, State};
-
 waiting_for_connack(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when waiting for connack!", [Name, Event]),
     {next_state, waiting_for_connack, State}.
@@ -533,14 +528,9 @@ connected(?UNSUBACK_PACKET(PacketId), State = #state{name = Name, proto_state = 
     {ok, ProtoState1} = emqttc_protocol:received({?UNSUBACK, PacketId}, ProtoState),
     {next_state, connected, State#state{proto_state = ProtoState1}};
 
-connected(?PINGRESP, State = #state{name = Name, logger = Logger}) ->
+connected(?PACKET(?PINGRESP), State = #state{name = Name, logger = Logger}) ->
     Logger:info("[Client ~s] RECV PINGRESP", [Name]),
     {next_state, connected, State};
-
-connected(tcp_closed, State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[Client ~s] TCP Closed", [Name]),
-    %%TODO: handle exeception
-    {next_state, disconnected, State};
 
 connected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when broker connected!", [Name, Event]),
@@ -652,6 +642,13 @@ handle_sync_event(_Event, _From, StateName, State) ->
     {next_state, NextStateName :: atom(), NewStateData :: term(),
         timeout() | hibernate} |
     {stop, Reason :: normal | term(), NewStateData :: term()}).
+
+
+handle_info(tcp_closed, StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s] TCP closed when waiting for connack!", [Name]),
+    %%TODO: handle exception...
+    {stop, {shutdown, tcp_closed}, State};
+
 handle_info(Info = {'EXIT', Pid, Reason}, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] ~p", [Name, Info]),
     {next_state, StateName, State};
