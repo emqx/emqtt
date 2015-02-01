@@ -1,27 +1,29 @@
-%%------------------------------------------------------------------------------
-%% Copyright (c) 2015, Feng Lee <feng@emqtt.io>
-%% 
-%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%% of this software and associated documentation files (the "Software"), to deal
-%% in the Software without restriction, including without limitation the rights
-%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%% copies of the Software, and to permit persons to whom the Software is
-%% furnished to do so, subject to the following conditions:
-%% 
-%% The above copyright notice and this permission notice shall be included in all
-%% copies or substantial portions of the Software.
-%% 
-%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%% SOFTWARE.
-%%------------------------------------------------------------------------------
-%%
-%% The Original Code is from emqtt.
-%%
+%%%-----------------------------------------------------------------------------
+%%% @Copyright (C) 2012-2015, Feng Lee <feng@emqtt.io>
+%%%
+%%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%%% of this software and associated documentation files (the "Software"), to deal
+%%% in the Software without restriction, including without limitation the rights
+%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%%% copies of the Software, and to permit persons to whom the Software is
+%%% furnished to do so, subject to the following conditions:
+%%%
+%%% The above copyright notice and this permission notice shall be included in all
+%%% copies or substantial portions of the Software.
+%%%
+%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+%%% SOFTWARE.
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% emqttc packet header.
+%%% @end
+%%%-----------------------------------------------------------------------------
+-author("feng@emqtt.io").
 
 %%------------------------------------------------------------------------------
 %% MQTT Protocol Version and Levels
@@ -30,8 +32,8 @@
 -define(MQTT_PROTO_V311, 4).
 
 -define(PROTOCOL_NAMES, [
-        {?MQTT_PROTO_V31, <<"MQIsdp">>}, 
-        {?MQTT_PROTO_V311, <<"MQTT">>} ]).
+    {?MQTT_PROTO_V31, <<"MQIsdp">>},
+    {?MQTT_PROTO_V311, <<"MQTT">>}]).
 
 -type mqtt_vsn() :: ?MQTT_PROTO_V31 | ?MQTT_PROTO_V311.
 
@@ -48,11 +50,11 @@
 -type mqtt_qos() :: ?QOS_0 | ?QOS_1 | ?QOS_2.
 
 %%------------------------------------------------------------------------------
-%% Max ClientId Length
+%% Max ClientId Length. Why 1024? NiDongDe!
 %%------------------------------------------------------------------------------
 -define(MAX_CLIENTID_LEN, 1024).
 
-%%------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
 %% MQTT Control Packet Types
 %%------------------------------------------------------------------------------
 -define(RESERVED,     0).   %% Reserved
@@ -71,20 +73,21 @@
 -define(PINGRESP,    13).   %% PING response
 -define(DISCONNECT,  14).   %% Client is disconnecting
 
--define(TYPE_NAMES, ['CONNECT',
-                     'CONNACK',
-                     'PUBLISH',
-                     'PUBACK',
-                     'PUBREC',
-                     'PUBREL',
-                     'PUBCOMP',
-                     'SUBSCRIBE',
-                     'SUBACK',
-                     'UNSUBSCRIBE',
-                     'UNSUBACK',
-                     'PINGREQ',
-                     'PINGRESP',
-                     'DISCONNECT' ]).
+-define(TYPE_NAMES, [
+    'CONNECT',
+    'CONNACK',
+    'PUBLISH',
+    'PUBACK',
+    'PUBREC',
+    'PUBREL',
+    'PUBCOMP',
+    'SUBSCRIBE',
+    'SUBACK',
+    'UNSUBSCRIBE',
+    'UNSUBACK',
+    'PINGREQ',
+    'PINGRESP',
+    'DISCONNECT']).
 
 -type mqtt_packet_type() :: ?RESERVED..?DISCONNECT.
 
@@ -110,86 +113,123 @@
 %%------------------------------------------------------------------------------
 %% MQTT Packet Fixed Header
 %%------------------------------------------------------------------------------
-
 -record(mqtt_packet_header, {
-        type   = ?RESERVED  :: mqtt_packet_type(),
-        dup    = false      :: boolean(),
-        qos    = ?QOS_0     :: mqtt_qos(),
-        retain = false      :: boolean() }).
+    type   = ?RESERVED  :: mqtt_packet_type(),
+    dup    = false      :: boolean(),
+    qos    = ?QOS_0     :: mqtt_qos(),
+    retain = false      :: boolean()}).
 
 %%------------------------------------------------------------------------------
 %% MQTT Packets
 %%------------------------------------------------------------------------------
-
 -type mqtt_packet_id() :: 1..16#ffff | undefined.
 
--record(mqtt_packet_connect,  { 
-        client_id   = <<>>              :: binary(),
-        proto_ver   = ?MQTT_PROTO_V311  :: mqtt_vsn(),
-        proto_name  = <<"MQTT">>        :: binary(),
-        will_retain = false             :: boolean(),
-        will_qos    = ?QOS_0            :: mqtt_qos(),
-        will_flag   = false             :: boolean(),
-        clean_sess  = false             :: boolean(),
-        keep_alive  = 60                :: non_neg_integer(),
-        will_topic  = undefined         :: undefined | binary(),
-        will_msg    = undefined         :: undefined | binary(),
-        username    = undefined         :: undefined | binary(),
-        password    = undefined         :: undefined | binary() }).
+-record(mqtt_packet_connect,  {
+    client_id   = <<>>              :: binary(),
+    proto_ver   = ?MQTT_PROTO_V311  :: mqtt_vsn(),
+    proto_name  = <<"MQTT">>        :: binary(),
+    will_retain = false             :: boolean(),
+    will_qos    = ?QOS_0            :: mqtt_qos(),
+    will_flag   = false             :: boolean(),
+    clean_sess  = false             :: boolean(),
+    keep_alive  = 60                :: non_neg_integer(),
+    will_topic  = undefined         :: undefined | binary(),
+    will_msg    = undefined         :: undefined | binary(),
+    username    = undefined         :: undefined | binary(),
+    password    = undefined         :: undefined | binary()}).
 
 -record(mqtt_packet_connack, {
-        ack_flags = ?RESERVED   :: 0 | 1, 
-        return_code             :: mqtt_connack() }).
+    ack_flags = ?RESERVED   :: 0 | 1,
+    return_code             :: mqtt_connack() }).
 
 -record(mqtt_packet_publish, {
-        topic_name  :: binary(), 
-        packet_id   :: mqtt_packet_id() }).
+    topic_name  :: binary(),
+    packet_id   :: mqtt_packet_id() }).
 
--record(mqtt_packet_puback, { 
-        packet_id   :: mqtt_packet_id() }).
+-record(mqtt_packet_puback, {
+    packet_id   :: mqtt_packet_id() }).
 
--record(mqtt_packet_subscribe, { 
-        packet_id   :: mqtt_packet_id(), 
-        topic_table :: list({binary(), mqtt_qos()}) }).
+-record(mqtt_packet_subscribe, {
+    packet_id   :: mqtt_packet_id(),
+    topic_table :: list({binary(), mqtt_qos()}) }).
 
--record(mqtt_packet_unsubscribe, { 
-        packet_id   :: mqtt_packet_id(), 
-        topics      :: list(binary()) }).
+-record(mqtt_packet_unsubscribe, {
+    packet_id   :: mqtt_packet_id(),
+    topics      :: list(binary()) }).
 
--record(mqtt_packet_suback, { 
-        packet_id   :: mqtt_packet_id(), 
-        qos_table   :: list(mqtt_qos() | 128) }).
+-record(mqtt_packet_suback, {
+    packet_id   :: mqtt_packet_id(),
+    qos_table   :: list(mqtt_qos() | 128) }).
 
 -record(mqtt_packet_unsuback, {
-        packet_id   :: mqtt_packet_id() }).
+    packet_id   :: mqtt_packet_id() }).
 
 %%------------------------------------------------------------------------------
 %% MQTT Control Packet
 %%------------------------------------------------------------------------------
 -record(mqtt_packet, {
     header    :: #mqtt_packet_header{},
-    variable  :: #mqtt_packet_connect{} | #mqtt_packet_connack{} 
-               | #mqtt_packet_publish{} | #mqtt_packet_puback{} 
-               | #mqtt_packet_subscribe{} | #mqtt_packet_suback{}
-               | #mqtt_packet_unsubscribe{} | #mqtt_packet_unsuback{}
-               | mqtt_packet_id(), 
+    variable  :: #mqtt_packet_connect{} | #mqtt_packet_connack{}
+    | #mqtt_packet_publish{} | #mqtt_packet_puback{}
+    | #mqtt_packet_subscribe{} | #mqtt_packet_suback{}
+    | #mqtt_packet_unsubscribe{} | #mqtt_packet_unsuback{}
+    | mqtt_packet_id(),
     payload   :: binary() }).
 
 -type mqtt_packet() :: #mqtt_packet{}.
 
--define(PACKET_TYPE(Packet, Type), 
-    Packet = #mqtt_packet{header = #mqtt_packet_header{type = Type}}).
+%%------------------------------------------------------------------------------
+%% MQTT Packet Match
+%%------------------------------------------------------------------------------
+-define(CONNECT_PACKET(Packet),
+    #mqtt_packet{header = #mqtt_packet_header{type = ?CONNECT}, variable = Packet}).
+
+-define(CONNACK_PACKET(ReturnCode),
+    #mqtt_packet{header = #mqtt_packet_header{type = ?CONNACK},
+                 variable = #mqtt_packet_connack{return_code = ReturnCode}}).
+
+-define(PUBLISH_PACKET(Qos, Topic, PacketId, Payload),
+    #mqtt_packet{header = #mqtt_packet_header{type = ?PUBLISH,
+                                              qos = Qos},
+                 variable = #mqtt_packet_publish{topic_name = Topic,
+                                                 packet_id  = PacketId},
+                 payload = Payload}).
+
+-define(PUBACK_PACKET(Type, PacketId),
+    #mqtt_packet{header = #mqtt_packet_header{type = Type},
+                 variable = #mqtt_packet_puback{packet_id = PacketId}}).
+
+-define(SUBSCRIBE_PACKET(PacketId, TopicTable), 
+    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE},
+                 variable = #mqtt_packet_subscribe{packet_id   = PacketId,
+                                                   topic_table = TopicTable}}).
+-define(SUBACK_PACKET(PacketId, QosTable),
+    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBACK},
+                 variable = #mqtt_packet_suback{packet_id = PacketId,
+                                                qos_table = QosTable}}).
+-define(UNSUBSCRIBE_PACKET(PacketId, Topics), 
+    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE},
+                 variable = #mqtt_packet_unsubscribe{packet_id = PacketId,
+                                                     topics    = Topics}}).
+-define(UNSUBACK_PACKET(PacketId),
+    #mqtt_packet{header = #mqtt_packet_header{type = ?UNSUBACK},
+                 variable = #mqtt_packet_unsuback{packet_id = PacketId}}).
+
+-define(PINGRESP_PACKET,
+    #mqtt_packet{header = #mqtt_packet_header{type = ?PINGRESP}}).
+
+-define(PACKET(Type),
+    #mqtt_packet{header = #mqtt_packet_header{type = Type}}).
 
 %%------------------------------------------------------------------------------
 %% MQTT Message
 %%------------------------------------------------------------------------------
 -record(mqtt_message, {
-        qos    = ?QOS_0 :: mqtt_qos(), 
-        retain = false  :: boolean(), 
-        dup    = false  :: boolean(), 
-        msgid           :: mqtt_packet_id(),
-        topic           :: binary(), 
-        payload         :: binary() }).
+    qos    = ?QOS_0 :: mqtt_qos(),
+    retain = false  :: boolean(),
+    dup    = false  :: boolean(),
+    msgid           :: mqtt_packet_id(),
+    topic           :: binary(),
+    payload         :: binary()}).
 
 -type mqtt_message() :: #mqtt_message{}.
-
