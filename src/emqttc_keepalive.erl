@@ -1,93 +1,117 @@
-%%------------------------------------------------------------------------------
-%% Copyright (c) 2012-2015, Feng Lee <feng@emqtt.io>
-%% 
-%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%% of this software and associated documentation files (the "Software"), to deal
-%% in the Software without restriction, including without limitation the rights
-%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%% copies of the Software, and to permit persons to whom the Software is
-%% furnished to do so, subject to the following conditions:
-%% 
-%% The above copyright notice and this permission notice shall be included in all
-%% copies or substantial portions of the Software.
-%% 
-%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%% SOFTWARE.
-%%------------------------------------------------------------------------------
+%%%-----------------------------------------------------------------------------
+%%% @Copyright (C) 2012-2015, Feng Lee <feng@emqtt.io>
+%%%
+%%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%%% of this software and associated documentation files (the "Software"), to deal
+%%% in the Software without restriction, including without limitation the rights
+%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%%% copies of the Software, and to permit persons to whom the Software is
+%%% furnished to do so, subject to the following conditions:
+%%%
+%%% The above copyright notice and this permission notice shall be included in all
+%%% copies or substantial portions of the Software.
+%%%
+%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+%%% SOFTWARE.
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% emqttc socket keepalive.
+%%%
+%%% @end
+%%%-----------------------------------------------------------------------------
 -module(emqttc_keepalive).
 
--author('feng@emqtt.io').
+-author("feng@emqtt.io").
 
--export([new/3, resume/1, cancel/1]).
+-record(keepalive, {socket,
+                    stat_name,
+                    stat_val,
+                    timeout_sec,
+                    timeout_msg,
+                    timer_ref}).
 
-%%TODO: refactor socket keepalive...
--record(keepalive, {socket, send_oct, timeout_sec, timeout_msg, timer_ref}).
+-type keepalive() :: #keepalive{}.
 
-%%----------------------------------------------------------------------------
+-export_type([keepalive/0]).
 
--ifdef(use_specs).
+%% API
+-export([new/3, start/2, resume/1, cancel/1]).
 
--type keepalive() -> #keepalive{}.
+%%%-----------------------------------------------------------------------------
+%% @doc
+%% Create a KeepAlive.
+%%
+%% @end
+%%%-----------------------------------------------------------------------------
+-spec new(Socket, StatName, TimeoutSec) -> KeepAlive when
+    Socket        :: inet:socket(),
+    StatName      :: inet:stat_option(),
+    TimeoutSec    :: non_neg_integer(),
+    KeepAlive     :: keepalive() | undefined.
+new(_Socket, _StatName, 0) ->
+    undefined;
+new(Socket, StatName, TimeoutSec) when TimeoutSec > 0 ->
+    {ok, [{StatName, StatVal}]} = inet:getstat(Socket, [StatName]),
+    #keepalive{socket      = Socket,
+               stat_name   = StatName,
+               stat_val    = StatVal,
+               timeout_sec = TimeoutSec}.
 
--spec new(Socket, TimeoutSec, TimeoutMsg) -> KeepAlive when
-      Socket        :: inet:socket(),
-      TimeoutSec    :: non_neg_integer(),
-      TimeoutMsg    :: tuple(),
-      KeepAlive     :: keepalive().
+%%------------------------------------------------------------------------------
+%% @doc
+%% Start KeepAlive.
+%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec start(KeepAlive, TimeoutMsg) -> KeepAlive when
+    KeepAlive   :: keepalive() | undefined,
+    TimeoutMsg  :: tuple().
+start(undefined, _TimeoutMsg) ->
+    undefined;
+start(KeepAlive = #keepalive{timeout_sec = TimeoutSec}, TimeoutMsg) ->
+    Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
+    KeepAlive#keepalive{timeout_msg = TimeoutMsg, timer_ref = Ref}.
 
--spec resume(KeepAlive) -> timeout | {resumed, KeepAlive} when 
-      KeepAlive  :: keepalive().
-
--spec cancel(keepalive() | undefined | reference()) -> any().
-
--endif.
-
-%%----------------------------------------------------------------------------
-
-%%----------------------------------------------------------------------------
-%% @doc create a keepalive.
-%%----------------------------------------------------------------------------
-new(Socket, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
-    {ok, [{send_oct, SendOct}]} = inet:getstat(Socket, [send_oct]),
-	Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
-	#keepalive { socket      = Socket, 
-                 send_oct    = SendOct, 
-                 timeout_sec = TimeoutSec, 
-                 timeout_msg = TimeoutMsg,
-                 timer_ref   = Ref }.
-
-%%----------------------------------------------------------------------------
-%% @doc try to resume keepalive, called when timeout.
-%%----------------------------------------------------------------------------
-resume(KeepAlive = #keepalive { socket      = Socket, 
-                                send_oct    = SendOct, 
-                                timeout_sec = TimeoutSec, 
-                                timeout_msg = TimeoutMsg, 
-                                timer_ref   = Ref }) ->
-    {ok, [{send_oct, NewSendOct}]} = inet:getstat(Socket, [send_oct]),
+%%------------------------------------------------------------------------------
+%% @doc
+%% Resume KeepAlive, called when timeout.
+%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec resume(KeepAlive) -> timeout | {resumed, KeepAlive} when
+    KeepAlive  :: keepalive() | undefined.
+resume(undefined) -> undefined;
+resume(KeepAlive = #keepalive{socket      = Socket,
+                              stat_name   = StatName,
+                              stat_val    = StatVal,
+                              timeout_sec = TimeoutSec,
+                              timeout_msg = TimeoutMsg,
+                              timer_ref   = Ref}) ->
+    {ok, [{StatName, NewStatVal}]} = inet:getstat(Socket, [StatName]),
     if
-        NewSendOct =:= SendOct -> 
+        NewStatVal =:= StatVal ->
             timeout;
         true ->
-            %need?
-            cancel(Ref),
+            cancel(Ref), %need?
             NewRef = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
-            {resumed, KeepAlive#keepalive { send_oct = NewSendOct, timer_ref = NewRef }}
+            {resumed, KeepAlive#keepalive{stat_val = NewStatVal, timer_ref = NewRef}}
     end.
 
-%%----------------------------------------------------------------------------
-%% @doc cancel keepalive
-%%----------------------------------------------------------------------------
-cancel(#keepalive { timer_ref = Ref }) ->
+%%------------------------------------------------------------------------------
+%% @doc
+%% Cancel KeepAlive.
+%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec cancel(keepalive() | undefined | reference()) -> any().
+cancel(undefined) ->
+    ok;
+cancel(#keepalive{timer_ref = Ref}) ->
     cancel(Ref);
-cancel(undefined) -> 
-	undefined;
-cancel(Ref) -> 
-	catch erlang:cancel_timer(Ref).
-
-
+cancel(Ref) when is_reference(Ref)->
+    catch erlang:cancel_timer(Ref).
