@@ -170,11 +170,11 @@
 -record(mqtt_packet, {
     header    :: #mqtt_packet_header{},
     variable  :: #mqtt_packet_connect{} | #mqtt_packet_connack{}
-    | #mqtt_packet_publish{} | #mqtt_packet_puback{}
-    | #mqtt_packet_subscribe{} | #mqtt_packet_suback{}
-    | #mqtt_packet_unsubscribe{} | #mqtt_packet_unsuback{}
-    | mqtt_packet_id(),
-    payload   :: binary() }).
+                | #mqtt_packet_publish{} | #mqtt_packet_puback{}
+                | #mqtt_packet_subscribe{} | #mqtt_packet_suback{}
+                | #mqtt_packet_unsubscribe{} | #mqtt_packet_unsuback{}
+                | mqtt_packet_id() | undefined,
+    payload   :: binary() | undefined }).
 
 -type mqtt_packet() :: #mqtt_packet{}.
 
@@ -197,6 +197,10 @@
 
 -define(PUBACK_PACKET(Type, PacketId),
     #mqtt_packet{header = #mqtt_packet_header{type = Type},
+                 variable = #mqtt_packet_puback{packet_id = PacketId}}).
+
+-define(PUBREL_PACKET(PacketId),
+    #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREL, qos = ?QOS_1},
                  variable = #mqtt_packet_puback{packet_id = PacketId}}).
 
 -define(SUBSCRIBE_PACKET(PacketId, TopicTable), 

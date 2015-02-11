@@ -208,7 +208,7 @@ pubrec(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBREC, PacketId), State).
 
 pubrel(PacketId, State) when is_integer(PacketId) ->
-    send(?PUBACK_PACKET(?PUBREL, PacketId), State).
+    send(?PUBREL_PACKET(PacketId), State). %% qos = 1
 
 pubcomp(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBCOMP, PacketId), State).
@@ -231,7 +231,7 @@ unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = Pac
     %% unsubscribe from topic tree
     SubMap1 = lists:foldl(fun(Topic, Acc) -> maps:remove(Topic, Acc) end, SubMap, Topics),
     %% send packet
-    send(?UNSUBSCRIBE(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
+    send(?UNSUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
 
 ping(State) ->
     send(?PACKET(?PINGREQ), State).

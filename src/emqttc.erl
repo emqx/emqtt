@@ -89,8 +89,9 @@
         ping_reqs   = []    :: list(),
         pending_pubsub = [] :: list(),
         keepalive           :: emqttc_keepalive:keepalive() | undefined,
+        alive_interval = 0  :: non_neg_integer(),
         reconnector         :: emqttc_reconnector:reconnector() | undefined,
-        logger              :: gen_logger:logmod()}).  
+        logger              :: gen_logger:logmod()}).
 
 %%%=============================================================================
 %%% API
@@ -275,14 +276,16 @@ init([Name, MqttOpts]) ->
 
     Logger = gen_logger:new(get_value(logger, MqttOpts, {stdout, debug})),
 
-    case get_value(client_id, MqttOpts) of
+    MqttOpts1 = proplists:delete(logger, MqttOpts),
+
+    case get_value(client_id, MqttOpts1) of
         undefined -> Logger:warning("ClientId is NULL!");
         _ -> ok
     end,
 
-    ProtoState = emqttc_protocol:init([{logger, Logger} | MqttOpts]),
+    ProtoState = emqttc_protocol:init([{logger, Logger} | MqttOpts1]),
 
-    State = init(MqttOpts, #state{
+    State = init(MqttOpts1, #state{
                     name         = Name,
                     host         = "localhost",
                     port         = 1883,
@@ -299,8 +302,8 @@ init([{port, Port} | Opts], State) ->
     init(Opts, State#state{port = Port});
 init([{logger, Cfg} | Opts], State) ->
     init(Opts, State#state{logger = gen_logger:new(Cfg)});
-init([{keepalive, KeepAlive} | Opts], State) -> %%TODO:
-    init(Opts, State);
+init([{keepalive, Time} | Opts], State) ->
+    init(Opts, State#state{alive_interval = Time});
 init([{reconnect, ReconnOpt} | Opts], State) ->
     init(Opts, State#state{reconnector = init_reconnector(ReconnOpt)});
 init([_Opt | Opts], State) ->
@@ -347,13 +350,15 @@ connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
 %%------------------------------------------------------------------------------
 waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
                 name = Name, 
+                socket = Socket,
                 pending_pubsub = Pending,
                 proto_state = ProtoState,
+                alive_interval = AliveInterval,
                 logger = Logger}) ->
     Logger:info("[Client ~s] RECV: CONNACK_ACCEPT", [Name]),
     {ok, ProtoState1} = emqttc_protocol:received('CONNACK', ProtoState),
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
-    {next_state, connected, State#state{proto_state = ProtoState1, pending_pubsub = []}};
+    {next_state, connected, start_keepalive(State#state{proto_state = ProtoState1, pending_pubsub = []})};
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
@@ -595,6 +600,16 @@ handle_sync_event(_Event, _From, StateName, State) ->
         timeout() | hibernate} |
     {stop, Reason :: normal | term(), NewStateData :: term()}).
 
+handle_info({timeout, keepalive}, connected, State = #state{proto_state = ProtoState, keepalive = KeepAlive}) ->
+    NewKeepAlive =
+    case emqttc_keepalive:resume(KeepAlive) of
+        timeout -> 
+            emqttc_protocol:ping(ProtoState),
+            KeepAlive;
+        {resumed, KeepAlive1} -> 
+            KeepAlive1
+    end,
+    {next_state, connected, State#state{keepalive = NewKeepAlive}};
 
 handle_info(tcp_closed, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] TCP closed when waiting for connack!", [Name]),
@@ -605,7 +620,8 @@ handle_info(Info = {'EXIT', Pid, Reason}, StateName, State = #state{name = Name,
     Logger:error("[Client ~s] ~p", [Name, Info]),
     {next_state, StateName, State};
 
-handle_info(_Info, StateName, State) ->
+handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s] Unexpected Info when ~s: ~p", [Name, StateName, Info]),
     {next_state, StateName, State}.
 
 %%------------------------------------------------------------------------------
@@ -675,6 +691,19 @@ pend(Event, State = #state{pending_pubsub = Pending}) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc 
+%% Start KeepAlive
+%%
+%% @end
+%%------------------------------------------------------------------------------
+start_keepalive(State = #state{socket = Socket, alive_interval = AliveInterval}) ->
+    KeepAlive = emqttc_keepalive:start(
+            emqttc_keepalive:new(Socket, send_oct, AliveInterval), 
+                {timeout, keepalive}),
+    State#state{keepalive = KeepAlive}.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 
 %% Handle Received Packet
 %%
 %% @end
@@ -683,13 +712,13 @@ received(?PUBLISH_PACKET(?QOS_0, Topic, undefined, Payload), State) ->
     dispatch({publish, Topic, Payload}, State),
     {ok, State};
 
-received(Packet = ?PUBLISH_PACKET(?QOS_1, Topic, PacketId, Payload), State = #state{proto_state = ProtoState}) ->
-    emqttc_protocol:received(Packet, ProtoState),
+received(Packet = ?PUBLISH_PACKET(?QOS_1, Topic, _PacketId, Payload), State = #state{proto_state = ProtoState}) ->
+    emqttc_protocol:received({'PUBLISH', Packet}, ProtoState),
     dispatch({publish, Topic, Payload}, State),
     {ok, State};
 
-received(Packet = ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), State = #state{proto_state = ProtoState}) ->
-    {ok, ProtoState1} = emqttc_protocol:received(Packet, ProtoState),
+received(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, _PacketId, _Payload), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({'PUBLISH', Packet}, ProtoState),
     {ok, State#state{proto_state = ProtoState1}};
 
 received(?PUBACK_PACKET(?PUBACK, PacketId), State = #state{proto_state = ProtoState}) ->

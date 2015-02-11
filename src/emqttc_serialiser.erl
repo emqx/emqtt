@@ -66,7 +66,7 @@ serialise_variable(?CONNECT, #mqtt_packet_connect{client_id   =  ClientId,
     will_topic  =  WillTopic,
     will_msg    =  WillMsg,
     username    =  Username,
-    password    =  Password }, <<>>) ->
+    password    =  Password }, undefined) ->
     VariableBin = <<(size(ProtoName)):16/big-unsigned-integer,
     ProtoName/binary,
     ProtoVer:8,
@@ -90,11 +90,11 @@ serialise_variable(?CONNECT, #mqtt_packet_connect{client_id   =  ClientId,
     {VariableBin, <<PayloadBin1/binary, UserPasswd/binary>>};
 
 serialise_variable(?SUBSCRIBE, #mqtt_packet_subscribe{packet_id   = PacketId,
-    topic_table = Topics }, <<>>) ->
+    topic_table = Topics }, undefined) ->
     {<<PacketId:16/big>>, serialise_topics(Topics)};
 
 serialise_variable(?UNSUBSCRIBE, #mqtt_packet_unsubscribe{ packet_id  = PacketId,
-    topics = Topics }, <<>>) ->
+    topics = Topics }, undefined) ->
     {<<PacketId:16/big>>, serialise_topics(Topics)};
 
 serialise_variable(?PUBLISH, #mqtt_packet_publish { topic_name = TopicName,
@@ -106,7 +106,7 @@ serialise_variable(?PUBLISH, #mqtt_packet_publish { topic_name = TopicName,
                   end,
     {<<TopicBin/binary, PacketIdBin/binary>>, PayloadBin};
 
-serialise_variable(PubAck, #mqtt_packet_puback { packet_id = PacketId }, <<>> = _Payload)
+serialise_variable(PubAck, #mqtt_packet_puback { packet_id = PacketId }, _Payload)
     when PubAck =:= ?PUBACK; PubAck =:= ?PUBREC; PubAck =:= ?PUBREL; PubAck =:= ?PUBCOMP ->
     {<<PacketId:16/big>>, <<>>};
 
@@ -117,7 +117,7 @@ serialise_variable(?DISCONNECT, undefined, undefined) ->
     {<<>>, <<>>}.
 
 serialise_payload(undefined) ->
-    <<>>;
+    undefined;
 serialise_payload(Bin) when is_binary(Bin) ->
     Bin.
 
