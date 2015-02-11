@@ -266,8 +266,10 @@ init([undefined, Args]) ->
     init([self(), Args]);
 
 init([Name, Args]) ->
-    true = proplists:is_defined(client_id, Args),
-    ClientId = proplists:get_value(client_id, Args),
+    %true = proplists:is_defined(client_id, Args),
+    {_, Secs, MicroSecs} = erlang:now(),
+    RandomId = list_to_binary(["emqttc-", integer_to_list(Secs), "-", integer_to_list(MicroSecs)]),
+    ClientId = proplists:get_value(client_id, Args, RandomId),
 
     Host = proplists:get_value(host, Args, "localhost"),
     Port = proplists:get_value(port, Args, 1883),
