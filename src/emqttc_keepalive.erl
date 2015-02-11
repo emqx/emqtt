@@ -30,7 +30,7 @@
 
 -record(keepalive, {socket,
                     stat_name,
-                    stat_val,
+                    stat_val = 0,
                     timeout_sec,
                     timeout_msg,
                     timer_ref}).
@@ -40,7 +40,7 @@
 -export_type([keepalive/0]).
 
 %% API
--export([new/3, start/2, resume/1, cancel/1]).
+-export([new/3, start/1, restart/1, resume/1, cancel/1]).
 
 %%%-----------------------------------------------------------------------------
 %% @doc
@@ -48,19 +48,19 @@
 %%
 %% @end
 %%%-----------------------------------------------------------------------------
--spec new(Socket, StatName, TimeoutSec) -> KeepAlive when
+-spec new({Socket, StatName}, TimeoutSec, TimeoutMsg) -> KeepAlive when
     Socket        :: inet:socket(),
     StatName      :: inet:stat_option(),
     TimeoutSec    :: non_neg_integer(),
+    TimeoutMsg    :: tuple(),
     KeepAlive     :: keepalive() | undefined.
-new(_Socket, _StatName, 0) ->
+new({_Socket, _StatName}, 0, _TimeoutMsg) ->
     undefined;
-new(Socket, StatName, TimeoutSec) when TimeoutSec > 0 ->
-    {ok, [{StatName, StatVal}]} = inet:getstat(Socket, [StatName]),
+new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
     #keepalive{socket      = Socket,
                stat_name   = StatName,
-               stat_val    = StatVal,
-               timeout_sec = TimeoutSec}.
+               timeout_sec = TimeoutSec,
+               timeout_msg = TimeoutMsg}.
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -68,14 +68,26 @@ new(Socket, StatName, TimeoutSec) when TimeoutSec > 0 ->
 %%
 %% @end
 %%------------------------------------------------------------------------------
--spec start(KeepAlive, TimeoutMsg) -> KeepAlive when
-    KeepAlive   :: keepalive() | undefined,
-    TimeoutMsg  :: tuple().
-start(undefined, _TimeoutMsg) ->
+-spec start(KeepAlive) -> KeepAlive when
+    KeepAlive   :: keepalive() | undefined.
+start(undefined) ->
     undefined;
-start(KeepAlive = #keepalive{timeout_sec = TimeoutSec}, TimeoutMsg) ->
+start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName, 
+                             timeout_sec = TimeoutSec, 
+                             timeout_msg = TimeoutMsg}) ->
+    {ok, [{StatName, StatVal}]} = inet:getstat(Socket, [StatName]),
     Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
-    KeepAlive#keepalive{timeout_msg = TimeoutMsg, timer_ref = Ref}.
+    KeepAlive#keepalive{stat_val = StatVal, timer_ref = Ref}.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Restart KeepAlive.
+%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec restart(KeepAlive) -> KeepAlive when
+    KeepAlive   :: keepalive() | undefined.
+restart(KeepAlive) -> start(KeepAlive).
 
 %%------------------------------------------------------------------------------
 %% @doc

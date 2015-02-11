@@ -350,15 +350,18 @@ connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
 %%------------------------------------------------------------------------------
 waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
                 name = Name, 
-                socket = Socket,
                 pending_pubsub = Pending,
                 proto_state = ProtoState,
-                alive_interval = AliveInterval,
+                keepalive = KeepAlive,
                 logger = Logger}) ->
     Logger:info("[Client ~s] RECV: CONNACK_ACCEPT", [Name]),
     {ok, ProtoState1} = emqttc_protocol:received('CONNACK', ProtoState),
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
-    {next_state, connected, start_keepalive(State#state{proto_state = ProtoState1, pending_pubsub = []})};
+    %% start keepalive
+    KeepAlive1 = emqttc_keepalive:start(KeepAlive),
+    {next_state, connected, State#state{proto_state = ProtoState1, 
+                                        keepalive = KeepAlive1, 
+                                        pending_pubsub = []}};
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
@@ -558,6 +561,12 @@ disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
     {next_state, NextStateName :: atom(), NewStateData :: #state{},
         timeout() | hibernate} |
     {stop, Reason :: term(), NewStateData :: #state{}}).
+
+handle_event(tcp_closed, connected, State = #state{name = Name, logger = Logger}) ->
+    Logger:warning("[Client ~s] TCP closed when waiting for connack!", [Name]),
+    %%TODO: handle exception...
+    {stop, {shutdown, tcp_closed}, State};
+
 handle_event(_Event, StateName, State) ->
     {next_state, StateName, State}.
 
@@ -605,21 +614,20 @@ handle_info({timeout, keepalive}, connected, State = #state{proto_state = ProtoS
     case emqttc_keepalive:resume(KeepAlive) of
         timeout -> 
             emqttc_protocol:ping(ProtoState),
-            KeepAlive;
+            emqttc_keepalive:restart(KeepAlive);
         {resumed, KeepAlive1} -> 
             KeepAlive1
     end,
     {next_state, connected, State#state{keepalive = NewKeepAlive}};
 
-handle_info(tcp_closed, StateName, State = #state{name = Name, logger = Logger}) ->
-    Logger:warning("[Client ~s] TCP closed when waiting for connack!", [Name]),
-    %%TODO: handle exception...
-    {stop, {shutdown, tcp_closed}, State};
-
-handle_info(Info = {'EXIT', Pid, Reason}, StateName, State = #state{name = Name, logger = Logger}) ->
-    Logger:error("[Client ~s] ~p", [Name, Info]),
+handle_info({'EXIT', Receiver, Reason}, StateName, State = #state{name = Name, receiver = Receiver, logger = Logger}) ->
+    Logger:warning("[Client ~s] receiver exit: ~p", [Name, Reason]),
     {next_state, StateName, State};
 
+handle_info({inet_reply, Socket, ok}, StateName, State = #state{socket = Socket}) ->
+    %socket send reply.
+    {next_state, StateName, State};
+    
 handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Info when ~s: ~p", [Name, StateName, Info]),
     {next_state, StateName, State}.
@@ -661,6 +669,7 @@ connect(State = #state{name = Name,
                        socket = undefined, 
                        receiver = undefined,
                        proto_state = ProtoState, 
+                       alive_interval = AliveInterval,
                        logger = Logger, 
                        reconnector = Reconnector}) ->
     Logger:info("[Client ~s]: connecting to ~p:~p", [Name, Host, Port]),
@@ -668,9 +677,12 @@ connect(State = #state{name = Name,
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),
+            KeepAlive = emqttc_keepalive:new({Socket, send_oct}, 
+                                             AliveInterval, {timeout, keepalive}),
             Logger:info("[Client ~s] connected with ~p:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#state{socket = Socket,
                                                           receiver = Receiver,
+                                                          keepalive = KeepAlive,
                                                           proto_state = ProtoState1} };
         {error, Reason} ->
             Logger:info("[Client ~s] connection failure: ~p", [Name, Reason]),
@@ -687,19 +699,6 @@ connect(State = #state{name = Name,
 
 pend(Event, State = #state{pending_pubsub = Pending}) ->
     State#state{pending_pubsub = [Event | Pending]}.
-
-%%------------------------------------------------------------------------------
-%% @private
-%% @doc 
-%% Start KeepAlive
-%%
-%% @end
-%%------------------------------------------------------------------------------
-start_keepalive(State = #state{socket = Socket, alive_interval = AliveInterval}) ->
-    KeepAlive = emqttc_keepalive:start(
-            emqttc_keepalive:new(Socket, send_oct, AliveInterval), 
-                {timeout, keepalive}),
-    State#state{keepalive = KeepAlive}.
 
 %%------------------------------------------------------------------------------
 %% @private
