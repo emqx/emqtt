@@ -131,7 +131,7 @@ receiver_loop(ClientPid, Socket, ParseState) ->
         {tcp_closed, Socket} ->
             gen_fsm:send_all_state_event(ClientPid, tcp_closed);
         stop -> 
-            gen_tcp:close(Socket), ok
+            gen_tcp:close(Socket)
     end.
 
 parse_received_bytes(_ClientPid, <<>>, ParseState) ->

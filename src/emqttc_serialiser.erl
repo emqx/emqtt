@@ -89,12 +89,12 @@ serialise_variable(?CONNECT, #mqtt_packet_connect{client_id   =  ClientId,
     UserPasswd = << <<(serialise_utf(B))/binary>> || B <- [Username, Password], B =/= undefined >>,
     {VariableBin, <<PayloadBin1/binary, UserPasswd/binary>>};
 
-serialise_variable(?SUBSCRIBE, #mqtt_packet_subscribe{packet_id   = PacketId,
+serialise_variable(?SUBSCRIBE, #mqtt_packet_subscribe{packet_id = PacketId,
     topic_table = Topics }, undefined) ->
     {<<PacketId:16/big>>, serialise_topics(Topics)};
 
-serialise_variable(?UNSUBSCRIBE, #mqtt_packet_unsubscribe{ packet_id  = PacketId,
-    topics = Topics }, undefined) ->
+serialise_variable(?UNSUBSCRIBE, #mqtt_packet_unsubscribe{
+    packet_id  = PacketId, topics = Topics }, undefined) ->
     {<<PacketId:16/big>>, serialise_topics(Topics)};
 
 serialise_variable(?PUBLISH, #mqtt_packet_publish { topic_name = TopicName,

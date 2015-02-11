@@ -212,7 +212,7 @@
                  variable = #mqtt_packet_suback{packet_id = PacketId,
                                                 qos_table = QosTable}}).
 -define(UNSUBSCRIBE_PACKET(PacketId, Topics), 
-    #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE},
+    #mqtt_packet{header = #mqtt_packet_header{type = ?UNSUBSCRIBE, qos = ?QOS_1},
                  variable = #mqtt_packet_unsubscribe{packet_id = PacketId,
                                                      topics    = Topics}}).
 -define(UNSUBACK_PACKET(PacketId),

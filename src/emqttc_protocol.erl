@@ -49,7 +49,7 @@
 -record(proto_state, {
         socket                  :: inet:socket(),
         socket_name             :: list() | binary(),
-        proto_ver  = 3          :: mqtt_vsn(),
+        proto_ver  = 4          :: mqtt_vsn(),
         proto_name = <<"MQTT">> :: binary(),
         client_id               :: binary(),
         clean_sess = true       :: boolean(),
@@ -84,17 +84,16 @@
     State    :: proto_state().
 init(MqttOpts) ->
 	init(MqttOpts, #proto_state{client_id   = random_id(),
-                                proto_ver   = ?MQTT_PROTO_V311,
-                                proto_name  = <<"MQTT">>,
-                                clean_sess  = false,
-                                keepalive   = 60,
-                                will_flag   = false,
                                 will_msg    = #mqtt_message{} }).
 
 init([], State) ->
     State;
 init([{client_id, ClientId} | Opts], State) when is_binary(ClientId) ->
     init(Opts, State#proto_state{client_id = ClientId});
+init([{proto_ver, ?MQTT_PROTO_V31} | Opts], State) ->
+    init(Opts, State#proto_state{proto_ver = ?MQTT_PROTO_V31, proto_name = <<"MQIsdp">>});
+init([{proto_ver, ?MQTT_PROTO_V311} | Opts], State) ->
+    init(Opts, State#proto_state{proto_ver = ?MQTT_PROTO_V311, proto_name = <<"MQTT">>});
 init([{clean_sess, CleanSess} | Opts], State) when is_boolean(CleanSess) ->
     init(Opts, State#proto_state{clean_sess = CleanSess});
 init([{keepalive, KeepAlive} | Opts], State) when is_integer(KeepAlive) ->
@@ -238,6 +237,10 @@ ping(State) ->
 
 disconnect(State) ->
     send(?PACKET(?DISCONNECT), State).
+
+received('CONNACK', State = #proto_state{clean_sess = true}) ->
+    %%TODO: Send awaiting...
+    {ok, State};
 
 received('CONNACK', State = #proto_state{clean_sess = false}) ->
     %%TODO: Resume Session...
