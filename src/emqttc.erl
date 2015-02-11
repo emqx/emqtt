@@ -85,8 +85,8 @@
         receiver            :: pid(),
         proto_state         :: emqttc_protocol:proto_state(),
         subscribers = []    :: list(),
-        pubsub_map = #{}    :: map(),
-        ping_reqs = []      :: list(),
+        pubsub_map  = #{}   :: map(),
+        ping_reqs   = []    :: list(),
         pending_pubsub = [] :: list(),
         keepalive           :: emqttc_keepalive:keepalive() | undefined,
         reconnector         :: emqttc_reconnector:reconnector() | undefined,
@@ -484,16 +484,15 @@ connected(?PUBLISH_PACKET(?QOS_0, Topic, undefined, Payload), State = #state{nam
     dispatch({publish, Topic, Payload}, State),
     {next_state, connected, State};
 
-connected(?PUBLISH_PACKET(?QOS_1, Topic, PacketId, Payload), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
+connected(Packet = ?PUBLISH_PACKET(?QOS_1, Topic, PacketId, Payload), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
     Logger:info("[Client ~s] RECV: Publish(qos=1, packet_id=~p, topic=~s, payload=~p)", [PacketId, Name, Topic, Payload]),
-    emqttc_protocol:puback(PacketId, ProtoState),
+    emqttc_protocol:received(Packet, ProtoState),
     dispatch({publish, Topic, Payload}, State),
     {next_state, connected, State};
 
 connected(Packet = ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
     Logger:info("[Client ~s] RECV: Publish(qos=2, packet_id=~p, topic=~s, payload=~p)", [PacketId, Name, Topic, Payload]),
-    emqttc_protocol:pubrec(PacketId, ProtoState),
-    {ok, ProtoState1} = emqttc_protocol:store(Packet, ProtoState),
+    {ok, ProtoState1} = emqttc_protocol:received(Packet, ProtoState),
     {next_state, connected, State#state{proto_state = ProtoState1}};
 
 connected(?PUBACK_PACKET(?PUBACK, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
@@ -508,10 +507,14 @@ connected(?PUBACK_PACKET(?PUBREC, PacketId), State = #state{name = Name, proto_s
 
 connected(?PUBACK_PACKET(?PUBREL, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
     Logger:info("[Client ~s] RECV: Pubrel(packet_id=~p)", [Name, PacketId]),
-    %%TODO:
-    {ok, ProtoState1, Publish} = emqttc_protocol:received({'PUBREL', PacketId}, ProtoState),
-    dispatch(Publish, State),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
+    ProtoState2 = 
+    case emqttc_protocol:received({'PUBREL', PacketId}, ProtoState) of
+        {ok, ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), ProtoState1} ->
+            dispatch({publish, Topic, Payload}, State), ProtoState1;
+        {ok, ProtoState1} -> ProtoState1
+    end,
+    emqttc_protocol:pubcomp(PacketId, ProtoState2),
+    {next_state, connected, State#state{proto_state = ProtoState2}};
 
 connected(?PUBACK_PACKET(?PUBCOMP, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
     Logger:info("[Client ~s] RECV: Pubcomp(packet_id=~p)", [Name, PacketId]),

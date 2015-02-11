@@ -38,6 +38,7 @@
          puback/2,
          pubrec/2,
          pubrel/2,
+         pubcomp/2,
          store/2,
          subscribe/2,
          unsubscribe/2,
@@ -210,6 +211,9 @@ pubrec(PacketId, State) when is_integer(PacketId) ->
 pubrel(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBREL, PacketId), State).
 
+pubcomp(PacketId, State) when is_integer(PacketId) ->
+    send(?PUBACK_PACKET(?PUBCOMP, PacketId), State).
+
 subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
     case Resubs of
@@ -236,16 +240,17 @@ ping(State) ->
 disconnect(State) ->
     send(?PACKET(?DISCONNECT), State).
 
-%%TODO: should be merge with received(publish...
-store(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload), State = #proto_state{awaiting_rel = AwaitingRel}) ->
-    {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}}.
-
 received('CONNACK', State = #proto_state{clean_sess = false}) ->
     %%TODO: Resume Session...
     {ok, State};
 
-received({'PUBLISH', Msg}, State = #proto_state{awaiting_rel = AwaitingRel, logger = Logger}) ->
-    {ok, State};
+received({'PUBLISH', ?PUBLISH_PACKET(?QOS_1, _Topic, PacketId, _Payload)}, State) ->
+    puback(PacketId, State);
+
+received({'PUBLISH', Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload)}, 
+         State = #proto_state{awaiting_rel = AwaitingRel}) ->
+    pubrec(PacketId, State),
+    {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}};
 
 received({'PUBACK', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck, logger = Logger}) ->
     case maps:is_key(PacketId, AwaitingAck) of
@@ -261,13 +266,14 @@ received({'PUBREC', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck,
         true -> ok;
         false -> Logger:warning("[~s] PUBREC PacketId '~p' not found!", [logtag(State), PacketId])
     end,
+    pubrel(PacketId, State),
     {ok, State#proto_state{awaiting_ack   = maps:remove(PacketId, AwaitingAck), 
                            awaiting_comp  = maps:put(PacketId, true, AwaitingComp)}};
 
 received({'PUBREL', PacketId}, State = #proto_state{awaiting_rel = AwaitingRel, logger = Logger}) ->
     case maps:find(PacketId, AwaitingRel) of
-        {ok, Msg} -> 
-            {ok, Msg, State#proto_state{awaiting_rel = maps:remove(PacketId, AwaitingRel)}}; 
+        {ok, Publish} -> 
+            {ok, Publish, State#proto_state{awaiting_rel = maps:remove(PacketId, AwaitingRel)}}; 
         error -> 
             Logger:warning("[~s] PUBREL PacketId '~p' not found!", [logtag(State), PacketId]),
             {ok, State}
