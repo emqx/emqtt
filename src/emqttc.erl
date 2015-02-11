@@ -479,61 +479,10 @@ connected(disconnect, State=#state{socket = Socket, receiver = Receiver, proto_s
     emqttc_socket:close(Socket),
     {stop, normal, State#state{socket = undefined, receiver = undefined}};
 
-connected(?PUBLISH_PACKET(?QOS_0, Topic, undefined, Payload), State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Publish(qos=0, topic=~s, payload=~p)", [Name, Topic, Payload]),
-    dispatch({publish, Topic, Payload}, State),
-    {next_state, connected, State};
-
-connected(Packet = ?PUBLISH_PACKET(?QOS_1, Topic, PacketId, Payload), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Publish(qos=1, packet_id=~p, topic=~s, payload=~p)", [PacketId, Name, Topic, Payload]),
-    emqttc_protocol:received(Packet, ProtoState),
-    dispatch({publish, Topic, Payload}, State),
-    {next_state, connected, State};
-
-connected(Packet = ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Publish(qos=2, packet_id=~p, topic=~s, payload=~p)", [PacketId, Name, Topic, Payload]),
-    {ok, ProtoState1} = emqttc_protocol:received(Packet, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?PUBACK_PACKET(?PUBACK, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Puback(packet_id=~p)", [Name, PacketId]),
-    {ok, ProtoState1} = emqttc_protocol:received({'PUBACK', PacketId}, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?PUBACK_PACKET(?PUBREC, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Pubrec(packet_id=~p)", [Name, PacketId]),
-    {ok, ProtoState1} = emqttc_protocol:received({'PUBREC', PacketId}, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?PUBACK_PACKET(?PUBREL, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Pubrel(packet_id=~p)", [Name, PacketId]),
-    ProtoState2 = 
-    case emqttc_protocol:received({'PUBREL', PacketId}, ProtoState) of
-        {ok, ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), ProtoState1} ->
-            dispatch({publish, Topic, Payload}, State), ProtoState1;
-        {ok, ProtoState1} -> ProtoState1
-    end,
-    emqttc_protocol:pubcomp(PacketId, ProtoState2),
-    {next_state, connected, State#state{proto_state = ProtoState2}};
-
-connected(?PUBACK_PACKET(?PUBCOMP, PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: Pubcomp(packet_id=~p)", [Name, PacketId]),
-    {ok, ProtoState1} = emqttc_protocol:received({'PUBCOMP', PacketId}, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?SUBACK_PACKET(PacketId, QosTable), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: SUBACK(packet_id=~p, qos_table=~p)", [Name, PacketId, QosTable]),
-    {ok, ProtoState1} = emqttc_protocol:received({'SUBACK', PacketId, QosTable}, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?UNSUBACK_PACKET(PacketId), State = #state{name = Name, proto_state = ProtoState, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: UNSUBACK(packet_id=~p)", [Name, PacketId]),
-    {ok, ProtoState1} = emqttc_protocol:received({?UNSUBACK, PacketId}, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
-
-connected(?PACKET(?PINGRESP), State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV PINGRESP", [Name]),
-    {next_state, connected, State};
+connected(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
+    Logger:info("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
+    {ok, NewState} = received(Packet, State),
+    {next_state, connected, NewState};
 
 connected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when broker connected!", [Name, Event]),
@@ -722,6 +671,59 @@ connect(State = #state{name = Name,
 
 pend(Event, State = #state{pending_pubsub = Pending}) ->
     State#state{pending_pubsub = [Event | Pending]}.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 
+%% Handle Received Packet
+%%
+%% @end
+%%------------------------------------------------------------------------------
+received(?PUBLISH_PACKET(?QOS_0, Topic, undefined, Payload), State) ->
+    dispatch({publish, Topic, Payload}, State),
+    {ok, State};
+
+received(Packet = ?PUBLISH_PACKET(?QOS_1, Topic, PacketId, Payload), State = #state{proto_state = ProtoState}) ->
+    emqttc_protocol:received(Packet, ProtoState),
+    dispatch({publish, Topic, Payload}, State),
+    {ok, State};
+
+received(Packet = ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received(Packet, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?PUBACK_PACKET(?PUBACK, PacketId), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({'PUBACK', PacketId}, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?PUBACK_PACKET(?PUBREC, PacketId), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({'PUBREC', PacketId}, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?PUBACK_PACKET(?PUBREL, PacketId), State = #state{proto_state = ProtoState}) ->
+    ProtoState2 = 
+    case emqttc_protocol:received({'PUBREL', PacketId}, ProtoState) of
+        {ok, ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), ProtoState1} ->
+            dispatch({publish, Topic, Payload}, State), ProtoState1;
+        {ok, ProtoState1} -> ProtoState1
+    end,
+    emqttc_protocol:pubcomp(PacketId, ProtoState2),
+    {ok, State#state{proto_state = ProtoState2}};
+
+received(?PUBACK_PACKET(?PUBCOMP, PacketId), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({'PUBCOMP', PacketId}, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?SUBACK_PACKET(PacketId, QosTable), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({'SUBACK', PacketId, QosTable}, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?UNSUBACK_PACKET(PacketId), State = #state{proto_state = ProtoState}) ->
+    {ok, ProtoState1} = emqttc_protocol:received({?UNSUBACK, PacketId}, ProtoState),
+    {ok, State#state{proto_state = ProtoState1}};
+
+received(?PACKET(?PINGRESP), State) ->
+    {ok, State}.
 
 %%------------------------------------------------------------------------------
 %% @private

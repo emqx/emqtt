@@ -33,7 +33,7 @@
 %% API
 -export([protocol_name/1, type_name/1, connack_name/1]).
 
--export([make/1, make/2, dump/1]).
+-export([dump/1]).
 
 protocol_name(Ver) when Ver =:= ?MQTT_PROTO_V31; Ver =:= ?MQTT_PROTO_V311->
     proplists:get_value(Ver, ?PROTOCOL_NAMES).
@@ -47,23 +47,6 @@ connack_name(?CONNACK_INVALID_ID )  -> 'CONNACK_INVALID_ID';
 connack_name(?CONNACK_SERVER)       -> 'CONNACK_SERVER';
 connack_name(?CONNACK_CREDENTIALS)  -> 'CONNACK_CREDENTIALS';
 connack_name(?CONNACK_AUTH)         -> 'CONNACK_AUTH'.
-
-make(Type) when Type >= ?CONNECT andalso Type =< ?DISCONNECT -> 
-    #mqtt_packet{header = #mqtt_packet_header{ type = Type }}.
-
-make(PubAck, PacketId) when PubAck >= ?PUBACK, PubAck =< ?PUBCOMP, is_integer(PacketId) ->
-    #mqtt_packet{header = #mqtt_packet_header{type = PubAck, 
-                                              qos  = qos(PubAck)}, 
-                 variable = #mqtt_packet_puback{packet_id = PacketId }};
-
-make(Type, Variable) when Type > ?RESERVED, Type =< ?DISCONNECT ->
-    #mqtt_packet{header   = #mqtt_packet_header{type = Type, qos = qos(Type)},
-                 variable = Variable}.
-
-qos(?PUBREL)        -> ?QOS_1;
-qos(?SUBSCRIBE)     -> ?QOS_1;
-qos(?UNSUBSCRIBE)   -> ?QOS_1;
-qos(_Type)          ->  ?QOS_0.
 
 dump(#mqtt_packet{header = Header, variable = Variable, payload = Payload}) ->
     dump_header(Header, dump_variable(Variable, Payload)).

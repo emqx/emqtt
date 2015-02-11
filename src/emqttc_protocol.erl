@@ -39,7 +39,6 @@
          pubrec/2,
          pubrel/2,
          pubcomp/2,
-         store/2,
          subscribe/2,
          unsubscribe/2,
          ping/1,
