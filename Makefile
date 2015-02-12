@@ -6,7 +6,8 @@ REBAR=./rebar
 REBAR_GEN=../../rebar
 DIALYZER=dialyzer
 
-all: update-deps get-deps clean compile xref edoc
+#update-deps edoc
+all: get-deps compile xref
 
 get-deps:
 	@$(REBAR) get-deps
@@ -27,7 +28,7 @@ test:
 	@$(REBAR) skip_deps=true eunit
 
 edoc:
-	./make_doc
+	@$(REBAR) doc
 
 dialyzer: compile
 	@$(DIALYZER) ebin deps/ossp_uuid/ebin

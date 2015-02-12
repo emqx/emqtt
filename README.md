@@ -72,4 +72,10 @@ Default Keep Alive value is 20(sec), If you want to set KeepAlive, add option <c
 1> {ok, Pid} = emqttc:start_link([{host, "test.mosquitto.org"}, {keep_alive. 60}]).
 ```
 
+## Contributors 
+
+@hiroeorz
+
+@desoulter
+
 

@@ -1,5 +1,0 @@
-%% encoding: UTF-8
-{application,edown}.
-{packages,[]}.
-{modules,[emqtt_frame,emqttc,emqttc_app,emqttc_childno,emqttc_event,
-          emqttc_sock,emqttc_sock_sup,emqttc_sup]}.
