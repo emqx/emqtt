@@ -188,9 +188,9 @@ emqttc:start_link([{reconnect, {3, 120, 10}}]).
 
 ```
 
-## Subscribe and Publush
+## Subscribe and Publish
 
-### Pulbish API
+### Publish API
 
 ```erlang
 
