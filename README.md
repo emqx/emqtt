@@ -74,12 +74,13 @@ $ make
 
 ## Connect to Broker
 
-Connect to MQTT Broker.
+Connect to MQTT Broker:
 
 ```erlang
 
 {ok, C1} = emqttc:start_link([{host, "test.mosquitto.org"}]).
 
+%% with name 'emqttclient'
 {ok, C2} = emqttc:start_link(emqttclient, [{host, "test.mosquitto.org"}]).
 
 ```
@@ -92,7 +93,7 @@ Connect to MQTT Broker.
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
                    | {keepalive, non_neg_integer()}
-                   | {proto_vsn, mqtt_vsn()}
+                   | {proto_ver, mqtt_vsn()}
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
@@ -107,7 +108,7 @@ port   | inet:port_number() | 1883 | Broker Port |
 client_id | binary() | random clientId | MQTT ClientId | <<"slimpleClientId">>
 clean_sess | boolean() | true | MQTT CleanSession | 
 keepalive | non_neg_integer() | 60 | MQTT KeepAlive(secs) 
-proto_vsn | mqtt_vsn()			| 4 | MQTT Protocol Version |
+proto_ver | mqtt_vsn()			| 4 | MQTT Protocol Version | 3,4
 username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
@@ -120,13 +121,13 @@ Default Clean Session value is true, If you want to set Clean Session = false, a
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {clean_sess. false}]).
+emqttc:start_link([{host, "test.mosquitto.org"}, {clean_sess, false}]).
 
 ```
 
 ### KeepAlive
 
-Default Keep Alive value is 60(secs), If you want to change KeepAlive, add option <code>{keepalive, 300}</code>. No KeepAlive to use <code>{keepalive, 0}</code>.
+Default KeepAlive value is 60(secs), If you want to change KeepAlive, add option <code>{keepalive, 300}</code>. No KeepAlive to use <code>{keepalive, 0}</code>.
 
 ```erlang
 
@@ -149,6 +150,26 @@ emqttc:start_link([{logger, {otp, warning}}]).
 %% log to lager with error level
 emqttc:start_link([{logger, {lager, error}}]).
 
+```
+
+#### Logger modules
+
+Module | Description
+-------|------------
+stdout | io:format
+otp    | error_logger
+lager  | lager
+
+#### Logger Levels
+
+```
+all
+debug
+info
+warning
+error
+critical
+none
 ```
 
 ### Reconnect
@@ -179,43 +200,55 @@ emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>).
 %% publish(Client, Topic, Payload, PubOpts) with options
 emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain true}]).
 
-```erlang
+```
 
 ### Subscribe API
 
-%% subscribe.
-3> Qos = 0.
-4> emqttc:subscribe(Pid, [{<<"temp/random">>, Qos}]).
-ok
+```erlang
 
+%% subscribe topic with Qos0
+emqttc:subscribe(Client, <<"Topic">>).
+
+%% subscribe topic with qos
+emqttc:subscribe(Client, {<<"Topic">>, 1}).
+%% or
+emqttc:subscribe(Client, <<"Topic">>, 1).
+
+%% subscribe topics
+emqttc:subscribe(Client, [{<<"Topic1">>, 1}, {<<"Topic2">>, 2}]).
 
 %% unsubscribe
+emqttc:unsubscribe(Client, <<"Topic">>).
+emqttc:unsubscribe(Client, [<<"Topic1">>, <<"Topic2">>]).
+
+```
 
 ## Ping and Pong
 
-Ping Pong
+```erlang
+pong = emqttc:ping(Client).
+```
 
 ## Disconnect
 
-Disconnect from Broker...
+```erlang
+emqttc:disconnect(Client).
+```
 
 ## Design 
 
-Socket Design Diagraph
-
-## Contributors 
-
-@hiroeorz
-
-@desoulter
-
-@erylee
+![Design](https://raw.githubusercontent.com/emqtt/emqttc/master/doc/Socket.png)
 
 ## License
 
 The MIT License (MIT)
 
+## Contributors
+
+@hiroeorz
+
+@desoulter
+
 ## Contact
 
 feng@emqtt.io
-
