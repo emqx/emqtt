@@ -68,7 +68,7 @@
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
                    | {keepalive, non_neg_integer()}
-                   | {proto_vsn, mqtt_vsn()}
+                   | {proto_ver, mqtt_vsn()}
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
