@@ -7,3 +7,10 @@ deps
 .DS_Store
 log
 eunit.coverage.xml
+.rebar
+*.swp
+oldsrc/
+doc/*.html
+doc/*.css
+doc/edoc-info
+doc/erlang.png
