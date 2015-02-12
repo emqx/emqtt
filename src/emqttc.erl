@@ -73,7 +73,7 @@
                    | {password, binary()}
                    | {will, list(tuple())}
                    | {logger, atom() | {atom(), atom()}}
-                   | {reconnector, emqttc_reconnector:reconnector() | undefined}.
+                   | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
 -type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
 
