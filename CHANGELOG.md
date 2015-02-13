@@ -2,7 +2,7 @@
 ChangeLog
 ==================
 
-v0.2.1-beta (2015-02-12)
+v0.2.1-beta (2015-02-14)
 ------------------------
 
 Feature: SSL Socket Support
