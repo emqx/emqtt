@@ -658,7 +658,7 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
                            pubsub_map  = PubSubMap,
                            ping_reqs = PingReqs,
                            logger = Logger}) ->
-    Logger:error("[Client ~s] Process DOWN: ~p", [Name, Down]),
+    Logger:warning("[Client ~s] Process DOWN: ~p", [Name, Down]),
 
     %% ping?
     PingReqs1 = lists:keydelete(MonRef, 2, PingReqs),
@@ -677,6 +677,7 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
         false ->
             {Subscribers, PubSubMap}
     end,
+
     {next_state, StateName, State#state{subscribers = Subscribers1,
                                         pubsub_map = PubSubMap1,
                                         ping_reqs = PingReqs1 }};

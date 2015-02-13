@@ -31,6 +31,20 @@ disconnect_test() ->
     timer:sleep(1000),
     emqttc:disconnect(C).
 
+subscribe_down_test() ->
+    {ok, C} = start_client(),
+    _SubPid = spawn(fun() ->
+                        emqttc:subscribe(C, <<"Topic">>),
+                        receive
+                            {publish, _Topic, _Payload} -> ok
+                        after
+                            1000 -> exit(timeout)
+                        end
+                    end),
+    timer:sleep(500),
+    emqttc:publish(C, <<"Topic">>, <<"Payload">>),
+    timer:sleep(500).
+
 start_client() ->
     emqttc:start_link([{logger, {otp, info}}]).
 
