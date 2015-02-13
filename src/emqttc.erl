@@ -652,6 +652,35 @@ handle_info({'EXIT', Receiver, Reason}, _StateName,
     emqttc_keepalive:cancel(KeepAlive),
     try_reconnect({receiver, Reason}, State#state{receiver = undefined});
 
+handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
+            State = #state{name = Name,
+                           subscribers = Subscribers,
+                           pubsub_map  = PubSubMap,
+                           ping_reqs = PingReqs,
+                           logger = Logger}) ->
+    Logger:error("[Client ~s] Process DOWN: ~p", [Name, Down]),
+
+    %% ping?
+    PingReqs1 = lists:keydelete(MonRef, 2, PingReqs),
+
+    %% clear pubsub
+    {Subscribers1, PubSubMap1} =
+    case lists:keyfind(MonRef, 2, Subscribers) of
+        {Pid, MonRef} ->
+            {lists:delete({Pid, MonRef}, Subscribers),
+                maps:fold(fun(Topic, Subs, Map) ->
+                        case lists:member(Pid, Subs) of
+                                true -> maps:put(Topic, lists:delete(Pid, Subs), Map);
+                                false -> Map
+                        end
+                    end, PubSubMap, PubSubMap)};
+        false ->
+            {Subscribers, PubSubMap}
+    end,
+    {next_state, StateName, State#state{subscribers = Subscribers1,
+                                        pubsub_map = PubSubMap1,
+                                        ping_reqs = PingReqs1 }};
+
 handle_info({inet_reply, Socket, ok}, StateName, State = #state{socket = Socket}) ->
     %socket send reply.
     {next_state, StateName, State};
