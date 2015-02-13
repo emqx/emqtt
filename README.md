@@ -115,7 +115,7 @@ proto_ver | mqtt_vsn()			| 4 | MQTT Protocol Version | 3,4
 username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
-ssl  | | | ssl socket | 
+ssl  | | | SSL socket | 
 logger | atom() or {atom(), atom()} | info | Client Logger | error, {opt, info}, {lager, error}
 reconnect | false, or integer() | false | Client Reconnect | false, 4, {4, 60}
 
