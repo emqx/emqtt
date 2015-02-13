@@ -10,6 +10,8 @@ Both MQTT V3.1/V3.1.1 Protocol Support
 
 QoS0, QoS1, QoS2 Publish and Subscribe
 
+SSL Socket Support
+
 ## Usage
 
 ### simple 
@@ -97,6 +99,7 @@ Connect to MQTT Broker:
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
+                   | ssl
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 ```
@@ -112,6 +115,7 @@ proto_ver | mqtt_vsn()			| 4 | MQTT Protocol Version | 3,4
 username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
+ssl  | | | ssl socket | 
 logger | atom() or {atom(), atom()} | info | Client Logger | error, {opt, info}, {lager, error}
 reconnect | false, or integer() | false | Client Reconnect | false, 4, {4, 60}
 
@@ -132,6 +136,16 @@ Default KeepAlive value is 60(secs), If you want to change KeepAlive, add option
 ```erlang
 
 emqttc:start_link([{host, "test.mosquitto.org"}, {keepalive, 60}]).
+
+```
+
+### SSL Socket
+
+Connect to broker with SSL Socket:
+
+```erlang
+
+emqttc:start_link([{host, "test.mosquitto.org"}, {port, 8883}, ssl]).
 
 ```
 
