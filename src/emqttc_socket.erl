@@ -31,45 +31,70 @@
 -include("emqttc_packet.hrl").
 
 %% API
--export([connect/3, send/2, close/1, stop/1]).
+-export([connect/4, controlling_process/2, send/2, close/1, stop/1]).
 
--export([sockname/1, sockname_s/1, setopts/2]).
+-export([sockname/1, sockname_s/1, setopts/2, getstat/2]).
 
 %% Internal export
 -export([receiver/2]).
 
--define(TIMEOUT, 3000).
+%% 30 (secs)
+-define(TIMEOUT, 30000).
 
 -define(TCPOPTIONS, [
     binary,
     {packet,    raw},
     {reuseaddr, true},
     {nodelay,   true},
-    {active, 	true},
+    {active, 	false},
     {reuseaddr, true},
     {send_timeout,  ?TIMEOUT}]).
 
+-define(SSLOPTIONS, [{depth, 0}]).
+
 %%%-----------------------------------------------------------------------------
 %%% @doc
-%%% Connect to broker with TCP transport.
+%%% Connect to broker with TCP or SSL transport.
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--spec connect(ClientPid, Host, Port) -> {ok, Socket, Receiver} | {error, term()} when
+-spec connect(ClientPid, Transport, Host, Port) -> {ok, Socket, Receiver} | {error, term()} when
     ClientPid   :: pid(),
+    Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
     Socket      :: inet:socket(),
     Receiver    :: pid().
-connect(ClientPid, Host, Port) ->
-    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
-        {ok, Socket} -> 
+connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
+    case connect(Transport, Host, Port) of
+        {ok, Socket} ->
             ReceiverPid = spawn_link(?MODULE, receiver, [ClientPid, Socket]),
-            gen_tcp:controlling_process(Socket, ReceiverPid),
-            {ok, Socket, ReceiverPid} ;
-        {error, Reason} -> 
+            controlling_process(Socket, ReceiverPid),
+            {ok, Socket, ReceiverPid};
+        {error, Reason} ->
             {error, Reason}
     end.
+
+-spec connect(Transport, Host, Port) -> {ok, Socket} | {error, any()} when
+    Transport   :: tcp | ssl,
+    Host        :: inet:ip_address() | string(),
+    Port        :: inet:port_number(),
+    Socket      :: inet:socket() | ssl:sslsocket().
+connect(tcp, Host, Port) ->
+    gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT); 
+connect(ssl, Host, Port) ->
+    ssl:connect(Host, Port, ?TCPOPTIONS++?SSLOPTIONS, ?TIMEOUT).
+
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% Socket controlling process.
+%%%
+%%% @end
+%%%-----------------------------------------------------------------------------
+controlling_process(Socket, Pid) when is_port(Socket) ->
+    gen_tcp:controlling_process(Socket, Pid);
+controlling_process(SslSocket, Pid) ->
+    ssl:controlling_process(SslSocket, Pid).
 
 %%%-----------------------------------------------------------------------------
 %%% @doc
@@ -77,11 +102,13 @@ connect(ClientPid, Host, Port) ->
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--spec send(Socket :: inet:socket(), mqtt_packet() | binary()) -> ok.
-send(Socket, Packet) when is_record(Packet, mqtt_packet) ->
-    send(Socket, emqttc_serialiser:serialise(Packet));
-send(Socket, Data) when is_binary(Data) ->
-    erlang:port_command(Socket, Data).
+-spec send(Socket, Data) -> ok when 
+    Socket  :: inet:socket() | ssl:sslsocket(),
+    Data    :: binary().
+send(Socket, Data) when is_port(Socket) ->
+    gen_tcp:send(Socket, Data);
+send(SslSocket, Data) ->
+    ssl:send(SslSocket, Data).
 
 %%%-----------------------------------------------------------------------------
 %%% @doc
@@ -89,9 +116,11 @@ send(Socket, Data) when is_binary(Data) ->
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--spec close(Socket :: inet:socket()) -> ok.
-close(Socket) ->
-    gen_tcp:close(Socket).
+-spec close(Socket :: inet:socket() | ssl:sslsocket()) -> ok.
+close(Socket) when is_port(Socket) ->
+    gen_tcp:close(Socket);
+close(SslSocket) ->
+    ssl:close(SslSocket).
 
 %%%-----------------------------------------------------------------------------
 %%% @doc
@@ -103,11 +132,46 @@ close(Socket) ->
 stop(Receiver) ->
     Receiver ! stop.
 
-setopts(Socket, Opts) ->
-    inet:setopts(Socket, Opts).
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% Set socket options.
+%%%
+%%% @end
+%%%-----------------------------------------------------------------------------
+setopts(Socket, Opts) when is_port(Socket) ->
+    inet:setopts(Socket, Opts);
+setopts(SslSocket, Opts) ->
+    ssl:setopts(SslSocket, Opts).
 
-sockname(Sock) when is_port(Sock) ->
-    inet:sockname(Sock).
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% Get socket stats.
+%%%
+%%% @end
+%%%-----------------------------------------------------------------------------
+-spec getstat(Socket, Stats) -> {ok, Result} | {error, any()} when 
+    Socket  :: inet:socket() | ssl:sslsocket(),
+    Stats   :: list(),
+    Result  :: list().
+getstat(Socket, Stats) when is_port(Socket) ->
+    inet:getstat(Socket, Stats);
+getstat(SslSocket, Stats) -> %% TODO...
+    inet:getstat(SslSocket#ssl_socket.tcp, Stats).
+
+%%%-----------------------------------------------------------------------------
+%%% @doc
+%%% Socket name.
+%%%
+%%% @end
+%%%-----------------------------------------------------------------------------
+-spec sockname(Socket) -> {ok, {Address, Port}} | {error, any()} when
+    Socket  :: inet:socket() | ssl:sslsocket(),
+    Address :: inet:address(),
+    Port    :: inet:port().
+sockname(Socket) when is_port(Socket) ->
+    inet:sockname(Socket);
+sockname(SslSocket) ->
+    ssl:sockname(SslSocket).
 
 sockname_s(Sock) ->
     case sockname(Sock) of
@@ -124,27 +188,38 @@ receiver(ClientPid, Socket) ->
     receiver_loop(ClientPid, Socket, emqttc_parser:new()).
 
 receiver_loop(ClientPid, Socket, ParseState) ->
+    setopts(Socket, [{active, once}]),
     receive
         {tcp, Socket, Data} ->
-            {ok, ParseState1} = parse_received_bytes(ClientPid, Data, ParseState),
-            receiver_loop(ClientPid, Socket, ParseState1);
+            receiver_loop(ClientPid, Socket, 
+                          parse_received_bytes(ClientPid, Data, ParseState));
+        {ssl, Socket, Data} ->
+            receiver_loop(ClientPid, Socket, 
+                          parse_received_bytes(ClientPid, Data, ParseState));
         {tcp_closed, Socket} ->
-            gen_fsm:send_all_state_event(ClientPid, tcp_closed);
+            connection_lost(ClientPid, tcp_closed);
+        {ssl_closed, Socket} ->
+            connection_lost(ClientPid, ssl_closed);
+        {ssl_error, Socket, Reason} ->
+            connection_lost(ClientPid, {ssl_error, Reason});
         stop -> 
-            gen_tcp:close(Socket)
+            close(Socket)
     end.
 
 parse_received_bytes(_ClientPid, <<>>, ParseState) ->
-    {ok, ParseState};
+    ParseState;
 
 parse_received_bytes(ClientPid, Data, ParseState) ->
     case emqttc_parser:parse(Data, ParseState) of
-    {more, ParseState1} ->
-        {ok, ParseState1};
+    {more, ParseState1} -> 
+        ParseState1;
     {ok, Packet, Rest} -> 
         gen_fsm:send_event(ClientPid, Packet),
         parse_received_bytes(ClientPid, Rest, ParseState)
     end.
+
+connection_lost(ClientPid, Reason) ->
+    gen_fsm:send_all_state_event(ClientPid, {connection_lost, Reason}).
 
 maybe_ntoab(Addr) when is_tuple(Addr) -> ntoab(Addr);
 maybe_ntoab(Host)                     -> Host.
@@ -160,3 +235,4 @@ ntoab(IP) ->
         0 -> Str;
         _ -> "[" ++ Str ++ "]"
     end.
+

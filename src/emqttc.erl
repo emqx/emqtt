@@ -72,6 +72,7 @@
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
+                   | ssl
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
@@ -90,6 +91,7 @@
         pending_pubsub = [] :: list(),
         keepalive           :: emqttc_keepalive:keepalive() | undefined,
         keepalive_time = 60 :: non_neg_integer(),
+        transport = tcp     :: tcp | ssl,
         reconnector         :: emqttc_reconnector:reconnector() | undefined,
         logger              :: gen_logger:logmod()}).
 
@@ -289,10 +291,13 @@ init([Name, MqttOpts]) ->
 
     ProtoState = emqttc_protocol:init([{logger, Logger} | MqttOpts1]),
 
+    IsSSL = get_value(ssl, MqttOpts1, false),
+
     State = init(MqttOpts1, #state{
                     name         = Name,
                     host         = "localhost",
-                    port         = 1883,
+                    port         = if IsSSL -> 8883;
+                                      true  -> 1883 end,
                     proto_state  = ProtoState,
                     logger       = Logger}),
 
@@ -304,6 +309,9 @@ init([{host, Host} | Opts], State) ->
     init(Opts, State#state{host = Host});
 init([{port, Port} | Opts], State) ->
     init(Opts, State#state{port = Port});
+init([ssl | Opts], State) ->
+    ssl:start(), % ok? hehe...
+    init(Opts, State#state{transport = ssl});
 init([{logger, Cfg} | Opts], State) ->
     init(Opts, State#state{logger = gen_logger:new(Cfg)});
 init([{keepalive, Time} | Opts], State) ->
@@ -571,10 +579,10 @@ disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
         timeout() | hibernate} |
     {stop, Reason :: term(), NewStateData :: #state{}}).
 
-handle_event(tcp_closed, _StateName, State = #state{name = Name, keepalive = KeepAlive, logger = Logger}) ->
-    Logger:warning("[Client ~s] TCP closed by the peer!", [Name]),
+handle_event({connection_lost, Reason}, _StateName, State = #state{name = Name, keepalive = KeepAlive, logger = Logger}) ->
+    Logger:warning("[Client ~s] Connection lost for: ~p", [Name, Reason]),
     emqttc_keepalive:cancel(KeepAlive),
-    try_reconnect(tcp_closed, State#state{socket = undefined});
+    try_reconnect(Reason, State#state{socket = undefined});
 
 handle_event(Event, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event when ~s: ~p", [Name, StateName, Event]),
@@ -695,9 +703,10 @@ connect(State = #state{name = Name,
                        receiver = undefined,
                        proto_state = ProtoState, 
                        keepalive_time = KeepAliveTime,
+                       transport = Transport,
                        logger = Logger}) ->
     Logger:info("[Client ~s]: connecting to ~p:~p", [Name, Host, Port]),
-    case emqttc_socket:connect(self(), Host, Port) of
+    case emqttc_socket:connect(self(), Transport, Host, Port) of
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),

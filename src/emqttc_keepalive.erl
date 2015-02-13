@@ -49,7 +49,7 @@
 %% @end
 %%%-----------------------------------------------------------------------------
 -spec new({Socket, StatName}, TimeoutSec, TimeoutMsg) -> KeepAlive when
-    Socket        :: inet:socket(),
+    Socket        :: inet:socket() | ssl:sslsocket(),
     StatName      :: inet:stat_option(),
     TimeoutSec    :: non_neg_integer(),
     TimeoutMsg    :: tuple(),
@@ -75,7 +75,7 @@ start(undefined) ->
 start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName, 
                              timeout_sec = TimeoutSec, 
                              timeout_msg = TimeoutMsg}) ->
-    {ok, [{StatName, StatVal}]} = inet:getstat(Socket, [StatName]),
+    {ok, [{StatName, StatVal}]} = emqttc_socket:getstat(Socket, [StatName]),
     Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
     KeepAlive#keepalive{stat_val = StatVal, timer_ref = Ref}.
 
@@ -104,7 +104,7 @@ resume(KeepAlive = #keepalive{socket      = Socket,
                               timeout_sec = TimeoutSec,
                               timeout_msg = TimeoutMsg,
                               timer_ref   = Ref}) ->
-    {ok, [{StatName, NewStatVal}]} = inet:getstat(Socket, [StatName]),
+    {ok, [{StatName, NewStatVal}]} = emqttc_socket:getstat(Socket, [StatName]),
     if
         NewStatVal =:= StatVal ->
             timeout;
