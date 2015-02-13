@@ -2,6 +2,13 @@
 ChangeLog
 ==================
 
+v0.2.2-beta (2015-02-15)
+------------------------
+
+Improve: handle {'DOWN', MonRef, process, Pid, _Why} from subscriber
+
+Improve: handle 'SUBACK', 'UNSUBACK'
+
 v0.2.1-beta (2015-02-14)
 ------------------------
 
