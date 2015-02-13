@@ -52,6 +52,12 @@
 
 -define(SSLOPTIONS, [{depth, 0}]).
 
+-record(ssl_socket, {tcp, ssl}).
+
+-type ssl_socket() :: #ssl_socket{}.
+
+-define(IS_SSL(Socket), is_record(Socket, ssl_socket)).
+
 %%%-----------------------------------------------------------------------------
 %%% @doc
 %%% Connect to broker with TCP or SSL transport.
@@ -63,7 +69,7 @@
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
-    Socket      :: inet:socket(),
+    Socket      :: inet:socket() | ssl_socket(),
     Receiver    :: pid().
 connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
     case connect(Transport, Host, Port) of
@@ -79,11 +85,19 @@ connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
-    Socket      :: inet:socket() | ssl:sslsocket().
+    Socket      :: inet:socket() | ssl_socket().
 connect(tcp, Host, Port) ->
     gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT); 
 connect(ssl, Host, Port) ->
-    ssl:connect(Host, Port, ?TCPOPTIONS++?SSLOPTIONS, ?TIMEOUT).
+    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
+        {ok, Socket} -> 
+            case ssl:connect(Socket, ?SSLOPTIONS, ?TIMEOUT) of
+                {ok, SslSocket} -> {ok, #ssl_socket{tcp = Socket, ssl = SslSocket}};
+                {error, SslReason} -> {error, SslReason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%%-----------------------------------------------------------------------------
 %%% @doc
@@ -93,7 +107,7 @@ connect(ssl, Host, Port) ->
 %%%-----------------------------------------------------------------------------
 controlling_process(Socket, Pid) when is_port(Socket) ->
     gen_tcp:controlling_process(Socket, Pid);
-controlling_process(SslSocket, Pid) ->
+controlling_process(#ssl_socket{ssl = SslSocket}, Pid) ->
     ssl:controlling_process(SslSocket, Pid).
 
 %%%-----------------------------------------------------------------------------
@@ -103,11 +117,11 @@ controlling_process(SslSocket, Pid) ->
 %%% @end
 %%%-----------------------------------------------------------------------------
 -spec send(Socket, Data) -> ok when 
-    Socket  :: inet:socket() | ssl:sslsocket(),
+    Socket  :: inet:socket() | ssl_socket(),
     Data    :: binary().
 send(Socket, Data) when is_port(Socket) ->
     gen_tcp:send(Socket, Data);
-send(SslSocket, Data) ->
+send(#ssl_socket{ssl = SslSocket}, Data) ->
     ssl:send(SslSocket, Data).
 
 %%%-----------------------------------------------------------------------------
@@ -116,10 +130,10 @@ send(SslSocket, Data) ->
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--spec close(Socket :: inet:socket() | ssl:sslsocket()) -> ok.
+-spec close(Socket :: inet:socket() | ssl_socket()) -> ok.
 close(Socket) when is_port(Socket) ->
     gen_tcp:close(Socket);
-close(SslSocket) ->
+close(#ssl_socket{ssl = SslSocket}) ->
     ssl:close(SslSocket).
 
 %%%-----------------------------------------------------------------------------
@@ -140,7 +154,7 @@ stop(Receiver) ->
 %%%-----------------------------------------------------------------------------
 setopts(Socket, Opts) when is_port(Socket) ->
     inet:setopts(Socket, Opts);
-setopts(SslSocket, Opts) ->
+setopts(#ssl_socket{ssl = SslSocket}, Opts) ->
     ssl:setopts(SslSocket, Opts).
 
 %%%-----------------------------------------------------------------------------
@@ -149,14 +163,14 @@ setopts(SslSocket, Opts) ->
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--spec getstat(Socket, Stats) -> {ok, Result} | {error, any()} when 
-    Socket  :: inet:socket() | ssl:sslsocket(),
+-spec getstat(Socket, Stats) -> {ok, Values} | {error, any()} when 
+    Socket  :: inet:socket() | ssl_socket(),
     Stats   :: list(),
-    Result  :: list().
+    Values  :: list().
 getstat(Socket, Stats) when is_port(Socket) ->
     inet:getstat(Socket, Stats);
-getstat(SslSocket, Stats) -> %% TODO...
-    inet:getstat(SslSocket#ssl_socket.tcp, Stats).
+getstat(#ssl_socket{tcp = Socket}, Stats) -> 
+    inet:getstat(Socket, Stats).
 
 %%%-----------------------------------------------------------------------------
 %%% @doc
@@ -165,12 +179,12 @@ getstat(SslSocket, Stats) -> %% TODO...
 %%% @end
 %%%-----------------------------------------------------------------------------
 -spec sockname(Socket) -> {ok, {Address, Port}} | {error, any()} when
-    Socket  :: inet:socket() | ssl:sslsocket(),
+    Socket  :: inet:socket() | ssl_socket(),
     Address :: inet:address(),
     Port    :: inet:port().
 sockname(Socket) when is_port(Socket) ->
     inet:sockname(Socket);
-sockname(SslSocket) ->
+sockname(#ssl_socket{ssl = SslSocket}) ->
     ssl:sockname(SslSocket).
 
 sockname_s(Sock) ->
@@ -193,14 +207,14 @@ receiver_loop(ClientPid, Socket, ParseState) ->
         {tcp, Socket, Data} ->
             receiver_loop(ClientPid, Socket, 
                           parse_received_bytes(ClientPid, Data, ParseState));
-        {ssl, Socket, Data} ->
+        {ssl, _SslSocket, Data} ->
             receiver_loop(ClientPid, Socket, 
                           parse_received_bytes(ClientPid, Data, ParseState));
         {tcp_closed, Socket} ->
             connection_lost(ClientPid, tcp_closed);
-        {ssl_closed, Socket} ->
+        {ssl_closed, _SslSocket} ->
             connection_lost(ClientPid, ssl_closed);
-        {ssl_error, Socket, Reason} ->
+        {ssl_error, _SslSocket, Reason} ->
             connection_lost(ClientPid, {ssl_error, Reason});
         stop -> 
             close(Socket)
