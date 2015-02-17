@@ -41,7 +41,7 @@
           retries       = 0, 
           timer         = undefined}).
 
--type reconnector() :: #reconnector{}.
+-opaque reconnector() :: #reconnector{}.
 
 -export_type([reconnector/0]).
 
