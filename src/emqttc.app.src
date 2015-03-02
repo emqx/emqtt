@@ -26,7 +26,7 @@
 %%%-----------------------------------------------------------------------------
 {application, emqttc, [
     {description, "Erlang MQTT Client"},
-    {vsn, "0.1"},
+    {vsn, git},
     {registered, []},
     {applications, [
         kernel,
