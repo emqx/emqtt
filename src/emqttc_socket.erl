@@ -180,8 +180,8 @@ getstat(#ssl_socket{tcp = Socket}, Stats) ->
 %%%-----------------------------------------------------------------------------
 -spec sockname(Socket) -> {ok, {Address, Port}} | {error, any()} when
     Socket  :: inet:socket() | ssl_socket(),
-    Address :: inet:address(),
-    Port    :: inet:port().
+    Address :: inet:ip_address(),
+    Port    :: inet:port_number().
 sockname(Socket) when is_port(Socket) ->
     inet:sockname(Socket);
 sockname(#ssl_socket{ssl = SslSocket}) ->

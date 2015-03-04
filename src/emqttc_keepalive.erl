@@ -35,7 +35,7 @@
                     timeout_msg,
                     timer_ref}).
 
--type keepalive() :: #keepalive{}.
+-opaque keepalive() :: #keepalive{}.
 
 -export_type([keepalive/0]).
 
@@ -50,7 +50,7 @@
 %%%-----------------------------------------------------------------------------
 -spec new({Socket, StatName}, TimeoutSec, TimeoutMsg) -> KeepAlive when
     Socket        :: inet:socket() | ssl:sslsocket(),
-    StatName      :: inet:stat_option(),
+    StatName      :: recv_oct | send_oct,
     TimeoutSec    :: non_neg_integer(),
     TimeoutMsg    :: tuple(),
     KeepAlive     :: keepalive() | undefined.

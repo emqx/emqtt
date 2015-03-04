@@ -280,7 +280,7 @@ init([Name, MqttOpts]) ->
 
     process_flag(trap_exit, true),
 
-    Logger = gen_logger:new(get_value(logger, MqttOpts, {stdout, debug})),
+    Logger = gen_logger:new(get_value(logger, MqttOpts, {console, debug})),
 
     MqttOpts1 = proplists:delete(logger, MqttOpts),
 
@@ -484,7 +484,7 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
                 true -> 
                     Subscribers;
                 false ->
-                    erlang:demonitor(MonRef),
+                    erlang:demonitor(MonRef, [flush]),
                     lists:keydelete(From, 1, Subscribers)
             end;
         false -> 
