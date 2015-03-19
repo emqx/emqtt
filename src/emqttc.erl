@@ -375,7 +375,7 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
-    Logger:info("[Client ~s] RECV: ~s", [Name, ErrConnAck]),
+    Logger:debug("[Client ~s] RECV: ~s", [Name, ErrConnAck]),
     {stop, {shutdown, ErrConnAck}, State};
 
 waiting_for_connack(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
@@ -501,7 +501,7 @@ connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState
     {stop, normal, State#state{socket = undefined, receiver = undefined}};
 
 connected(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
-    Logger:info("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
+    Logger:debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, NewState} = received(Packet, State),
     {next_state, connected, NewState};
 
@@ -735,13 +735,13 @@ connect(State = #state{name = Name,
                        keepalive_time = KeepAliveTime,
                        transport = Transport,
                        logger = Logger}) ->
-    Logger:info("[Client ~s]: connecting to ~p:~p", [Name, Host, Port]),
+    Logger:info("[Client ~s]: connecting to ~s:~p", [Name, Host, Port]),
     case emqttc_socket:connect(self(), Transport, Host, Port) of
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),
             KeepAlive = emqttc_keepalive:new({Socket, send_oct}, KeepAliveTime, ?KEEPALIVE_EVENT),
-            Logger:info("[Client ~s] connected with ~p:~p", [Name, Host, Port]),
+            Logger:info("[Client ~s] connected with ~s:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#state{socket = Socket,
                                                           receiver = Receiver,
                                                           keepalive = KeepAlive,
