@@ -309,7 +309,7 @@ received({'UNSUBACK', PacketId}, State) ->
 %%%-----------------------------------------------------------------------------
 send(Packet, State = #proto_state{socket = Socket, logger = Logger}) ->
     LogTag = logtag(State),
-    Logger:info("[~s] SENT: ~s", [LogTag, emqttc_packet:dump(Packet)]),
+    Logger:debug("[~s] SENT: ~s", [LogTag, emqttc_packet:dump(Packet)]),
     Data = emqttc_serialiser:serialise(Packet),
     Logger:debug("[~s] SENT: ~p", [LogTag, Data]),
     emqttc_socket:send(Socket, Data),
