@@ -58,12 +58,14 @@ run(Parent, Server = #server{interval = Interval}, N) ->
 	run(Parent, Server, N-1).
 
 connect(Parent, #server{host = Host, port = Port}, N) ->
-	case emqttc:start_link([{host, Host}, {port, Port}, {logger, ?LOGGER}]) of
+    {ok, LocHost} = inet:gethostname(),
+    ClientId = client_id(LocHost, N),
+	case emqttc:start_link([{host, Host}, {port, Port}, {client_id, ClientId}, {logger, ?LOGGER}]) of
     {ok, Client} -> 
         Parent ! {connected, Client},
         random:seed(now()),
         process_flag(trap_exit, true),
-        Topic = topic(N),
+        Topic = topic(LocHost, N),
         emqttc:subscribe(Client, Topic),
         loop(N, Client, Topic);
     {error, Error} ->
@@ -86,8 +88,10 @@ send(N, Client, Topic) ->
     Payload = list_to_binary([integer_to_list(N), ":", <<"Hello, eMQTTD!">>]),
 	emqttc:publish(Client, Topic, Payload).
 	 
-topic(N) ->
-    {ok, Host} = inet:gethostname(),
+client_id(Host, N) ->
+    list_to_binary(lists:concat(["testclient_", Host, "_", N, "_", random:uniform(16#FFFFFFFF)])).
+
+topic(Host, N) ->
     list_to_binary(lists:concat([Host, "/", N, "/", random:uniform(16#FFFFFFFF)])).
 
 int(A) when is_atom(A) -> list_to_integer(atom_to_list(A)).
