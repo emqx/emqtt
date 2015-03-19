@@ -2,6 +2,20 @@
 ChangeLog
 ==================
 
+v0.3.0-beta (2015-02-20)
+------------------------
+
+add examples/benchmark
+
+
+v0.2.4-beta (2015-02-18)
+------------------------
+
+emqttc_socket.erl: handle tcp_error.
+
+emqttc.erl: change log level from 'info' to 'debug' for SEND/RECV packets.
+
+
 v0.2.3-beta (2015-02-15)
 ------------------------
 
