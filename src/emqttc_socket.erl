@@ -207,15 +207,17 @@ receiver_loop(ClientPid, Socket, ParseState) ->
         {tcp, Socket, Data} ->
             receiver_loop(ClientPid, Socket, 
                           parse_received_bytes(ClientPid, Data, ParseState));
+        {tcp_error, Socket, Reason} ->
+            connection_lost(ClientPid, {tcp_error, Reason});
+        {tcp_closed, Socket} ->
+            connection_lost(ClientPid, tcp_closed);
         {ssl, _SslSocket, Data} ->
             receiver_loop(ClientPid, Socket, 
                           parse_received_bytes(ClientPid, Data, ParseState));
-        {tcp_closed, Socket} ->
-            connection_lost(ClientPid, tcp_closed);
-        {ssl_closed, _SslSocket} ->
-            connection_lost(ClientPid, ssl_closed);
         {ssl_error, _SslSocket, Reason} ->
             connection_lost(ClientPid, {ssl_error, Reason});
+        {ssl_closed, _SslSocket} ->
+            connection_lost(ClientPid, ssl_closed);
         stop -> 
             close(Socket)
     end.
