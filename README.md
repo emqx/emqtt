@@ -90,7 +90,7 @@ Connect to MQTT Broker:
 
 ```erlang
 
--type mqttc_opt() :: {host, inet:ip_address() | binary() | string()}
+-type mqttc_opt() :: {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
