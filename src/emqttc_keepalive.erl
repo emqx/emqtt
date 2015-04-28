@@ -42,12 +42,10 @@
 %% API
 -export([new/3, start/1, restart/1, resume/1, cancel/1]).
 
-%%%-----------------------------------------------------------------------------
-%% @doc
-%% Create a KeepAlive.
-%%
+%%------------------------------------------------------------------------------
+%% @doc Create a KeepAlive.
 %% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
 -spec new({Socket, StatName}, TimeoutSec, TimeoutMsg) -> KeepAlive when
     Socket        :: inet:socket() | ssl:sslsocket(),
     StatName      :: recv_oct | send_oct,
@@ -63,9 +61,7 @@ new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
                timeout_msg = TimeoutMsg}.
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Start KeepAlive.
-%%
+%% @doc Start KeepAlive
 %% @end
 %%------------------------------------------------------------------------------
 -spec start(KeepAlive) -> KeepAlive when
@@ -80,9 +76,7 @@ start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName,
     KeepAlive#keepalive{stat_val = StatVal, timer_ref = Ref}.
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Restart KeepAlive.
-%%
+%% @doc Restart KeepAlive
 %% @end
 %%------------------------------------------------------------------------------
 -spec restart(KeepAlive) -> KeepAlive when
@@ -90,9 +84,7 @@ start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName,
 restart(KeepAlive) -> start(KeepAlive).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Resume KeepAlive, called when timeout.
-%%
+%% @doc Resume KeepAlive, called when timeout.
 %% @end
 %%------------------------------------------------------------------------------
 -spec resume(KeepAlive) -> timeout | {resumed, KeepAlive} when
@@ -115,9 +107,7 @@ resume(KeepAlive = #keepalive{socket      = Socket,
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Cancel KeepAlive.
-%%
+%% @doc Cancel KeepAlive.
 %% @end
 %%------------------------------------------------------------------------------
 -spec cancel(keepalive() | undefined | reference()) -> any().
@@ -127,3 +117,4 @@ cancel(#keepalive{timer_ref = Ref}) ->
     cancel(Ref);
 cancel(Ref) when is_reference(Ref)->
     catch erlang:cancel_timer(Ref).
+

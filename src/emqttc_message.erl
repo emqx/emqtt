@@ -39,25 +39,11 @@
 
 -export([dump/1]).
 
-%%----------------------------------------------------------------------------
-
--ifdef(use_specs).
-
--spec( from_packet( mqtt_packet() ) -> mqtt_message() | undefined ).
-
--spec( to_packet( mqtt_message() ) -> mqtt_packet() ).
-
--sepc( set_flag(atom(), mqtt_message() ) -> mqtt_message().
-
--sepc( unset_flag(atom(), mqtt_message() ) -> mqtt_message().
-
--endif.
-
-%%----------------------------------------------------------------------------
-
-%%
+%%------------------------------------------------------------------------------
 %% @doc message from packet
-%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec from_packet(mqtt_packet()) -> mqtt_message() | undefined.
 from_packet(#mqtt_packet{ header = #mqtt_packet_header{ type   = ?PUBLISH,
     retain = Retain,
     qos    = Qos,
@@ -85,9 +71,11 @@ from_packet(#mqtt_packet_connect{ will_retain = Retain,
         dup     = false,
         payload = Msg }.
 
-%%
+%%------------------------------------------------------------------------------
 %% @doc message to packet
-%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec to_packet(mqtt_message()) -> mqtt_packet().
 to_packet(#mqtt_message{ msgid   = MsgId,
     qos     = Qos,
     retain  = Retain,
@@ -108,9 +96,11 @@ to_packet(#mqtt_message{ msgid   = MsgId,
             packet_id  = PacketId },
         payload = Payload }.
 
-%%
+%%------------------------------------------------------------------------------
 %% @doc set dup, retain flag
-%%
+%% @end
+%%------------------------------------------------------------------------------
+-spec set_flag(atom(), mqtt_message() ) -> mqtt_message().
 set_flag(Msg) ->
     Msg#mqtt_message{dup = true, retain = true}.
 set_flag(dup, Msg = #mqtt_message{dup = false}) ->
@@ -119,6 +109,12 @@ set_flag(retain, Msg = #mqtt_message{retain = false}) ->
     Msg#mqtt_message{retain = true};
 set_flag(Flag, Msg) when Flag =:= dup orelse Flag =:= retain -> Msg.
 
+
+%%------------------------------------------------------------------------------
+%% @doc unset dup, retain flag
+%% @end
+%%------------------------------------------------------------------------------
+-spec unset_flag(atom(), mqtt_message() ) -> mqtt_message().
 unset_flag(Msg) ->
     Msg#mqtt_message{dup = false, retain = false}.
 unset_flag(dup, Msg = #mqtt_message{dup = true}) ->
@@ -128,9 +124,10 @@ unset_flag(retain, Msg = #mqtt_message{retain = true}) ->
 unset_flag(Flag, Msg) when Flag =:= dup orelse Flag =:= retain -> Msg.
 
 
-%%
+%%------------------------------------------------------------------------------
 %% @doc dump message
-%%
+%% @end
+%%------------------------------------------------------------------------------
 dump(#mqtt_message{msgid= MsgId, qos = Qos, retain = Retain, dup = Dup, topic = Topic}) ->
     io_lib:format("Message(MsgId=~p, Qos=~p, Retain=~s, Dup=~s, Topic=~s)",
         [ MsgId, Qos, Retain, Dup, Topic ]).

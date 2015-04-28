@@ -63,7 +63,7 @@
          connected/2, connected/3, 
          disconnected/2, disconnected/3]).
 
--type mqttc_opt() :: {host, inet:ip_address() | binary() | string()}
+-type mqttc_opt() :: {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
@@ -104,9 +104,7 @@
 %%%=============================================================================
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Start emqttc application
-%%
+%% @doc Start emqttc application
 %% @end
 %%------------------------------------------------------------------------------
 -spec start() -> ok.
@@ -114,9 +112,7 @@ start() ->
     application:start(emqttc).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Start emqttc client with default options.
-%%
+%% @doc Start emqttc client with default options.
 %% @end
 %%------------------------------------------------------------------------------
 -spec start_link() -> {ok, Client :: pid()} | ignore | {error, term()}.
@@ -124,9 +120,7 @@ start_link() ->
     start_link([]).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Start emqttc client with options.
-%%
+%% @doc Start emqttc client with options.
 %% @end
 %%------------------------------------------------------------------------------
 -spec start_link(MqttOpts) -> {ok, Client} | ignore | {error, any()} when
@@ -136,9 +130,7 @@ start_link(MqttOpts) when is_list(MqttOpts) ->
     gen_fsm:start_link(?MODULE, [undefined, MqttOpts], []).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Start emqttc client with name, options.
-%%
+%% @doc Start emqttc client with name, options.
 %% @end
 %%------------------------------------------------------------------------------
 -spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
@@ -148,9 +140,7 @@ start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
     gen_fsm:start_link({local, Name}, ?MODULE, [Name, MqttOpts], []).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Publish message to broker with QoS0.
-%%
+%% @doc Publish message to broker with QoS0.
 %% @end
 %%------------------------------------------------------------------------------
 -spec publish(Client, Topic, Payload) -> ok | {ok, MsgId} when
@@ -162,9 +152,7 @@ publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{topic = Topic, payload = Payload}).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Publish message to broker with Qos, retain options.
-%%
+%% @doc Publish message to broker with Qos, retain options.
 %% @end
 %%------------------------------------------------------------------------------
 -spec publish(Client, Topic, Payload, PubOpts) -> ok | {ok, MsgId} when
@@ -182,9 +170,7 @@ publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payloa
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Publish MQTT Message.
-%%
+%% @doc Publish MQTT Message.
 %% @end
 %%------------------------------------------------------------------------------
 -spec publish(Client, Message) -> ok when
@@ -194,9 +180,7 @@ publish(Client, Msg) when is_record(Msg, mqtt_message) ->
     gen_fsm:send_event(Client, {publish, Msg}).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Subscribe Topic or Topics.
-%%
+%% @doc Subscribe Topic or Topics.
 %% @end
 %%------------------------------------------------------------------------------
 -spec subscribe(Client, Topics) -> ok when
@@ -210,9 +194,7 @@ subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qo
     gen_fsm:send_event(Client, {subscribe, self(), Topics}).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Subscribe Topic with Qos.
-%%
+%% @doc Subscribe Topic with Qos.
 %% @end
 %%------------------------------------------------------------------------------
 -spec subscribe(Client, Topic, Qos) -> ok when
@@ -223,9 +205,7 @@ subscribe(Client, Topic, Qos) when is_binary(Topic), ?IS_QOS(Qos) ->
     subscribe(Client, [{Topic, Qos}]).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Unsubscribe Topics
-%%
+%% @doc Unsubscribe Topics
 %% @end
 %%------------------------------------------------------------------------------
 -spec unsubscribe(Client, Topics) -> ok when
@@ -237,9 +217,7 @@ unsubscribe(Client, [Topic | _] = Topics) when is_binary(Topic) ->
     gen_fsm:send_event(Client, {unsubscribe, self(), Topics}).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Sync Send ping to broker.
-%%
+%% @doc Sync Send ping to broker.
 %% @end
 %%------------------------------------------------------------------------------
 -spec ping(Client) -> pong when Client :: pid() | atom().
@@ -247,9 +225,7 @@ ping(Client) ->
     gen_fsm:sync_send_event(Client, ping).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Disconnect from broker.
-%%
+%% @doc Disconnect from broker.
 %% @end
 %%------------------------------------------------------------------------------
 -spec disconnect(Client) -> ok when Client :: pid() | atom().
@@ -328,9 +304,7 @@ init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Event Handler for state that connecting to MQTT broker.
-%%
+%% @doc Event Handler for state that connecting to MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 connecting(timeout, State) ->
@@ -342,9 +316,7 @@ connecting(Event, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sync event Handler for state that connecting to MQTT broker.
-%%
+%% @doc Sync event Handler for state that connecting to MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
@@ -353,9 +325,7 @@ connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Event Handler for state that waiting_for_connack from MQTT broker.
-%%
+%% @doc Event Handler for state that waiting_for_connack from MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
@@ -400,9 +370,7 @@ waiting_for_connack(Event, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sync Event Handler for state that waiting_for_connack from MQTT broker.
-%%
+%% @doc Sync Event Handler for state that waiting_for_connack from MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger}) ->
@@ -411,9 +379,7 @@ waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger}) 
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Event Handler for state that connected to MQTT broker.
-%%
+%% @doc Event Handler for state that connected to MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
@@ -511,9 +477,7 @@ connected(Event, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sync Event Handler for state that connected to MQTT broker.
-%%
+%% @doc Sync Event Handler for state that connected to MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 connected(ping, {Pid, _} = From, State = #state{ping_reqs = PingReqs, proto_state = ProtoState}) ->
@@ -533,9 +497,7 @@ connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Event Handler for state that disconnected from MQTT broker.
-%%
+%% @doc Event Handler for state that disconnected from MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 disconnected(Event = {publish, _Msg}, State) ->
@@ -554,9 +516,7 @@ disconnected(Event, State = #state{name = Name, logger = Logger}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sync Event Handler for state that disconnected from MQTT broker.
-%%
+%% @doc Sync Event Handler for state that disconnected from MQTT broker.
 %% @end
 %%------------------------------------------------------------------------------
 disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
@@ -712,9 +672,7 @@ terminate(_Reason, _StateName, #state{keepalive = KeepAlive, reconnector = Recon
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Convert process state when code is changed
-%%
+%% @doc Convert process state when code is changed
 %% @end
 %%------------------------------------------------------------------------------
 -spec(code_change(OldVsn :: term() | {down, term()}, StateName :: atom(),
@@ -769,9 +727,7 @@ pending(Event, State = #state{pending_pubsub = Pending}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 
-%% Handle Received Packet
-%%
+%% @doc Handle Received Packet
 %% @end
 %%------------------------------------------------------------------------------
 received(?PUBLISH_PACKET(?QOS_0, Topic, undefined, Payload), State) ->
@@ -823,9 +779,7 @@ received(?PACKET(?PINGRESP), State= #state{ping_reqs = PingReqs}) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 
-%% Dispatch Publish Message to subscribers.
-%%
+%% @doc Dispatch Publish Message to subscribers.
 %% @end
 %%------------------------------------------------------------------------------
 dispatch(Publish = {publish, Topic, _Payload}, #state{name = Name,
