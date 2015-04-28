@@ -2,6 +2,14 @@
 ChangeLog
 ==================
 
+v0.3.1-beta (2015-04-28)
+------------------------
+
+format comments
+
+emqttc_message.erl: fix spec
+
+
 v0.3.0-beta (2015-02-20)
 ------------------------
 
