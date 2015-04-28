@@ -46,9 +46,7 @@
 -export_type([reconnector/0]).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Create a reconnector.
-%%
+%% @doc Create a reconnector.
 %% @end
 %%------------------------------------------------------------------------------
 -spec new() -> reconnector().
@@ -56,9 +54,7 @@ new() ->
     new({?MIN_INTERVAL, ?MAX_INTERVAL}).
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Create a reconnector with min_interval, max_interval seconds and max retries.
-%%
+%% @doc Create a reconnector with min_interval, max_interval seconds and max retries.
 %% @end
 %%------------------------------------------------------------------------------
 -spec new(MinInterval) -> reconnector() when 
@@ -76,9 +72,7 @@ new({MinInterval, MaxInterval, MaxRetries}) when is_integer(MinInterval),
                  max_retries  = MaxRetries}.
 
 %%------------------------------------------------------------------------------
-%% @doc
-%% Execute reconnector.
-%%
+%% @doc Execute reconnector.
 %% @end
 %%------------------------------------------------------------------------------
 -spec execute(Reconntor, TimeoutMsg) -> {stop, any()} | {ok, reconnector()} when
@@ -106,9 +100,7 @@ execute(Reconnector=#reconnector{min_interval = MinInterval,
     {ok, Reconnector#reconnector{interval = Interval2, retries = Retries+1, timer = NewTimer }}.
     
 %%------------------------------------------------------------------------------
-%% @doc
-%% Reset reconnector.
-%%
+%% @doc Reset reconnector
 %% @end
 %%------------------------------------------------------------------------------
 -spec reset(reconnector()) -> reconnector().

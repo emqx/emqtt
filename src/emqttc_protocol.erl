@@ -73,12 +73,10 @@
 %%% API
 %%%=============================================================================
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% init protocol with MQTT options.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Init protocol with MQTT options.
+%% @end
+%%------------------------------------------------------------------------------
 -spec init(MqttOpts) -> State when
     MqttOpts :: list(tuple()),
     State    :: proto_state().
@@ -128,12 +126,10 @@ random_id() ->
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
     list_to_binary(["emqttc/" | io_lib:format("~12.16.0b~8.16.0b", [I1, I2])]).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Set socket.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Set socket
+%% @end
+%%0-----------------------------------------------------------------------------
 set_socket(State, Socket) ->
     {ok, SockName} = emqttc_socket:sockname_s(Socket),
     State#proto_state{
@@ -141,12 +137,10 @@ set_socket(State, Socket) ->
         socket_name = SockName
     }.
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Send CONNECT Packet.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Send CONNECT Packet
+%% @end
+%%------------------------------------------------------------------------------
 connect(State = #proto_state{client_id  = ClientId,
                              proto_ver  = ProtoVer, 
                              proto_name = ProtoName,
@@ -176,15 +170,15 @@ connect(State = #proto_state{client_id  = ClientId,
     
     send(?CONNECT_PACKET(Connect), State).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Publish Message to Broker:
-%%%
-%%% Qos0 message sent directly.
-%%% Qos1, Qos2 messages should be stored first.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc
+%% Publish Message to Broker:
+%%
+%% Qos0 message sent directly.
+%% Qos1, Qos2 messages should be stored first.
+%%
+%% @end
+%%------------------------------------------------------------------------------
 publish(Message = #mqtt_message{qos = ?QOS_0}, State) ->
 	send(emqttc_message:to_packet(Message), State);
 
@@ -300,13 +294,13 @@ received({'UNSUBACK', PacketId}, State) ->
 %%% Internal functions
 %%%=============================================================================
 
-%%%-----------------------------------------------------------------------------
-%%% @private
-%%% @doc
-%%% Send Packet to broker.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Send Packet to broker.
+%%
+%% @end
+%%------------------------------------------------------------------------------
 send(Packet, State = #proto_state{socket = Socket, logger = Logger}) ->
     LogTag = logtag(State),
     Logger:debug("[~s] SENT: ~s", [LogTag, emqttc_packet:dump(Packet)]),

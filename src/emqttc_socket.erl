@@ -58,12 +58,10 @@
 
 -define(IS_SSL(Socket), is_record(Socket, ssl_socket)).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Connect to broker with TCP or SSL transport.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Connect to broker with TCP or SSL transport
+%% @end
+%%------------------------------------------------------------------------------
 -spec connect(ClientPid, Transport, Host, Port) -> {ok, Socket, Receiver} | {error, term()} when
     ClientPid   :: pid(),
     Transport   :: tcp | ssl,
@@ -99,23 +97,19 @@ connect(ssl, Host, Port) ->
             {error, Reason}
     end.
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Socket controlling process.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Socket controlling process
+%% @end
+%%------------------------------------------------------------------------------
 controlling_process(Socket, Pid) when is_port(Socket) ->
     gen_tcp:controlling_process(Socket, Pid);
 controlling_process(#ssl_socket{ssl = SslSocket}, Pid) ->
     ssl:controlling_process(SslSocket, Pid).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Send Packet and Data.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Send Packet and Data
+%% @end
+%%------------------------------------------------------------------------------
 -spec send(Socket, Data) -> ok when 
     Socket  :: inet:socket() | ssl_socket(),
     Data    :: binary().
@@ -124,45 +118,37 @@ send(Socket, Data) when is_port(Socket) ->
 send(#ssl_socket{ssl = SslSocket}, Data) ->
     ssl:send(SslSocket, Data).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Close Socket.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Close Socket.
+%% @end
+%%------------------------------------------------------------------------------
 -spec close(Socket :: inet:socket() | ssl_socket()) -> ok.
 close(Socket) when is_port(Socket) ->
     gen_tcp:close(Socket);
 close(#ssl_socket{ssl = SslSocket}) ->
     ssl:close(SslSocket).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Stop Receiver.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Stop Receiver.
+%% @end
+%%------------------------------------------------------------------------------
 -spec stop(Receiver :: pid()) -> ok.
 stop(Receiver) ->
     Receiver ! stop.
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Set socket options.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Set socket options.
+%% @end
+%%------------------------------------------------------------------------------
 setopts(Socket, Opts) when is_port(Socket) ->
     inet:setopts(Socket, Opts);
 setopts(#ssl_socket{ssl = SslSocket}, Opts) ->
     ssl:setopts(SslSocket, Opts).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Get socket stats.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Get socket stats.
+%% @end
+%%------------------------------------------------------------------------------
 -spec getstat(Socket, Stats) -> {ok, Values} | {error, any()} when 
     Socket  :: inet:socket() | ssl_socket(),
     Stats   :: list(),
@@ -172,12 +158,10 @@ getstat(Socket, Stats) when is_port(Socket) ->
 getstat(#ssl_socket{tcp = Socket}, Stats) -> 
     inet:getstat(Socket, Stats).
 
-%%%-----------------------------------------------------------------------------
-%%% @doc
-%%% Socket name.
-%%%
-%%% @end
-%%%-----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%% @doc Socket name.
+%% @end
+%%------------------------------------------------------------------------------
 -spec sockname(Socket) -> {ok, {Address, Port}} | {error, any()} when
     Socket  :: inet:socket() | ssl_socket(),
     Address :: inet:ip_address(),
@@ -198,6 +182,7 @@ sockname_s(Sock) ->
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
+
 receiver(ClientPid, Socket) ->
     receiver_loop(ClientPid, Socket, emqttc_parser:new()).
 
