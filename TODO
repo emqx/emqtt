@@ -1,2 +1,6 @@
+0.2.2
+-----
+
+handle 'CONNECT' timout
 
 handle 'SUBACK', 'UNSUBACK'
