@@ -1,2 +1,7 @@
 
+handle CONNECT timeout
+
+Received publish message when WAITING_FOR_CONNACK sometimes
+
 handle 'SUBACK', 'UNSUBACK'
+
