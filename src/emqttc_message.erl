@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @Copyright (C) 2012-2015, Feng Lee <feng@emqtt.io>
+%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -100,9 +100,10 @@ to_packet(#mqtt_message{ msgid   = MsgId,
 %% @doc set dup, retain flag
 %% @end
 %%------------------------------------------------------------------------------
--spec set_flag(atom(), mqtt_message() ) -> mqtt_message().
+-spec set_flag(mqtt_message() ) -> mqtt_message().
 set_flag(Msg) ->
     Msg#mqtt_message{dup = true, retain = true}.
+-spec set_flag(atom(), mqtt_message() ) -> mqtt_message().
 set_flag(dup, Msg = #mqtt_message{dup = false}) ->
     Msg#mqtt_message{dup = true};
 set_flag(retain, Msg = #mqtt_message{retain = false}) ->
@@ -114,9 +115,10 @@ set_flag(Flag, Msg) when Flag =:= dup orelse Flag =:= retain -> Msg.
 %% @doc unset dup, retain flag
 %% @end
 %%------------------------------------------------------------------------------
--spec unset_flag(atom(), mqtt_message() ) -> mqtt_message().
+-spec unset_flag(mqtt_message() ) -> mqtt_message().
 unset_flag(Msg) ->
     Msg#mqtt_message{dup = false, retain = false}.
+-spec unset_flag(atom(), mqtt_message() ) -> mqtt_message().
 unset_flag(dup, Msg = #mqtt_message{dup = true}) ->
     Msg#mqtt_message{dup = false};
 unset_flag(retain, Msg = #mqtt_message{retain = true}) ->
