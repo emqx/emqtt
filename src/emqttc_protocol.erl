@@ -124,7 +124,8 @@ random_id() ->
     random:seed(now()),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
-    list_to_binary(["emqttc/" | io_lib:format("~12.16.0b~8.16.0b", [I1, I2])]).
+    {ok, Host} = inet:gethostname(),
+    list_to_binary(["emqttc_", Host, "_" | io_lib:format("~12.16.0b~8.16.0b", [I1, I2])]).
 
 %%------------------------------------------------------------------------------
 %% @doc Set socket
