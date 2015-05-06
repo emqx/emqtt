@@ -1,5 +1,5 @@
 
-handle CONNECT timeout
+handle 'CONNECT' timout
 
 Received publish message when WAITING_FOR_CONNACK sometimes
 

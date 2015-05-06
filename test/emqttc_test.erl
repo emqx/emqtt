@@ -45,7 +45,21 @@ subscribe_down_test() ->
     emqttc:publish(C, <<"Topic">>, <<"Payload">>),
     timer:sleep(500).
 
+clean_sess_test() ->
+    {ok, C} = start_client([{client_id, <<"testClient">>}, {clean_sess, false}]),
+    emqttc:subscribe(C, <<"Topic">>, 1),
+    emqttc:publish(C, <<"Topic">>, <<"Playload">>, [{qos, 1}]),
+    emqttc:disconnect(C),
+    timer:sleep(100),
+    {ok, C2} = start_client([{client_id, <<"testClient">>}, {clean_sess, false}]),
+    emqttc:subscribe(C2, <<"Topic1">>, 1),
+    emqttc:publish(C2, <<"Topic1">>, <<"Playload">>, [{qos, 1}]),
+    emqttc:disconnect(C2).
+
 start_client() ->
     emqttc:start_link([{logger, {otp, info}}]).
+
+start_client(Opts) ->
+    emqttc:start_link([{logger, {otp, info}}|Opts]).
 
 -endif.
