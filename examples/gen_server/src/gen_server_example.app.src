@@ -1,0 +1,14 @@
+{application, gen_server_example,
+ [
+  {description, "emqttc gen_server example"},
+  {vsn, "1.0"},
+  {modules, [
+             gen_server_example
+            ]},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []}
+ ]}.
