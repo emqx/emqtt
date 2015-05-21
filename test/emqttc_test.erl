@@ -1,8 +1,18 @@
+
 -module(emqttc_test).
 
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
+
+qos_opt_test() ->
+    ?assertEqual(0, emqttc:qos_opt(0)),
+    ?assertEqual(2, emqttc:qos_opt(qos2)),
+    ?assertEqual(0, emqttc:qos_opt([])),
+    ?assertEqual(1, emqttc:qos_opt([qos1])),
+    ?assertEqual(2, emqttc:qos_opt([{qos, 2}])),
+    ?assertEqual(1, emqttc:qos_opt([qos1, {qos, 2}, {retain, 0}])),
+    ?assertEqual(0, emqttc:qos_opt([{retain, 0}])).
 
 subscribe_test() ->
     {ok, C} = start_client(),
@@ -22,7 +32,7 @@ unsubscribe_test() ->
     emqttc:unsubscribe(C, <<"Topic">>).
 
 ping_test() ->
-    {ok, C} = start_client(),
+    {ok, C} = start_client([{client_id, <<"pingTestClient">>}]),
     timer:sleep(1000),
     pong = emqttc:ping(C).
 

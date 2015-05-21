@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2015 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,12 @@
          connected/2, connected/3, 
          disconnected/2, disconnected/3]).
 
+-ifdef(TEST).
+
+-export([qos_opt/1]).
+
+-endif.
+
 -type mqttc_opt() :: {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
                    | {client_id, binary()}
@@ -77,7 +83,7 @@
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
--type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
+-type mqtt_pubopt() :: qos0 | qos1 | qos2 | {qos, mqtt_qos()} | {retain, boolean()}.
 
 -record(state, {
         parent              :: pid(),
@@ -166,14 +172,14 @@ publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     Client    :: pid() | atom(),
     Topic     :: binary(),
     Payload   :: binary(),
-    PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
+    PubOpts   :: qos0 | qos1 | qos2 | mqtt_qos() | [mqtt_pubopt()],
     MsgId     :: mqtt_packet_id().
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{
-        qos = get_value(qos, PubOpts, ?QOS_0),
-        retain  = get_value(retain, PubOpts, false),
-        topic   = Topic,
-        payload = Payload}).
+            qos     = qos_opt(PubOpts),
+            retain  = get_value(retain, PubOpts, false),
+            topic   = Topic,
+            payload = Payload}).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -195,10 +201,11 @@ publish(Client, Msg) when is_record(Msg, mqtt_message) ->
     Topics    :: [{binary(), mqtt_qos()}] | {binary(), mqtt_qos()} | binary().
 subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, [{Topic, ?QOS_0}]);
-subscribe(Client, {Topic, Qos}) when is_binary(Topic), ?IS_QOS(Qos) ->
-    subscribe(Client, [{Topic, Qos}]);
-subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qos) ->
-    gen_fsm:send_event(Client, {subscribe, self(), Topics}).
+subscribe(Client, {Topic, Qos}) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
+    subscribe(Client, [{Topic, qos_opt(Qos)}]);
+subscribe(Client, [{_Topic, _Qos} | _] = Topics) when is_list(Topics) ->
+    gen_fsm:send_event(Client, {subscribe, self(),
+                                [{Topic, qos_opt(Qos)} || {Topic, Qos} <- Topics]}).
 
 %%------------------------------------------------------------------------------
 %% @doc Subscribe Topic with Qos.
@@ -840,4 +847,26 @@ dispatch(Publish = {publish, Topic, _Payload}, #state{name = Name,
         true ->
             ok
     end.
+
+qos_opt(qos2) ->
+    ?QOS_2;
+qos_opt(qos1) ->
+    ?QOS_1;
+qos_opt(qos0) ->
+    ?QOS_0;
+qos_opt(Qos) when is_integer(Qos), ?QOS_0 =< Qos, Qos =< ?QOS_2 ->
+    Qos;
+qos_opt([]) ->
+    ?QOS_0;
+qos_opt([qos2|_PubOpts]) ->
+    ?QOS_2;
+qos_opt([qos1|_PubOpts]) ->
+    ?QOS_1;
+qos_opt([qos0|_PubOpts]) ->
+    ?QOS_0;
+qos_opt([{qos, Qos}|_PubOpts]) ->
+    Qos;
+qos_opt([_|PubOpts]) ->
+    qos_opt(PubOpts).
+
 
