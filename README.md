@@ -23,7 +23,7 @@ examples/simple_example.erl
 {ok, C} = emqttc:start_link([{host, "localhost"}, {client_id, <<"simpleClient">>}]),
 
 %% subscribe
-emqttc:subscribe(C, <<"TopicA">>, 0),
+emqttc:subscribe(C, <<"TopicA">>, qos0),
 
 %% publish
 emqttc:publish(C, <<"TopicA">>, <<"Payload...">>),
@@ -55,7 +55,7 @@ init(_Args) ->
     {ok, C} = emqttc:start_link([{host, "localhost"},
                                  {client_id, <<"simpleClient">>},
                                  {logger, info}]),
-    emqttc:subscribe(C, <<"TopicA">>, 1),
+    emqttc:subscribe(C, <<"TopicA">>, qos1),
     self() ! publish,
     {ok, #state{mqttc = C, seq = 1}}.
 
