@@ -38,7 +38,7 @@ init(_Args) ->
                                  {client_id, <<"simpleClient">>},
                                  {reconnect, 3},
                                  {logger, {console, info}}]),
-    %% the pending subscribe
+    %% The pending subscribe
     emqttc:subscribe(C, <<"TopicA">>, 1),
     {ok, #state{mqttc = C, seq = 1}}.
 

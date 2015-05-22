@@ -40,6 +40,9 @@
 %% Start emqttc client
 -export([start_link/0, start_link/1, start_link/2]).
 
+%% Lookup topics subscribed
+-export([topics/1]).
+
 %% API
 -export([publish/3, publish/4, 
          subscribe/2, subscribe/3, 
@@ -81,9 +84,12 @@
                    | {connack_timeout, pos_integer()}
                    | ssl
                    | {logger, atom() | {atom(), atom()}}
+                   | auto_resub
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
--type mqtt_pubopt() :: qos0 | qos1 | qos2 | {qos, mqtt_qos()} | {retain, boolean()}.
+-type mqtt_qosopt() :: qos0 | qos1 | qos2 | mqtt_qos().
+
+-type mqtt_pubopt() :: mqtt_qosopt() | {qos, mqtt_qos()} | {retain, boolean()}.
 
 -record(state, {
         parent              :: pid(),
@@ -97,6 +103,7 @@
         pubsub_map  = #{}   :: map(),
         ping_reqs   = []    :: list(),
         pending_pubsub = [] :: list(),
+        auto_resub = false  :: boolean(),
         keepalive           :: emqttc_keepalive:keepalive() | undefined,
         keepalive_time = 60 :: non_neg_integer(),
         connack_timeout     :: pos_integer(),
@@ -152,6 +159,15 @@ start_link(MqttOpts) when is_list(MqttOpts) ->
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
     gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts], []).
 
+
+%%------------------------------------------------------------------------------
+%% @doc Lookup topics subscribed
+%% @end
+%%------------------------------------------------------------------------------
+-spec topics(Client :: pid()) -> [{binary(), mqtt_qos()}].
+topics(Client) ->
+    gen_fsm:sync_send_all_state_event(Client, topics).
+
 %%------------------------------------------------------------------------------
 %% @doc Publish message to broker with QoS0.
 %% @end
@@ -172,8 +188,13 @@ publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     Client    :: pid() | atom(),
     Topic     :: binary(),
     Payload   :: binary(),
-    PubOpts   :: qos0 | qos1 | qos2 | mqtt_qos() | [mqtt_pubopt()],
+    PubOpts   :: mqtt_qosopt() | [mqtt_pubopt()],
     MsgId     :: mqtt_packet_id().
+publish(Client, Topic, Payload, QosOpt) when ?IS_QOS(QosOpt); is_atom(QosOpt) ->
+    publish(Client, #mqtt_message{
+            qos     = qos_opt(QosOpt),
+            topic   = Topic,
+            payload = Payload});
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{
             qos     = qos_opt(PubOpts),
@@ -214,9 +235,9 @@ subscribe(Client, [{_Topic, _Qos} | _] = Topics) when is_list(Topics) ->
 -spec subscribe(Client, Topic, Qos) -> ok when
     Client    :: pid() | atom(),
     Topic     :: binary(),
-    Qos       :: mqtt_qos().
-subscribe(Client, Topic, Qos) when is_binary(Topic), ?IS_QOS(Qos) ->
-    subscribe(Client, [{Topic, Qos}]).
+    Qos       :: qos0 | qos1 | qos2 | mqtt_qos().
+subscribe(Client, Topic, Qos) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
+    subscribe(Client, [{Topic, qos_opt(Qos)}]).
 
 %%------------------------------------------------------------------------------
 %% @doc Unsubscribe Topics
@@ -304,6 +325,8 @@ init([{port, Port} | Opts], State) ->
 init([ssl | Opts], State) ->
     ssl:start(), % ok? hehe...
     init(Opts, State#state{transport = ssl});
+init([auto_resub | Opts], State) ->
+    init(Opts, State#state{auto_resub= true});
 init([{logger, Cfg} | Opts], State) ->
     init(Opts, State#state{logger = gen_logger:new(Cfg)});
 init([{keepalive, Time} | Opts], State) ->
@@ -337,13 +360,15 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
                 parent = Parent,
                 name = Name, 
                 pending_pubsub = Pending,
+                auto_resub = AutoResub,
+                pubsub_map = PubsubMap,
                 proto_state = ProtoState,
                 keepalive = KeepAlive,
                 connack_tref = TRef,
                 logger = Logger}) ->
     Logger:info("[Client ~s] RECV: CONNACK_ACCEPT", [Name]),
 
-    %% cancel connack timer
+    %% Cancel connack timer
     if
         TRef =:= undefined -> ok;
         true -> gen_fsm:cancel_timer(TRef)
@@ -351,13 +376,24 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
 
     {ok, ProtoState1} = emqttc_protocol:received('CONNACK', ProtoState),
 
-    %% send the pending pubsub
+    %% Resubscribe automatically
+    case AutoResub of
+        true ->
+            case [{Topic, Qos} || {Topic, {Qos, _Subs}} <- maps:to_list(PubsubMap)] of
+                []         -> ok;
+                TopicTable -> subscribe(self(), TopicTable)
+            end;
+        false ->
+            ok
+    end,
+
+    %% Send the pending pubsub
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
 
-    %% start keepalive
+    %% Start keepalive
     KeepAlive1 = emqttc_keepalive:start(KeepAlive),
 
-    %% tell parent to subscribe
+    %% Tell parent to subscribe
     Parent ! {mqttc, self(), connected},
 
     {next_state, connected, State#state{proto_state = ProtoState1,
@@ -414,7 +450,8 @@ connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
 
 connected({subscribe, From, Topics}, State = #state{subscribers = Subscribers, 
                                                     pubsub_map  = PubSubMap, 
-                                                    proto_state = ProtoState}) ->
+                                                    proto_state = ProtoState,
+                                                    logger = Logger}) ->
 
     {ok, ProtoState1} = emqttc_protocol:subscribe(Topics, ProtoState),
 
@@ -424,21 +461,28 @@ connected({subscribe, From, Topics}, State = #state{subscribers = Subscribers,
         {From, _MonRef} -> 
             Subscribers;
         false -> 
-            MonRef = erlang:monitor(process, From),
-            [{From, MonRef} | Subscribers]
+            [{From, erlang:monitor(process, From)} | Subscribers]
     end,
 
     %% register to pubsub
     PubSubMap1 = lists:foldl(
-        fun({Topic, _Qos}, Map) ->
+        fun({Topic, Qos}, Map) ->
             case maps:find(Topic, Map) of 
-                {ok, Subs} ->
+                {ok, {OldQos, Subs}} ->
                     case lists:member(From, Subs) of
-                        true -> Map;
-                        false -> maps:put(Topic, [From | Subs], Map)
+                        true ->
+                            if
+                            Qos =:= OldQos -> 
+                                Map;
+                            true -> 
+                                Logger:error("Subscribe topic '~s' with different qos: old=~p, new=~p", [Topic, OldQos, Qos]),
+                                maps:put(Topic, {Qos, Subs}, Map)
+                            end;
+                        false -> 
+                            maps:put(Topic, {Qos, [From | Subs]}, Map)
                     end; 
                 error ->
-                    maps:put(Topic, [From], Map)
+                    maps:put(Topic, {Qos, [From]}, Map)
             end
         end, PubSubMap, Topics),
 
@@ -456,10 +500,10 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     lists:foldl(
         fun(Topic, Map) ->
             case maps:find(Topic, Map) of
-                {ok, Subs} ->
+                {ok, {Qos, Subs}} ->
                     case lists:member(From, Subs) of
                         true ->
-                            maps:put(Topic, lists:delete(From, Subs), Map);
+                            maps:put(Topic, {Qos, lists:delete(From, Subs)}, Map);
                         false ->
                             Map
                     end;
@@ -472,7 +516,7 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     Subscribers1 =
     case lists:keyfind(From, 1, Subscribers) of
         {From, MonRef} -> 
-            case lists:member(From, lists:flatten(maps:values(PubSubMap1))) of
+            case lists:member(From, lists:append([Subs || {_Qos, Subs} <- maps:values(PubSubMap1)])) of
                 true -> 
                     Subscribers;
                 false ->
@@ -609,6 +653,10 @@ handle_event(Event, StateName, State = #state{name = Name, logger = Logger}) ->
         timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewStateData :: term()} |
     {stop, Reason :: term(), NewStateData :: term()}).
+handle_sync_event(topics, _From, StateName, State = #state{pubsub_map = PubsubMap}) ->
+    TopicTable = [{Topic, Qos} || {Topic, {Qos, _Subs}} <- maps:to_list(PubsubMap)],
+    {reply, TopicTable, StateName, State};
+
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
@@ -670,10 +718,10 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
     case lists:keyfind(MonRef, 2, Subscribers) of
         {Pid, MonRef} ->
             {lists:delete({Pid, MonRef}, Subscribers),
-                maps:fold(fun(Topic, Subs, Map) ->
+                maps:fold(fun(Topic, {Qos, Subs}, Map) ->
                         case lists:member(Pid, Subs) of
-                                true -> maps:put(Topic, lists:delete(Pid, Subs), Map);
-                                false -> Map
+                            true -> maps:put(Topic, {Qos, lists:delete(Pid, Subs)}, Map);
+                            false -> Map
                         end
                     end, PubSubMap, PubSubMap)};
         false ->
@@ -827,16 +875,16 @@ received(?PACKET(?PINGRESP), State= #state{ping_reqs = PingReqs}) ->
 %% @doc Dispatch Publish Message to subscribers.
 %% @end
 %%------------------------------------------------------------------------------
-dispatch(Publish = {publish, Topic, _Payload}, #state{name = Name,
+dispatch(Publish = {publish, TopicName, _Payload}, #state{name = Name,
                                                       pubsub_map = PubSubMap, 
                                                       logger = Logger}) ->
     Matched =
     lists:foldl(
-        fun(Filter, Acc) -> 
-                case emqttc_topic:match(Topic, Filter) of 
+        fun(TopicFilter, Acc) -> 
+                case emqttc_topic:match(TopicName, TopicFilter) of 
                     true ->
-                        [Sub ! Publish || Sub <- maps:get(Filter, PubSubMap)],
-                        [Filter | Acc];
+                        {_Qos, Subs} = maps:get(TopicFilter, PubSubMap),
+                        [Sub ! Publish || Sub <- Subs], [TopicFilter | Acc];
                     false ->
                         Acc 
                 end

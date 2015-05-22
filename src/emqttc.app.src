@@ -26,12 +26,11 @@
 %%%-----------------------------------------------------------------------------
 {application, emqttc, [
     {description, "Erlang MQTT Client"},
-    {vsn, "0.2.2"},
+    {vsn, "0.4.0"},
     {registered, []},
     {applications, [
         kernel,
         stdlib
     ]},
-    {mod, {emqttc_app, []}},
     {env, []}
 ]}.

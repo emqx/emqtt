@@ -2,6 +2,21 @@
 ChangeLog
 ==================
 
+0.4.0-alpha (2015-05-22)
+------------------------
+
+Support 'wait_for_connack' timeout and Auto Resubscribe Topics.
+
+Feature: issue #10 - Should send message to client on (re-)connect or handle re-subscribes also 
+Feature: send '{mqttc, Pid, connected}' message to parent process when emqttc is connected successfully
+
+Feature: send '{mqttc, Pid, disconnected}' message to parent process when emqttc is disconnected from broker and prepare to reconnect.
+
+Improve: issue #12 - support 'CONNACK' timeout
+
+Improve: issue #13 - Improve subscribe/publish api with atoms: qos0/1/2
+
+
 v0.3.1-beta (2015-04-28)
 ------------------------
 
