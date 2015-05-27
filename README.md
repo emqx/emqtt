@@ -302,8 +302,8 @@ The MIT License (MIT)
 ## Contributors
 
 @hiroeorz
-
 @desoulter
+@witeman
 
 ## Contact
 
