@@ -610,6 +610,10 @@ disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
         timeout() | hibernate} |
     {stop, Reason :: term(), NewStateData :: #state{}}).
 
+handle_event({frame_error, Error}, _StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s] Frame Error: ~p", [Name, Error]),
+    {stop, {shutdown, {frame_error, Error}}, State};
+
 handle_event({connection_lost, Reason}, StateName, State = #state{parent = Parent, name = Name, keepalive = KeepAlive, connack_tref = TRef, logger = Logger}) 
         when StateName =:= connected; StateName =:= waiting_for_connack ->
 

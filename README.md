@@ -301,9 +301,9 @@ The MIT License (MIT)
 
 ## Contributors
 
-@hiroeorz
-
-@desoulter
+[@hiroeorz](https://github.com/hiroeorz)
+[@desoulter](https://github.com/desoulter)
+[@witeman](https://github.com/witeman)
 
 ## Contact
 
