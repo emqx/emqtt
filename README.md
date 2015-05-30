@@ -23,7 +23,7 @@ examples/simple_example.erl
 {ok, C} = emqttc:start_link([{host, "localhost"}, {client_id, <<"simpleClient">>}]),
 
 %% subscribe
-emqttc:subscribe(C, <<"TopicA">>, 0),
+emqttc:subscribe(C, <<"TopicA">>, qos0),
 
 %% publish
 emqttc:publish(C, <<"TopicA">>, <<"Payload...">>),
@@ -55,13 +55,26 @@ init(_Args) ->
     {ok, C} = emqttc:start_link([{host, "localhost"},
                                  {client_id, <<"simpleClient">>},
                                  {logger, info}]),
-    emqttc:subscribe(C, <<"TopicA">>, 1),
+    emqttc:subscribe(C, <<"TopicA">>, qos1),
     self() ! publish,
     {ok, #state{mqttc = C, seq = 1}}.
 
 %% Receive Publish Message from TopicA...
 handle_info({publish, Topic, Payload}, State) ->
     io:format("Message from ~s: ~p~n", [Topic, Payload]),
+    {noreply, State};
+    
+%% Client connected
+handle_info({mqttc, C, connected}, State = #state{mqttc = C}) ->
+    io:format("Client ~p is connected~n", [C]),
+    emqttc:subscribe(C, <<"TopicA">>, 1),
+    emqttc:subscribe(C, <<"TopicB">>, 2),
+    self() ! publish,
+    {noreply, State};
+    
+%% Client disconnected
+handle_info({mqttc, C,  disconnected}, State = #state{mqttc = C}) ->
+    io:format("Client ~p is disconnected~n", [C]),
     {noreply, State};
 
 ```
@@ -99,7 +112,9 @@ Connect to MQTT Broker:
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
+                   | {connack_timeout, pos_integer()}
                    | ssl
+                   | auto_resub
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 ```
@@ -115,7 +130,9 @@ proto_ver | mqtt_vsn()			| 4 | MQTT Protocol Version | 3,4
 username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
-ssl  | | | SSL socket | 
+connack_timeout | pos_integer() | 30 | ConnAck Timeout | {connack_timeout, 10}
+ssl |
+auto_resub |
 logger | atom() or {atom(), atom()} | info | Client Logger | error, {opt, info}, {lager, error}
 reconnect | false, or integer() | false | Client Reconnect | false, 4, {4, 60}
 
@@ -202,6 +219,17 @@ emqttc:start_link([{reconnect, {3, 120, 10}}]).
 
 ```
 
+### Auto Resubscribe
+
+'auto_resub' option to let emqttc resubscribe topics when reconnected.
+
+```erlang
+
+%% Resubscribe topics automatically when reconnected.  
+emqttc:start_link([auto_resub, {reconnect, 4}]).
+
+```
+
 ## Subscribe and Publish
 
 ### Publish API
@@ -210,6 +238,10 @@ emqttc:start_link([{reconnect, {3, 120, 10}}]).
 
 %% publish(Client, Topic, Payload) with Qos0
 emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>).
+
+%% publish(Client, Topic, Payload, Qos)
+emqttc:publish(Client, <<"Topic">>, <<"Payload">>, 1).
+emqttc:publish(Client, <<"Topic">>, <<"Payload">>, qos1).
 
 %% publish(Client, Topic, Payload, PubOpts) with options
 emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain true}]).
@@ -225,11 +257,15 @@ emqttc:subscribe(Client, <<"Topic">>).
 
 %% subscribe topic with qos
 emqttc:subscribe(Client, {<<"Topic">>, 1}).
+emqttc:subscribe(Client, {<<"Topic">>, qos1}).
+
 %% or
 emqttc:subscribe(Client, <<"Topic">>, 1).
+emqttc:subscribe(Client, <<"Topic">>, qos2).
+
 
 %% subscribe topics
-emqttc:subscribe(Client, [{<<"Topic1">>, 1}, {<<"Topic2">>, 2}]).
+emqttc:subscribe(Client, [{<<"Topic1">>, 1}, {<<"Topic2">>, qos2}]).
 
 %% unsubscribe
 emqttc:unsubscribe(Client, <<"Topic">>).
@@ -249,6 +285,12 @@ pong = emqttc:ping(Client).
 emqttc:disconnect(Client).
 ```
 
+## Topics Subscribed
+
+```
+emqttc:topics(Client).
+```
+
 ## Design 
 
 ![Design](https://raw.githubusercontent.com/emqtt/emqttc/master/doc/Socket.png)
@@ -259,9 +301,9 @@ The MIT License (MIT)
 
 ## Contributors
 
-@hiroeorz
-
-@desoulter
+[@hiroeorz](https://github.com/hiroeorz)
+[@desoulter](https://github.com/desoulter)
+[@witeman](https://github.com/witeman)
 
 ## Contact
 

@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @Copyright (C) 2012-2015, Feng Lee <feng@emqtt.io>
+%%% Copyright (c) 2015 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,9 @@
 %% Start emqttc client
 -export([start_link/0, start_link/1, start_link/2]).
 
+%% Lookup topics subscribed
+-export([topics/1]).
+
 %% API
 -export([publish/3, publish/4, 
          subscribe/2, subscribe/3, 
@@ -58,10 +61,16 @@
          code_change/4]).
 
 %% fsm state
--export([connecting/2, connecting/3, 
+-export([connecting/2,
          waiting_for_connack/2, waiting_for_connack/3, 
          connected/2, connected/3, 
          disconnected/2, disconnected/3]).
+
+-ifdef(TEST).
+
+-export([qos_opt/1]).
+
+-endif.
 
 -type mqttc_opt() :: {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
@@ -72,13 +81,18 @@
                    | {username, binary()}
                    | {password, binary()}
                    | {will, list(tuple())}
+                   | {connack_timeout, pos_integer()}
                    | ssl
                    | {logger, atom() | {atom(), atom()}}
+                   | auto_resub
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
--type mqtt_pubopt() :: {qos, mqtt_qos()} | {retain, boolean()}.
+-type mqtt_qosopt() :: qos0 | qos1 | qos2 | mqtt_qos().
+
+-type mqtt_pubopt() :: mqtt_qosopt() | {qos, mqtt_qos()} | {retain, boolean()}.
 
 -record(state, {
+        parent              :: pid(),
         name                :: atom(),
         host = "localhost"  :: inet:ip_address() | string(),
         port = 1883         :: inet:port_number(),
@@ -89,11 +103,17 @@
         pubsub_map  = #{}   :: map(),
         ping_reqs   = []    :: list(),
         pending_pubsub = [] :: list(),
+        auto_resub = false  :: boolean(),
         keepalive           :: emqttc_keepalive:keepalive() | undefined,
         keepalive_time = 60 :: non_neg_integer(),
+        connack_timeout     :: pos_integer(),
+        connack_tref        :: reference(),
         transport = tcp     :: tcp | ssl,
         reconnector         :: emqttc_reconnector:reconnector() | undefined,
         logger              :: gen_logger:logmod()}).
+
+%% seconds
+-define(CONNACK_TIMEOUT, 30).
 
 -define(KEEPALIVE_EVENT, {keepalive, timeout}).
 
@@ -127,7 +147,7 @@ start_link() ->
     MqttOpts  :: [mqttc_opt()],
     Client    :: pid().
 start_link(MqttOpts) when is_list(MqttOpts) ->
-    gen_fsm:start_link(?MODULE, [undefined, MqttOpts], []).
+    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Start emqttc client with name, options.
@@ -137,7 +157,16 @@ start_link(MqttOpts) when is_list(MqttOpts) ->
     Name      :: atom(),
     MqttOpts  :: [mqttc_opt()].
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [Name, MqttOpts], []).
+    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts], []).
+
+
+%%------------------------------------------------------------------------------
+%% @doc Lookup topics subscribed
+%% @end
+%%------------------------------------------------------------------------------
+-spec topics(Client :: pid()) -> [{binary(), mqtt_qos()}].
+topics(Client) ->
+    gen_fsm:sync_send_all_state_event(Client, topics).
 
 %%------------------------------------------------------------------------------
 %% @doc Publish message to broker with QoS0.
@@ -159,14 +188,19 @@ publish(Client, Topic, Payload) when is_binary(Topic), is_binary(Payload) ->
     Client    :: pid() | atom(),
     Topic     :: binary(),
     Payload   :: binary(),
-    PubOpts   :: mqtt_qos() | [mqtt_pubopt()],
+    PubOpts   :: mqtt_qosopt() | [mqtt_pubopt()],
     MsgId     :: mqtt_packet_id().
+publish(Client, Topic, Payload, QosOpt) when ?IS_QOS(QosOpt); is_atom(QosOpt) ->
+    publish(Client, #mqtt_message{
+            qos     = qos_opt(QosOpt),
+            topic   = Topic,
+            payload = Payload});
 publish(Client, Topic, Payload, PubOpts) when is_binary(Topic), is_binary(Payload) ->
     publish(Client, #mqtt_message{
-        qos = get_value(qos, PubOpts, ?QOS_0),
-        retain  = get_value(retain, PubOpts, false),
-        topic   = Topic,
-        payload = Payload}).
+            qos     = qos_opt(PubOpts),
+            retain  = get_value(retain, PubOpts, false),
+            topic   = Topic,
+            payload = Payload}).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -188,10 +222,11 @@ publish(Client, Msg) when is_record(Msg, mqtt_message) ->
     Topics    :: [{binary(), mqtt_qos()}] | {binary(), mqtt_qos()} | binary().
 subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, [{Topic, ?QOS_0}]);
-subscribe(Client, {Topic, Qos}) when is_binary(Topic), ?IS_QOS(Qos) ->
-    subscribe(Client, [{Topic, Qos}]);
-subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qos) ->
-    gen_fsm:send_event(Client, {subscribe, self(), Topics}).
+subscribe(Client, {Topic, Qos}) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
+    subscribe(Client, [{Topic, qos_opt(Qos)}]);
+subscribe(Client, [{_Topic, _Qos} | _] = Topics) when is_list(Topics) ->
+    gen_fsm:send_event(Client, {subscribe, self(),
+                                [{Topic, qos_opt(Qos)} || {Topic, Qos} <- Topics]}).
 
 %%------------------------------------------------------------------------------
 %% @doc Subscribe Topic with Qos.
@@ -200,9 +235,9 @@ subscribe(Client, [{Topic, Qos} | _] = Topics) when is_binary(Topic), ?IS_QOS(Qo
 -spec subscribe(Client, Topic, Qos) -> ok when
     Client    :: pid() | atom(),
     Topic     :: binary(),
-    Qos       :: mqtt_qos().
-subscribe(Client, Topic, Qos) when is_binary(Topic), ?IS_QOS(Qos) ->
-    subscribe(Client, [{Topic, Qos}]).
+    Qos       :: qos0 | qos1 | qos2 | mqtt_qos().
+subscribe(Client, Topic, Qos) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
+    subscribe(Client, [{Topic, qos_opt(Qos)}]).
 
 %%------------------------------------------------------------------------------
 %% @doc Unsubscribe Topics
@@ -249,10 +284,10 @@ disconnect(Client) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([undefined, MqttOpts]) ->
-    init([pid_to_list(self()), MqttOpts]);
+init([undefined, Parent, MqttOpts]) ->
+    init([pid_to_list(self()), Parent, MqttOpts]);
 
-init([Name, MqttOpts]) ->
+init([Name, Parent, MqttOpts]) ->
 
     process_flag(trap_exit, true),
 
@@ -270,11 +305,13 @@ init([Name, MqttOpts]) ->
     IsSSL = get_value(ssl, MqttOpts1, false),
 
     State = init(MqttOpts1, #state{
+                    parent       = Parent,
                     name         = Name,
                     host         = "localhost",
                     port         = if IsSSL -> 8883;
                                       true  -> 1883 end,
                     proto_state  = ProtoState,
+                    connack_timeout = ?CONNACK_TIMEOUT,
                     logger       = Logger}),
 
     {ok, connecting, State, 0}.
@@ -288,10 +325,14 @@ init([{port, Port} | Opts], State) ->
 init([ssl | Opts], State) ->
     ssl:start(), % ok? hehe...
     init(Opts, State#state{transport = ssl});
+init([auto_resub | Opts], State) ->
+    init(Opts, State#state{auto_resub= true});
 init([{logger, Cfg} | Opts], State) ->
     init(Opts, State#state{logger = gen_logger:new(Cfg)});
 init([{keepalive, Time} | Opts], State) ->
     init(Opts, State#state{keepalive_time = Time});
+init([{connack_timeout, Timeout}| Opts], State) ->
+    init(Opts, State#state{connack_timeout = Timeout});
 init([{reconnect, ReconnOpt} | Opts], State) ->
     init(Opts, State#state{reconnector = init_reconnector(ReconnOpt)});
 init([_Opt | Opts], State) ->
@@ -308,20 +349,7 @@ init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
 %% @end
 %%------------------------------------------------------------------------------
 connecting(timeout, State) ->
-    connect(State);
-
-connecting(Event, State = #state{name = Name, logger = Logger}) ->
-    Logger:warning("[Client ~s] Unexpected Event: ~p, when connecting.", [Name, Event]),
-    {next_state, connecting, State}.
-
-%%------------------------------------------------------------------------------
-%% @private
-%% @doc Sync event Handler for state that connecting to MQTT broker.
-%% @end
-%%------------------------------------------------------------------------------
-connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
-    Logger:warning("[Client ~s] Unexpected Sync Event from ~p when connecting: ~p", [Name, From, Event]),
-    {reply, {error, connecting}, connecting, State}.
+    connect(State).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -329,18 +357,48 @@ connecting(Event, From, State = #state{name = Name, logger = Logger}) ->
 %% @end
 %%------------------------------------------------------------------------------
 waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
+                parent = Parent,
                 name = Name, 
                 pending_pubsub = Pending,
+                auto_resub = AutoResub,
+                pubsub_map = PubsubMap,
                 proto_state = ProtoState,
                 keepalive = KeepAlive,
+                connack_tref = TRef,
                 logger = Logger}) ->
     Logger:info("[Client ~s] RECV: CONNACK_ACCEPT", [Name]),
+
+    %% Cancel connack timer
+    if
+        TRef =:= undefined -> ok;
+        true -> gen_fsm:cancel_timer(TRef)
+    end,
+
     {ok, ProtoState1} = emqttc_protocol:received('CONNACK', ProtoState),
+
+    %% Resubscribe automatically
+    case AutoResub of
+        true ->
+            case [{Topic, Qos} || {Topic, {Qos, _Subs}} <- maps:to_list(PubsubMap)] of
+                []         -> ok;
+                TopicTable -> subscribe(self(), TopicTable)
+            end;
+        false ->
+            ok
+    end,
+
+    %% Send the pending pubsub
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
-    %% start keepalive
+
+    %% Start keepalive
     KeepAlive1 = emqttc_keepalive:start(KeepAlive),
-    {next_state, connected, State#state{proto_state = ProtoState1, 
-                                        keepalive = KeepAlive1, 
+
+    %% Tell parent to subscribe
+    Parent ! {mqttc, self(), connected},
+
+    {next_state, connected, State#state{proto_state = ProtoState1,
+                                        keepalive = KeepAlive1,
+                                        connack_tref = undefined,
                                         pending_pubsub = []}};
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
@@ -363,6 +421,10 @@ waiting_for_connack(disconnect, State=#state{receiver = Receiver, proto_state = 
     emqttc_protocol:disconnect(ProtoState),
     emqttc_socket:stop(Receiver),
     {stop, normal, State#state{socket = undefined, receiver = undefined}};
+
+waiting_for_connack({timeout, TRef, connack}, State = #state{name = Name, logger = Logger, connack_tref = TRef}) ->
+    Logger:error("[Client ~s] CONNACK Timeout!", [Name]),
+    {stop, {shutdown, connack_timeout}, State};
 
 waiting_for_connack(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when waiting for connack!", [Name, Event]),
@@ -388,7 +450,8 @@ connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
 
 connected({subscribe, From, Topics}, State = #state{subscribers = Subscribers, 
                                                     pubsub_map  = PubSubMap, 
-                                                    proto_state = ProtoState}) ->
+                                                    proto_state = ProtoState,
+                                                    logger = Logger}) ->
 
     {ok, ProtoState1} = emqttc_protocol:subscribe(Topics, ProtoState),
 
@@ -398,21 +461,28 @@ connected({subscribe, From, Topics}, State = #state{subscribers = Subscribers,
         {From, _MonRef} -> 
             Subscribers;
         false -> 
-            MonRef = erlang:monitor(process, From),
-            [{From, MonRef} | Subscribers]
+            [{From, erlang:monitor(process, From)} | Subscribers]
     end,
 
     %% register to pubsub
     PubSubMap1 = lists:foldl(
-        fun({Topic, _Qos}, Map) ->
+        fun({Topic, Qos}, Map) ->
             case maps:find(Topic, Map) of 
-                {ok, Subs} ->
+                {ok, {OldQos, Subs}} ->
                     case lists:member(From, Subs) of
-                        true -> Map;
-                        false -> maps:put(Topic, [From | Subs], Map)
+                        true ->
+                            if
+                            Qos =:= OldQos -> 
+                                Map;
+                            true -> 
+                                Logger:error("Subscribe topic '~s' with different qos: old=~p, new=~p", [Topic, OldQos, Qos]),
+                                maps:put(Topic, {Qos, Subs}, Map)
+                            end;
+                        false -> 
+                            maps:put(Topic, {Qos, [From | Subs]}, Map)
                     end; 
                 error ->
-                    maps:put(Topic, [From], Map)
+                    maps:put(Topic, {Qos, [From]}, Map)
             end
         end, PubSubMap, Topics),
 
@@ -430,10 +500,10 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     lists:foldl(
         fun(Topic, Map) ->
             case maps:find(Topic, Map) of
-                {ok, Subs} ->
+                {ok, {Qos, Subs}} ->
                     case lists:member(From, Subs) of
                         true ->
-                            maps:put(Topic, lists:delete(From, Subs), Map);
+                            maps:put(Topic, {Qos, lists:delete(From, Subs)}, Map);
                         false ->
                             Map
                     end;
@@ -446,7 +516,7 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     Subscribers1 =
     case lists:keyfind(From, 1, Subscribers) of
         {From, MonRef} -> 
-            case lists:member(From, lists:flatten(maps:values(PubSubMap1))) of
+            case lists:member(From, lists:append([Subs || {_Qos, Subs} <- maps:values(PubSubMap1)])) of
                 true -> 
                     Subscribers;
                 false ->
@@ -505,6 +575,7 @@ disconnected(Event = {publish, _Msg}, State) ->
 
 disconnected(Event = {Tag, _From, _Topics}, State) when 
       Tag =:= subscribe orelse Tag =:= unsubscribe ->
+    io:format("Pending event for client disconnected: ~p~n", [Event]),
     {next_state, disconnected, pending(Event, State)};
 
 disconnected(disconnect, State) ->
@@ -539,10 +610,29 @@ disconnected(Event, _From, State = #state{name = Name, logger = Logger}) ->
         timeout() | hibernate} |
     {stop, Reason :: term(), NewStateData :: #state{}}).
 
-handle_event({connection_lost, Reason}, _StateName, State = #state{name = Name, keepalive = KeepAlive, logger = Logger}) ->
+handle_event({frame_error, Error}, _StateName, State = #state{name = Name, logger = Logger}) ->
+    Logger:error("[Client ~s] Frame Error: ~p", [Name, Error]),
+    {stop, {shutdown, {frame_error, Error}}, State};
+
+handle_event({connection_lost, Reason}, StateName, State = #state{parent = Parent, name = Name, keepalive = KeepAlive, connack_tref = TRef, logger = Logger}) 
+        when StateName =:= connected; StateName =:= waiting_for_connack ->
+
     Logger:warning("[Client ~s] Connection lost for: ~p", [Name, Reason]),
+
+    %% cancel connack timer first, if connection lost when waiting for connack.
+    case {StateName, TRef} of
+        {waiting_for_connack, undefined} -> ok;
+        {waiting_for_connack, TRef} -> gen_fsm:cancel_timer(TRef);
+        _ -> ok
+    end,
+
+    %% cancel keepalive
     emqttc_keepalive:cancel(KeepAlive),
-    try_reconnect(Reason, State#state{socket = undefined});
+
+    %% tell parent
+    Parent ! {mqttc, self(), disconnected},
+
+    try_reconnect(Reason, State#state{socket = undefined, connack_tref = TRef});
 
 handle_event(Event, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event when ~s: ~p", [Name, StateName, Event]),
@@ -567,6 +657,10 @@ handle_event(Event, StateName, State = #state{name = Name, logger = Logger}) ->
         timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewStateData :: term()} |
     {stop, Reason :: term(), NewStateData :: term()}).
+handle_sync_event(topics, _From, StateName, State = #state{pubsub_map = PubsubMap}) ->
+    TopicTable = [{Topic, Qos} || {Topic, {Qos, _Subs}} <- maps:to_list(PubsubMap)],
+    {reply, TopicTable, StateName, State};
+
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
@@ -628,10 +722,10 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
     case lists:keyfind(MonRef, 2, Subscribers) of
         {Pid, MonRef} ->
             {lists:delete({Pid, MonRef}, Subscribers),
-                maps:fold(fun(Topic, Subs, Map) ->
+                maps:fold(fun(Topic, {Qos, Subs}, Map) ->
                         case lists:member(Pid, Subs) of
-                                true -> maps:put(Topic, lists:delete(Pid, Subs), Map);
-                                false -> Map
+                            true -> maps:put(Topic, {Qos, lists:delete(Pid, Subs)}, Map);
+                            false -> Map
                         end
                     end, PubSubMap, PubSubMap)};
         false ->
@@ -691,6 +785,7 @@ connect(State = #state{name = Name,
                        receiver = undefined,
                        proto_state = ProtoState, 
                        keepalive_time = KeepAliveTime,
+                       connack_timeout = ConnAckTimeout,
                        transport = Transport,
                        logger = Logger}) ->
     Logger:info("[Client ~s]: connecting to ~s:~p", [Name, Host, Port]),
@@ -699,11 +794,13 @@ connect(State = #state{name = Name,
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),
             KeepAlive = emqttc_keepalive:new({Socket, send_oct}, KeepAliveTime, ?KEEPALIVE_EVENT),
+            TRef = gen_fsm:start_timer(ConnAckTimeout * 1000, connack),
             Logger:info("[Client ~s] connected with ~s:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#state{socket = Socket,
                                                           receiver = Receiver,
                                                           keepalive = KeepAlive,
-                                                          proto_state = ProtoState1} };
+                                                          connack_tref = TRef,
+                                                          proto_state = ProtoState1}};
         {error, Reason} ->
             Logger:info("[Client ~s] connection failure: ~p", [Name, Reason]),
             try_reconnect(Reason, State)
@@ -782,16 +879,16 @@ received(?PACKET(?PINGRESP), State= #state{ping_reqs = PingReqs}) ->
 %% @doc Dispatch Publish Message to subscribers.
 %% @end
 %%------------------------------------------------------------------------------
-dispatch(Publish = {publish, Topic, _Payload}, #state{name = Name,
+dispatch(Publish = {publish, TopicName, _Payload}, #state{name = Name,
                                                       pubsub_map = PubSubMap, 
                                                       logger = Logger}) ->
     Matched =
     lists:foldl(
-        fun(Filter, Acc) -> 
-                case emqttc_topic:match(Topic, Filter) of 
+        fun(TopicFilter, Acc) -> 
+                case emqttc_topic:match(TopicName, TopicFilter) of 
                     true ->
-                        [Sub ! Publish || Sub <- maps:get(Filter, PubSubMap)],
-                        [Filter | Acc];
+                        {_Qos, Subs} = maps:get(TopicFilter, PubSubMap),
+                        [Sub ! Publish || Sub <- Subs], [TopicFilter | Acc];
                     false ->
                         Acc 
                 end
@@ -802,4 +899,26 @@ dispatch(Publish = {publish, Topic, _Payload}, #state{name = Name,
         true ->
             ok
     end.
+
+qos_opt(qos2) ->
+    ?QOS_2;
+qos_opt(qos1) ->
+    ?QOS_1;
+qos_opt(qos0) ->
+    ?QOS_0;
+qos_opt(Qos) when is_integer(Qos), ?QOS_0 =< Qos, Qos =< ?QOS_2 ->
+    Qos;
+qos_opt([]) ->
+    ?QOS_0;
+qos_opt([qos2|_PubOpts]) ->
+    ?QOS_2;
+qos_opt([qos1|_PubOpts]) ->
+    ?QOS_1;
+qos_opt([qos0|_PubOpts]) ->
+    ?QOS_0;
+qos_opt([{qos, Qos}|_PubOpts]) ->
+    Qos;
+qos_opt([_|PubOpts]) ->
+    qos_opt(PubOpts).
+
 

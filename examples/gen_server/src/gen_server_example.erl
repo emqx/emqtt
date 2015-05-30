@@ -1,5 +1,7 @@
 -module(gen_server_example).
+
 -behaviour(gen_server).
+
 -define(SERVER, ?MODULE).
 
 %% ------------------------------------------------------------------
@@ -34,9 +36,10 @@ stop() ->
 init(_Args) ->
     {ok, C} = emqttc:start_link([{host, "localhost"}, 
                                  {client_id, <<"simpleClient">>},
-                                 {logger, info}]),
+                                 {reconnect, 3},
+                                 {logger, {console, info}}]),
+    %% The pending subscribe
     emqttc:subscribe(C, <<"TopicA">>, 1),
-    self() ! publish,
     {ok, #state{mqttc = C, seq = 1}}.
 
 handle_call(stop, _From, State) ->
@@ -48,15 +51,30 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% Publish Messages
 handle_info(publish, State = #state{mqttc = C, seq = I}) ->
     Payload = list_to_binary(["hello...", integer_to_list(I)]),
     emqttc:publish(C, <<"TopicA">>, Payload, [{qos, 1}]),
-    erlang:send_after(1000, self(), publish),
+    emqttc:publish(C, <<"TopicB">>, Payload, [{qos, 2}]),
+    erlang:send_after(3000, self(), publish),
     {noreply, State#state{seq = I+1}};
 
-%% Receive
+%% Receive Messages
 handle_info({publish, Topic, Payload}, State) ->
     io:format("Message from ~s: ~p~n", [Topic, Payload]),
+    {noreply, State};
+
+%% Client connected
+handle_info({mqttc, C, connected}, State = #state{mqttc = C}) ->
+    io:format("Client ~p is connected~n", [C]),
+    emqttc:subscribe(C, <<"TopicA">>, 1),
+    emqttc:subscribe(C, <<"TopicB">>, 2),
+    self() ! publish,
+    {noreply, State};
+
+%% Client disconnected
+handle_info({mqttc, C,  disconnected}, State = #state{mqttc = C}) ->
+    io:format("Client ~p is disconnected~n", [C]),
     {noreply, State};
 
 handle_info(_Info, State) ->

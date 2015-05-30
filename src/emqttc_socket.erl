@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% @Copyright (C) 2012-2015, Feng Lee <feng@emqtt.io>
+%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -190,15 +190,23 @@ receiver_loop(ClientPid, Socket, ParseState) ->
     setopts(Socket, [{active, once}]),
     receive
         {tcp, Socket, Data} ->
-            receiver_loop(ClientPid, Socket, 
-                          parse_received_bytes(ClientPid, Data, ParseState));
+            case parse_received_bytes(ClientPid, Data, ParseState) of
+                {ok, NewParserState} ->
+                    receiver_loop(ClientPid, Socket, NewParserState);
+                {error, Error} ->
+                    gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
+            end;
         {tcp_error, Socket, Reason} ->
             connection_lost(ClientPid, {tcp_error, Reason});
         {tcp_closed, Socket} ->
             connection_lost(ClientPid, tcp_closed);
         {ssl, _SslSocket, Data} ->
-            receiver_loop(ClientPid, Socket, 
-                          parse_received_bytes(ClientPid, Data, ParseState));
+            case parse_received_bytes(ClientPid, Data, ParseState) of
+                {ok, NewParserState} ->
+                    receiver_loop(ClientPid, Socket, NewParserState);
+                {error, Error} ->
+                    gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
+            end;
         {ssl_error, _SslSocket, Reason} ->
             connection_lost(ClientPid, {ssl_error, Reason});
         {ssl_closed, _SslSocket} ->
@@ -208,15 +216,17 @@ receiver_loop(ClientPid, Socket, ParseState) ->
     end.
 
 parse_received_bytes(_ClientPid, <<>>, ParseState) ->
-    ParseState;
+    {ok, ParseState};
 
 parse_received_bytes(ClientPid, Data, ParseState) ->
     case emqttc_parser:parse(Data, ParseState) of
-    {more, ParseState1} -> 
-        ParseState1;
+    {more, ParseState1} ->
+        {ok, ParseState1};
     {ok, Packet, Rest} -> 
         gen_fsm:send_event(ClientPid, Packet),
-        parse_received_bytes(ClientPid, Rest, ParseState)
+        parse_received_bytes(ClientPid, Rest, emqttc_parser:new());
+    {error, Error} ->
+        {error, Error}
     end.
 
 connection_lost(ClientPid, Reason) ->
