@@ -39,7 +39,7 @@
 -export([receiver/2]).
 
 %% 30 (secs)
--define(TIMEOUT, 30000).
+-define(TIMEOUT, 60000).
 
 -define(TCPOPTIONS, [
     binary,
