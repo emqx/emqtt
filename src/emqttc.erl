@@ -113,7 +113,7 @@
         logger              :: gen_logger:logmod()}).
 
 %% seconds
--define(CONNACK_TIMEOUT, 30).
+-define(CONNACK_TIMEOUT, 90).
 
 -define(KEEPALIVE_EVENT, {keepalive, timeout}).
 
