@@ -45,7 +45,6 @@
          disconnect/1,
          received/2]).
 
-%% TODO: types...
 -record(proto_state, {
         socket                  :: inet:socket(),
         socket_name             :: list() | binary(),
@@ -207,7 +206,9 @@ pubrel(PacketId, State) when is_integer(PacketId) ->
 pubcomp(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBCOMP, PacketId), State).
 
-subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
+subscribe(Topics, State = #proto_state{packet_id = PacketId,
+                                               subscriptions = SubMap,
+                                               logger = Logger}) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
     case Resubs of
         [] -> ok;
@@ -215,7 +216,8 @@ subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = Packe
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
     %% send packet
-    send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
+    {ok, NewState} = send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})),
+    {ok, PacketId, NewState}.
 
 unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
     case Topics -- maps:keys(SubMap) of
