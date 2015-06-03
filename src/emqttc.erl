@@ -113,7 +113,7 @@
         logger              :: gen_logger:logmod()}).
 
 %% seconds
--define(CONNACK_TIMEOUT, 30).
+-define(CONNACK_TIMEOUT, 90).
 
 -define(KEEPALIVE_EVENT, {keepalive, timeout}).
 
@@ -880,8 +880,9 @@ received(?PACKET(?PINGRESP), State= #state{ping_reqs = PingReqs}) ->
 %% @end
 %%------------------------------------------------------------------------------
 dispatch(Publish = {publish, TopicName, _Payload}, #state{name = Name,
-                                                      pubsub_map = PubSubMap, 
-                                                      logger = Logger}) ->
+                                                          parent = Parent,
+                                                          pubsub_map = PubSubMap,
+                                                          logger = Logger}) ->
     Matched =
     lists:foldl(
         fun(TopicFilter, Acc) -> 
@@ -895,7 +896,8 @@ dispatch(Publish = {publish, TopicName, _Payload}, #state{name = Name,
         end, [], maps:keys(PubSubMap)),
     if
         length(Matched) =:= 0 ->
-            Logger:warning("[Client ~s] Dropped: ~p", [Name, Publish]);
+            %% Dispath to Parent if no subscription matched.
+            Parent ! Publish;
         true ->
             ok
     end.
