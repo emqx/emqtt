@@ -25,7 +25,7 @@
 %%%-----------------------------------------------------------------------------
 -module(emqttc_protocol).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -include("emqttc_packet.hrl").
 
@@ -45,7 +45,6 @@
          disconnect/1,
          received/2]).
 
-%% TODO: types...
 -record(proto_state, {
         socket                  :: inet:socket(),
         socket_name             :: list() | binary(),
@@ -53,7 +52,7 @@
         proto_name = <<"MQTT">> :: binary(),
         client_id               :: binary(),
         clean_sess = true       :: boolean(),
-        keepalive  = 60         :: non_neg_integer(),
+        keepalive  = ?KEEPALIVE :: non_neg_integer(),
         will_flag  = false      :: boolean(),
         will_msg                :: mqtt_message(),
         username                :: binary() | undefined,
@@ -124,7 +123,8 @@ random_id() ->
     random:seed(now()),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
-    list_to_binary(["emqttc_" | io_lib:format("~12.16.0b~8.16.0b", [I1, I2])]).
+    {ok, Host} = inet:gethostname(),
+    list_to_binary(["emqttc_", Host, "_" | io_lib:format("~12.16.0b~8.16.0b", [I1, I2])]).
 
 %%------------------------------------------------------------------------------
 %% @doc Set socket
@@ -180,7 +180,8 @@ connect(State = #proto_state{client_id  = ClientId,
 %% @end
 %%------------------------------------------------------------------------------
 publish(Message = #mqtt_message{qos = ?QOS_0}, State) ->
-	send(emqttc_message:to_packet(Message), State);
+    {ok, NewState} = send(emqttc_message:to_packet(Message), State),
+    {ok, undefined, NewState};
 
 publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
                 packet_id = PacketId, awaiting_ack = AwaitingAck})
@@ -192,7 +193,9 @@ publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
         true -> Message1
     end,
     Awaiting1 = maps:put(PacketId, Message2, AwaitingAck),
-	send(emqttc_message:to_packet(Message2), next_packet_id(State#proto_state{awaiting_ack = Awaiting1})).
+	{ok, NewState} = send(emqttc_message:to_packet(Message2), 
+                              next_packet_id(State#proto_state{awaiting_ack = Awaiting1})),
+    {ok, PacketId, NewState}.
 
 puback(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBACK, PacketId), State).
@@ -206,7 +209,9 @@ pubrel(PacketId, State) when is_integer(PacketId) ->
 pubcomp(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBCOMP, PacketId), State).
 
-subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
+subscribe(Topics, State = #proto_state{packet_id = PacketId,
+                                               subscriptions = SubMap,
+                                               logger = Logger}) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
     case Resubs of
         [] -> ok;
@@ -214,7 +219,8 @@ subscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = Packe
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
     %% send packet
-    send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})).
+    {ok, NewState} = send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})),
+    {ok, PacketId, NewState}.
 
 unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
     case Topics -- maps:keys(SubMap) of
