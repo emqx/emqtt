@@ -6,11 +6,11 @@ emqttc requires Erlang R17+.
 
 ## Features
 
-Both MQTT V3.1/V3.1.1 Protocol Support
-
-QoS0, QoS1, QoS2 Publish and Subscribe
-
-TCP/SSL Socket Support
+* Both MQTT V3.1/V3.1.1 Protocol Support
+* QoS0, QoS1, QoS2 Publish and Subscribe
+* TCP/SSL Socket Support
+* Reconnect automatically
+* Keepalive and ping/pong
 
 ## Usage
 
