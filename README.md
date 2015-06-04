@@ -10,7 +10,7 @@ Both MQTT V3.1/V3.1.1 Protocol Support
 
 QoS0, QoS1, QoS2 Publish and Subscribe
 
-SSL Socket Support
+TCP/SSL Socket Support
 
 ## Usage
 
@@ -248,6 +248,19 @@ emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain 
 
 ```
 
+### Synchronous Publish API
+
+Publish qos1, qos2 messages and wait until puback, pubrel received.
+
+```
+-spec sync_publish(Client, Topic, Payload, PubOpts) -> {ok, MsgId} | {error, timeout} when
+    Client    :: pid() | atom(),
+    Topic     :: binary(),
+    Payload   :: binary(),
+    PubOpts   :: mqtt_qosopt() | [mqtt_pubopt()],
+    MsgId     :: mqtt_packet_id().
+```
+
 ### Subscribe API
 
 ```erlang
@@ -271,6 +284,16 @@ emqttc:subscribe(Client, [{<<"Topic1">>, 1}, {<<"Topic2">>, qos2}]).
 emqttc:unsubscribe(Client, <<"Topic">>).
 emqttc:unsubscribe(Client, [<<"Topic1">>, <<"Topic2">>]).
 
+```
+
+### Synchronous Subscribe API
+
+Subscribe topics and wait for suback.
+
+```
+-spec sync_subscribe(Client, Topics) -> {ok, mqtt_qos() | [mqtt_qos()]} when
+    Client    :: pid() | atom(),
+    Topics    :: [{binary(), mqtt_qos()}] | {binary(), mqtt_qos()} | binary().
 ```
 
 ## Ping and Pong

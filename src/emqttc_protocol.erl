@@ -25,7 +25,7 @@
 %%%-----------------------------------------------------------------------------
 -module(emqttc_protocol).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -include("emqttc_packet.hrl").
 
@@ -52,7 +52,7 @@
         proto_name = <<"MQTT">> :: binary(),
         client_id               :: binary(),
         clean_sess = true       :: boolean(),
-        keepalive  = 60         :: non_neg_integer(),
+        keepalive  = ?KEEPALIVE :: non_neg_integer(),
         will_flag  = false      :: boolean(),
         will_msg                :: mqtt_message(),
         username                :: binary() | undefined,
@@ -180,7 +180,8 @@ connect(State = #proto_state{client_id  = ClientId,
 %% @end
 %%------------------------------------------------------------------------------
 publish(Message = #mqtt_message{qos = ?QOS_0}, State) ->
-	send(emqttc_message:to_packet(Message), State);
+    {ok, NewState} = send(emqttc_message:to_packet(Message), State),
+    {ok, undefined, NewState};
 
 publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
                 packet_id = PacketId, awaiting_ack = AwaitingAck})
@@ -192,7 +193,9 @@ publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
         true -> Message1
     end,
     Awaiting1 = maps:put(PacketId, Message2, AwaitingAck),
-	send(emqttc_message:to_packet(Message2), next_packet_id(State#proto_state{awaiting_ack = Awaiting1})).
+	{ok, NewState} = send(emqttc_message:to_packet(Message2), 
+                              next_packet_id(State#proto_state{awaiting_ack = Awaiting1})),
+    {ok, PacketId, NewState}.
 
 puback(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBACK, PacketId), State).
