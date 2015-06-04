@@ -113,6 +113,8 @@ Connect to MQTT Broker:
                    | {password, binary()}
                    | {will, list(tuple())}
                    | {connack_timeout, pos_integer()}
+                   | {puback_timeout,  pos_integer()}
+                   | {suback_timeout,  pos_integer()}
                    | ssl
                    | auto_resub
                    | {logger, atom() | {atom(), atom()}}
