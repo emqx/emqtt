@@ -1,7 +1,5 @@
 
-handle 'CONNECT' timout
-
-Received publish message when WAITING_FOR_CONNACK sometimes
+autoConfirm option?
 
 handle 'SUBACK', 'UNSUBACK'
 

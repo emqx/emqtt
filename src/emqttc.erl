@@ -44,11 +44,11 @@
 -export([topics/1]).
 
 %% API
--export([publish/3, publish/4, 
+-export([publish/3, publish/4,
          sync_publish/4,
-         subscribe/2, subscribe/3, 
-         unsubscribe/2, 
-         ping/1, 
+         subscribe/2, subscribe/3,
+         unsubscribe/2,
+         ping/1,
          disconnect/1]).
 
 -behaviour(gen_fsm).
@@ -277,7 +277,7 @@ subscribe(Client, [{_Topic, _Qos} | _] = Topics) when is_list(Topics) ->
     Qos       :: qos0 | qos1 | qos2 | mqtt_qos().
 subscribe(Client, Topic, Qos) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
     case subscribe(Client, [{Topic, qos_opt(Qos)}]) of
-        {ok, [GrantedQos]}    -> {ok, GrantedQos};
+        {ok, [GrantedQos]} -> {ok, GrantedQos};
         {error, Error} -> {error, Error}
     end.
 
