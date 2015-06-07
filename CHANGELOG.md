@@ -2,10 +2,16 @@
 ChangeLog
 ==================
 
-0.5.0-beta (2015-05-31)
+0.5.0-alpha (2015-06-05)
 ------------------------
 
-Support 'Sync' Publish, Subscribe API
+Support synchronous subscribe/publish APIs
+
+Feature: emqttc - add sync_publish/4, sync_subscribe/2, sync_subscribe/3 apis
+
+Feature: mqttc_opt() - add 'puback_timeout', 'suback_timeout' options
+
+Bugfix: default keepalive bug
 
 
 0.4.1-beta (2015-05-27)
@@ -20,6 +26,7 @@ Bugfix: fix critical issue #11
 Support 'wait_for_connack' timeout and Auto Resubscribe Topics.
 
 Feature: issue #10 - Should send message to client on (re-)connect or handle re-subscribes also 
+
 Feature: send '{mqttc, Pid, connected}' message to parent process when emqttc is connected successfully
 
 Feature: send '{mqttc, Pid, disconnected}' message to parent process when emqttc is disconnected from broker and prepare to reconnect.
