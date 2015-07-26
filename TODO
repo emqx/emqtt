@@ -3,3 +3,8 @@ autoConfirm option?
 
 handle 'SUBACK', 'UNSUBACK'
 
+Session State of client:
+
+QoS 1 and QoS 2 messages which have been sent to the Server, but have not been completely acknowledged.
+
+QoS 2 messages which have been received from the Server, but have not been completely acknowledged.
