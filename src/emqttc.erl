@@ -1054,11 +1054,11 @@ dispatch(Publish = {publish, TopicName, _Payload}, #state{parent = Parent,
                                                           pubsub_map = PubSubMap}) ->
     Matched =
     lists:foldl(
-        fun(TopicFilter, Acc) -> 
+        fun(TopicFilter, Acc) ->
                 case emqttc_topic:match(TopicName, TopicFilter) of 
                     true ->
                         {_Qos, Subs} = maps:get(TopicFilter, PubSubMap),
-                        [Sub ! Publish || Sub <- Subs], [TopicFilter | Acc];
+                        lists:append(Subs, Acc);
                     false ->
                         Acc 
                 end
@@ -1068,7 +1068,7 @@ dispatch(Publish = {publish, TopicName, _Payload}, #state{parent = Parent,
             %% Dispath to Parent if no subscription matched.
             Parent ! Publish;
         true ->
-            ok
+            [Sub ! Publish || Sub <- unique(Matched)], ok
     end.
 
 qos_opt(qos2) ->
@@ -1092,3 +1092,5 @@ qos_opt([{qos, Qos}|_PubOpts]) ->
 qos_opt([_|PubOpts]) ->
     qos_opt(PubOpts).
 
+unique(L) ->
+    sets:to_list(sets:from_list(L)).
