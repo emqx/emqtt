@@ -5,3 +5,5 @@ Received publish message when WAITING_FOR_CONNACK sometimes
 
 handle 'SUBACK', 'UNSUBACK'
 
+Inflight Window and Queue to guarantee message order
+
