@@ -24,9 +24,10 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_topic).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -import(lists, [reverse/1]).
 

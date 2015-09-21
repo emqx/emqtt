@@ -24,6 +24,7 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_socket).
 
 -author("feng@emqtt.io").
@@ -39,7 +40,7 @@
 -export([receiver/2]).
 
 %% 30 (secs)
--define(TIMEOUT, 60000).
+-define(TIMEOUT, 90000).
 
 -define(TCPOPTIONS, [
     binary,

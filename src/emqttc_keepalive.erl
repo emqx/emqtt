@@ -24,9 +24,10 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_keepalive).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -record(keepalive, {socket,
                     stat_name,
@@ -99,7 +100,7 @@ resume(KeepAlive = #keepalive{socket      = Socket,
     {ok, [{StatName, NewStatVal}]} = emqttc_socket:getstat(Socket, [StatName]),
     if
         NewStatVal =:= StatVal ->
-            timeout;
+            {error, timeout};
         true ->
             cancel(Ref), %need?
             NewRef = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),

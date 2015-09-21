@@ -24,15 +24,15 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_parser).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -include("emqttc_packet.hrl").
 
 %% API
 -export([new/0, parse/2]).
-
 
 %%%-----------------------------------------------------------------------------
 %% @doc Initialize a parser.
