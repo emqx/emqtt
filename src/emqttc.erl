@@ -39,7 +39,7 @@
 -export([start/0]).
 
 %% Start emqttc client
--export([start_link/0, start_link/1, start_link/2]).
+-export([start_link/0, start_link/1, start_link/2, start_link/3]).
 
 %% Lookup topics
 -export([topics/1]).
@@ -114,7 +114,8 @@
                 connack_tref        :: reference(),
                 transport = tcp     :: tcp | ssl,
                 reconnector         :: emqttc_reconnector:reconnector() | undefined,
-                logger              :: gen_logger:logmod()}).
+                logger              :: gen_logger:logmod(),
+                tcp_opts            :: [gen_tcp:connect_option()]}).
 
 %% 60 secs
 -define(CONNACK_TIMEOUT, 60).
@@ -151,17 +152,31 @@ start_link() ->
     MqttOpts  :: [mqttc_opt()],
     Client    :: pid().
 start_link(MqttOpts) when is_list(MqttOpts) ->
-    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts], []).
+    start_link(MqttOpts, []).
 
 %%------------------------------------------------------------------------------
 %% @doc Start emqttc client with name, options.
 %% @end
 %%------------------------------------------------------------------------------
--spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
+-spec start_link(Name | MqttOpts, TcpOpts) -> {ok, pid()} | ignore | {error, any()} when
     Name      :: atom(),
-    MqttOpts  :: [mqttc_opt()].
+    MqttOpts  :: [mqttc_opt()],
+    TcpOpts   :: [gen_tcp:connect_option()].
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts], []).
+    start_link(Name, MqttOpts, []);
+start_link(MqttOpts, TcpOpts) when is_list(MqttOpts), is_list(TcpOpts) ->
+    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts, TcpOpts], []).
+
+%%------------------------------------------------------------------------------
+%% @doc Start emqttc client with name, options, tcp options.
+%% @end
+%%------------------------------------------------------------------------------
+-spec start_link(Name, MqttOpts, TcpOpts) -> {ok, pid()} | ignore | {error, any()} when
+    Name      :: atom(),
+    MqttOpts  :: [mqttc_opt()],
+    TcpOpts   :: [gen_tcp:connect_option()].
+start_link(Name, MqttOpts, TcpOpts) when is_atom(Name), is_list(MqttOpts), is_list(TcpOpts) ->
+    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts, TcpOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Lookup topics subscribed
@@ -353,10 +368,10 @@ disconnect(Client) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([undefined, Parent, MqttOpts]) ->
-    init([pid_to_list(self()), Parent, MqttOpts]);
+init([undefined, Parent, MqttOpts, TcpOpts]) ->
+    init([pid_to_list(self()), Parent, MqttOpts, TcpOpts]);
 
-init([Name, Parent, MqttOpts]) ->
+init([Name, Parent, MqttOpts, TcpOpts]) ->
 
     process_flag(trap_exit, true),
 
@@ -370,8 +385,8 @@ init([Name, Parent, MqttOpts]) ->
     end,
 
     ProtoState = emqttc_protocol:init(
-                   merge_opts([{logger, Logger},
-                               {keepalive, ?KEEPALIVE}], MqttOpts1)),
+                   emqttc_opts:merge([{logger, Logger},
+                                      {keepalive, ?KEEPALIVE}], MqttOpts1)),
 
     IsSSL = get_value(ssl, MqttOpts1, false),
 
@@ -384,7 +399,8 @@ init([Name, Parent, MqttOpts]) ->
                                    connack_timeout = ?CONNACK_TIMEOUT,
                                    puback_timeout  = ?PUBACK_TIMEOUT,
                                    suback_timeout  = ?SUBACK_TIMEOUT,
-                                   logger          = Logger}),
+                                   logger          = Logger,
+                                   tcp_opts        = TcpOpts}),
 
     {ok, connecting, State, 0}.
 
@@ -419,26 +435,6 @@ init_reconnector(false) ->
 init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
     emqttc_reconnector:new(Params).
 
-%%------------------------------------------------------------------------------
-%% @private
-%% @doc Merge Options
-%% @end
-%%------------------------------------------------------------------------------
-merge_opts(Defaults, Options) ->
-    lists:foldl(
-        fun({Opt, Val}, Acc) ->
-                case lists:keymember(Opt, 1, Acc) of
-                    true ->
-                        lists:keyreplace(Opt, 1, Acc, {Opt, Val});
-                    false ->
-                        [{Opt, Val}|Acc]
-                end;
-            (Opt, Acc) ->
-                case lists:member(Opt, Acc) of
-                    true -> Acc;
-                    false -> [Opt | Acc]
-                end
-        end, Defaults, Options).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -916,9 +912,10 @@ connect(State = #state{name = Name,
                        keepalive_after = KeepAliveTime,
                        connack_timeout = ConnAckTimeout,
                        transport = Transport,
-                       logger = Logger}) ->
+                       logger = Logger,
+                       tcp_opts = TcpOpts}) ->
     Logger:info("[Client ~s]: connecting to ~s:~p", [Name, Host, Port]),
-    case emqttc_socket:connect(self(), Transport, Host, Port) of
+    case emqttc_socket:connect(self(), Transport, Host, Port, TcpOpts) of
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),

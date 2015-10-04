@@ -31,7 +31,7 @@
 -include("emqttc_packet.hrl").
 
 %% API
--export([connect/4, controlling_process/2, send/2, close/1, stop/1]).
+-export([connect/5, controlling_process/2, send/2, close/1, stop/1]).
 
 -export([sockname/1, sockname_s/1, setopts/2, getstat/2]).
 
@@ -62,15 +62,16 @@
 %% @doc Connect to broker with TCP or SSL transport
 %% @end
 %%------------------------------------------------------------------------------
--spec connect(ClientPid, Transport, Host, Port) -> {ok, Socket, Receiver} | {error, term()} when
+-spec connect(ClientPid, Transport, Host, Port, TcpOpts) -> {ok, Socket, Receiver} | {error, term()} when
     ClientPid   :: pid(),
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
+    TcpOpts     :: [gen_tcp:connect_option()],
     Socket      :: inet:socket() | ssl_socket(),
     Receiver    :: pid().
-connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
-    case connect(Transport, Host, Port) of
+connect(ClientPid, Transport, Host, Port, TcpOpts) when is_pid(ClientPid) ->
+    case connect(Transport, Host, Port, TcpOpts) of
         {ok, Socket} ->
             ReceiverPid = spawn_link(?MODULE, receiver, [ClientPid, Socket]),
             controlling_process(Socket, ReceiverPid),
@@ -79,16 +80,17 @@ connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
             {error, Reason}
     end.
 
--spec connect(Transport, Host, Port) -> {ok, Socket} | {error, any()} when
+-spec connect(Transport, Host, Port, TcpOpts) -> {ok, Socket} | {error, any()} when
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
+    TcpOpts     :: [gen_tcp:connect_option()],
     Socket      :: inet:socket() | ssl_socket().
-connect(tcp, Host, Port) ->
-    gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT); 
-connect(ssl, Host, Port) ->
-    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
-        {ok, Socket} -> 
+connect(tcp, Host, Port, TcpOpts) ->
+    gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT);
+connect(ssl, Host, Port, TcpOpts) ->
+    case gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT) of
+        {ok, Socket} ->
             case ssl:connect(Socket, ?SSLOPTIONS, ?TIMEOUT) of
                 {ok, SslSocket} -> {ok, #ssl_socket{tcp = Socket, ssl = SslSocket}};
                 {error, SslReason} -> {error, SslReason}
