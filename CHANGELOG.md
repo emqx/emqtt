@@ -2,6 +2,14 @@
 ChangeLog
 ==================
 
+0.6.0-alpha (2015-10-08)
+------------------------
+
+Feature: Support to specify 'local ipaddress' (#20)
+
+Improve: add emqttc:start_link(MqttOpts, TcpOpts) api
+
+
 0.5.0-alpha (2015-06-05)
 ------------------------
 
