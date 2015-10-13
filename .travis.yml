@@ -1,5 +1,7 @@
 language: erlang
 
+sudo: false
+
 otp_release:
    - 17.0
 
