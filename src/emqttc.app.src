@@ -32,5 +32,9 @@
         kernel,
         stdlib
     ]},
+    {included_applications, [
+        gen_logger,
+        getopt
+    ]},
     {env, []}
 ]}.
