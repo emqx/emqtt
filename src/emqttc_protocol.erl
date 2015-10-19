@@ -96,13 +96,13 @@ init([{clean_sess, CleanSess} | Opts], State) when is_boolean(CleanSess) ->
 init([{keepalive, KeepAlive} | Opts], State) when is_integer(KeepAlive) ->
     init(Opts, State#proto_state{keepalive = KeepAlive});
 init([{username, Username} | Opts], State) when is_binary(Username)->
-    init(Opts, State#proto_state{ username = Username});
+    init(Opts, State#proto_state{username = Username});
 init([{password, Password} | Opts], State) when is_binary(Password) ->
-    init(Opts, State#proto_state{ password = Password });
+    init(Opts, State#proto_state{password = Password});
 init([{will_msg, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
     init(Opts, State#proto_state{will_msg = init_willmsg(WillOpts, WillMsg)});
 init([{logger, Logger} | Opts], State) ->
-    init(Opts, State#proto_state { logger = Logger });
+    init(Opts, State#proto_state{logger = Logger});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
