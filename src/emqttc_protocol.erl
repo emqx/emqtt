@@ -81,7 +81,7 @@
     State    :: proto_state().
 init(MqttOpts) ->
 	init(MqttOpts, #proto_state{client_id   = random_id(),
-                                will_msg    = #mqtt_message{} }).
+                                will_msg    = #mqtt_message{}}).
 
 init([], State) ->
     State;
@@ -99,8 +99,9 @@ init([{username, Username} | Opts], State) when is_binary(Username)->
     init(Opts, State#proto_state{username = Username});
 init([{password, Password} | Opts], State) when is_binary(Password) ->
     init(Opts, State#proto_state{password = Password});
-init([{will_msg, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
-    init(Opts, State#proto_state{will_msg = init_willmsg(WillOpts, WillMsg)});
+init([{will, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
+    init(Opts, State#proto_state{will_flag = true,
+                                 will_msg  = init_willmsg(WillOpts, WillMsg)});
 init([{logger, Logger} | Opts], State) ->
     init(Opts, State#proto_state{logger = Logger});
 init([_Opt | Opts], State) ->
@@ -155,10 +156,10 @@ connect(State = #proto_state{client_id  = ClientId,
                              password   = Password}) ->
 
 
-    Connect = #mqtt_packet_connect{client_id  = ClientId,
-                                   proto_ver  = ProtoVer,
-                                   proto_name = ProtoName,
-                                   will_flag  = WillFlag,
+    Connect = #mqtt_packet_connect{client_id   = ClientId,
+                                   proto_ver   = ProtoVer,
+                                   proto_name  = ProtoName,
+                                   will_flag   = WillFlag,
                                    will_retain = WillRetain,
                                    will_qos    = WillQos,
                                    clean_sess  = CleanSess,
