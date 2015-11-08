@@ -2,10 +2,12 @@
 ChangeLog
 ==================
 
-0.7.0-alpha (2015-11-08)
+0.7.0-beta (2015-11-08)
 ------------------------
 
 Hibernate emqttc and emqttc_socket to reduce memory usage
+
+Bugfix: emqttc send willmsg (#23)
 
 
 0.6.0-alpha (2015-10-08)
