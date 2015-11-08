@@ -36,7 +36,7 @@
 -export([sockname/1, sockname_s/1, setopts/2, getstat/2]).
 
 %% Internal export
--export([receiver/2]).
+-export([receiver/2, receiver_loop/3]).
 
 %% 30 (secs)
 -define(TIMEOUT, 60000).
@@ -186,15 +186,18 @@ sockname_s(Sock) ->
 %%%=============================================================================
 
 receiver(ClientPid, Socket) ->
-    receiver_loop(ClientPid, Socket, emqttc_parser:new()).
+    receiver_activate(ClientPid, Socket, emqttc_parser:new()).
+
+receiver_activate(ClientPid, Socket, ParseState) ->
+    setopts(Socket, [{active, once}]),
+    erlang:hibernate(?MODULE, receiver_loop, [ClientPid, Socket, ParseState]).
 
 receiver_loop(ClientPid, Socket, ParseState) ->
-    setopts(Socket, [{active, once}]),
     receive
         {tcp, Socket, Data} ->
             case parse_received_bytes(ClientPid, Data, ParseState) of
                 {ok, NewParserState} ->
-                    receiver_loop(ClientPid, Socket, NewParserState);
+                    receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
                     gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;
@@ -205,7 +208,7 @@ receiver_loop(ClientPid, Socket, ParseState) ->
         {ssl, _SslSocket, Data} ->
             case parse_received_bytes(ClientPid, Data, ParseState) of
                 {ok, NewParserState} ->
-                    receiver_loop(ClientPid, Socket, NewParserState);
+                    receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
                     gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;

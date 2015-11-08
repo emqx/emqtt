@@ -24,7 +24,6 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
-
 -module(emqttc).
 
 -author("hiroe.orz@gmail.com").
@@ -435,7 +434,6 @@ init_reconnector(false) ->
 init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
     emqttc_reconnector:new(Params).
 
-
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc Event Handler for state that connecting to MQTT broker.
@@ -489,10 +487,10 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     %% Tell parent to subscribe
     Parent ! {mqttc, self(), connected},
 
-    {next_state, connected, State#state{proto_state = ProtoState1,
-                                        keepalive = KeepAlive1,
-                                        connack_tref = undefined,
-                                        pending_pubsub = []}};
+    next_state(connected, State#state{proto_state = ProtoState1,
+                                      keepalive = KeepAlive1,
+                                      connack_tref = undefined,
+                                      pending_pubsub = []});
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
@@ -501,14 +499,14 @@ waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, log
 
 waiting_for_connack(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] RECV: ~s, when waiting for connack!", [Name, emqttc_packet:dump(Packet)]),
-    {next_state, waiting_for_connack, State};
+    next_state(waiting_for_connack, State);
 
 waiting_for_connack(Event = {publish, _Msg}, State) ->
-    {next_state, waiting_for_connack, pending(Event, State)};
+    next_state(waiting_for_connack, pending(Event, State));
 
 waiting_for_connack(Event = {Tag, _From, _Topics}, State) 
         when Tag =:= subscribe orelse Tag =:= unsubscribe ->
-    {next_state, waiting_for_connack, pending(Event, State)};
+    next_state(waiting_for_connack, pending(Event, State));
 
 waiting_for_connack(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
@@ -539,7 +537,7 @@ waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger}) 
 %%------------------------------------------------------------------------------
 connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
     {ok, _, ProtoState1} = emqttc_protocol:publish(Msg, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
+    next_state(connected, State#state{proto_state = ProtoState1});
 
 connected({subscribe, SubPid, Topics}, State = #state{subscribers = Subscribers,
                                                       pubsub_map  = PubSubMap,
@@ -579,10 +577,10 @@ connected({subscribe, SubPid, Topics}, State = #state{subscribers = Subscribers,
             end
         end, PubSubMap, Topics),
 
-    {next_state, connected, State#state{subscribers    = Subscribers1,
-                                        pubsub_map     = PubSubMap1,
-                                        inflight_msgid = MsgId,
-                                        proto_state    = ProtoState1}};
+    next_state(connected, State#state{subscribers    = Subscribers1,
+                                      pubsub_map     = PubSubMap1,
+                                      inflight_msgid = MsgId,
+                                      proto_state    = ProtoState1});
 
 connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
                                                     pubsub_map  = PubSubMap,
@@ -622,9 +620,9 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
             Subscribers
     end,
 
-    {next_state, connected, State#state{subscribers = Subscribers1,
-                                        pubsub_map  = PubSubMap1,
-                                        proto_state = ProtoState1}};
+    next_state(connected, State#state{subscribers = Subscribers1,
+                                      pubsub_map  = PubSubMap1,
+                                      proto_state = ProtoState1});
 
 connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
@@ -634,11 +632,11 @@ connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState
 connected(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
     Logger:debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, NewState} = received(Packet, State),
-    {next_state, connected, NewState};
+    next_state(connected, NewState);
 
 connected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when broker connected!", [Name, Event]),
-    {next_state, connected, State}.
+    next_state(connected, State).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -693,18 +691,18 @@ connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
 %% @end
 %%------------------------------------------------------------------------------
 disconnected(Event = {publish, _Msg}, State) ->
-    {next_state, disconnected, pending(Event, State)};
+    next_state(disconnected, pending(Event, State));
 
 disconnected(Event = {Tag, _From, _Topics}, State) when 
       Tag =:= subscribe orelse Tag =:= unsubscribe ->
-    {next_state, disconnected, pending(Event, State)};
+    next_state(disconnected, pending(Event, State));
 
 disconnected(disconnect, State) ->
     {stop, normal, State};
 
 disconnected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] Unexpected Event: ~p, when disconnected from broker!", [Name, Event]),
-    {next_state, disconnected, State}.
+    next_state(disconnected, State).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -818,7 +816,7 @@ handle_info({keepalive, timeout}, connected, State = #state{proto_state = ProtoS
         {resumed, KeepAlive1} -> 
             KeepAlive1
     end,
-    {next_state, connected, State#state{keepalive = NewKeepAlive}};
+    next_state(connected, State#state{keepalive = NewKeepAlive});
 
 handle_info({'EXIT', Receiver, normal}, StateName, State = #state{receiver = Receiver}) ->
     {next_state, StateName, State#state{receiver = undefined}};
@@ -857,13 +855,13 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
             {Subscribers, PubSubMap}
     end,
 
-    {next_state, StateName, State#state{subscribers = Subscribers1,
-                                        pubsub_map = PubSubMap1,
-                                        ping_reqs = PingReqs1 }};
+    next_state(StateName, State#state{subscribers = Subscribers1,
+                                      pubsub_map = PubSubMap1,
+                                      ping_reqs = PingReqs1});
 
 handle_info({inet_reply, Socket, ok}, StateName, State = #state{socket = Socket}) ->
     %socket send reply.
-    {next_state, StateName, State};
+    next_state(StateName, State);
     
 handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] Unexpected Info when ~s: ~p", [Name, StateName, Info]),
@@ -903,6 +901,10 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
+
+next_state(StateName, State) ->
+    {next_state, StateName, State, hibernate}.
+
 connect(State = #state{name = Name, 
                        host = Host, 
                        port = Port, 
@@ -1091,3 +1093,4 @@ qos_opt([_|PubOpts]) ->
 
 unique(L) ->
     sets:to_list(sets:from_list(L)).
+
