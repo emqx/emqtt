@@ -53,6 +53,8 @@
 -define(SSLOPTIONS, [{depth, 0}]).
 
 -record(ssl_socket, {tcp, ssl}).
+-record(sslsocket, {gen_tcp, pid}).
+-record(gen_tcp, { port, conn_type, unknown }).
 
 -type ssl_socket() :: #ssl_socket{}.
 
@@ -152,7 +154,8 @@ setopts(#ssl_socket{ssl = SslSocket}, Opts) ->
     Values  :: list().
 getstat(Socket, Stats) when is_port(Socket) ->
     inet:getstat(Socket, Stats);
-getstat(#ssl_socket{tcp = undefined, ssl = {sslsocket, {gen_tcp, Port, tls_connection, undefined}, _Pid}}, Stats) ->
+getstat(#ssl_socket{tcp = undefined, ssl = SSL}, Stats) ->
+    Port = SSL#sslsocket.gen_tcp#gen_tcp.port,
     inet:getstat(Port, Stats);
 getstat(#ssl_socket{tcp = Socket}, Stats) -> 
     inet:getstat(Socket, Stats).
