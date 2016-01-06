@@ -120,6 +120,8 @@ init_willmsg([_Opt | Opts], State) ->
     init_willmsg(Opts, State).
 
 random_id() ->
+    % erlang 18.x
+    %random:seed(erlang:timestamp()),
     random:seed(now()),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
@@ -288,11 +290,11 @@ received({'PUBCOMP', PacketId}, State = #proto_state{awaiting_comp = AwaitingCom
     end,
     {ok, State#proto_state{ awaiting_comp  = maps:remove(PacketId, AwaitingComp)}};
 
-received({'SUBACK', PacketId, QosTable}, State) ->
+received({'SUBACK', _PacketId, _QosTable}, State) ->
     %%  TODO...
     {ok, State};
 
-received({'UNSUBACK', PacketId}, State) ->
+received({'UNSUBACK', _PacketId}, State) ->
     %%  TODO...
     {ok, State}.
 
