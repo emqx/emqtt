@@ -19,14 +19,11 @@
 %%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %%% SOFTWARE.
 %%%-----------------------------------------------------------------------------
-%%% @doc
-%%% emqttc socket keepalive.
+%%% @doc emqttc socket keepalive.
 %%%
-%%% @end
+%%% @author Feng Lee <feng@emqtt.io>
 %%%-----------------------------------------------------------------------------
 -module(emqttc_keepalive).
-
--author("feng@emqtt.io").
 
 -record(keepalive, {socket,
                     stat_name,
@@ -35,7 +32,7 @@
                     timeout_msg,
                     timer_ref}).
 
--opaque keepalive() :: #keepalive{}.
+-opaque keepalive() :: #keepalive{} | undefined.
 
 -export_type([keepalive/0]).
 
@@ -51,7 +48,7 @@
     StatName      :: recv_oct | send_oct,
     TimeoutSec    :: non_neg_integer(),
     TimeoutMsg    :: tuple(),
-    KeepAlive     :: keepalive() | undefined.
+    KeepAlive     :: keepalive().
 new({_Socket, _StatName}, 0, _TimeoutMsg) ->
     undefined;
 new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
@@ -64,31 +61,32 @@ new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
 %% @doc Start KeepAlive
 %% @end
 %%------------------------------------------------------------------------------
--spec start(KeepAlive) -> KeepAlive when
-    KeepAlive   :: keepalive() | undefined.
+-spec start(keepalive()) -> {ok, keepalive()} | {error, any()}.
 start(undefined) ->
-    undefined;
+    {ok, undefined};
 start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName, 
                              timeout_sec = TimeoutSec, 
                              timeout_msg = TimeoutMsg}) ->
-    {ok, [{StatName, StatVal}]} = emqttc_socket:getstat(Socket, [StatName]),
-    Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
-    KeepAlive#keepalive{stat_val = StatVal, timer_ref = Ref}.
+    case emqttc_socket:getstat(Socket, [StatName]) of
+        {ok, [{StatName, StatVal}]} ->
+            Ref = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
+            {ok, KeepAlive#keepalive{stat_val = StatVal, timer_ref = Ref}};
+        {error, Error} ->
+            {error, Error}
+    end.
 
 %%------------------------------------------------------------------------------
 %% @doc Restart KeepAlive
 %% @end
 %%------------------------------------------------------------------------------
--spec restart(KeepAlive) -> KeepAlive when
-    KeepAlive   :: keepalive() | undefined.
+-spec restart(keepalive()) -> {ok, keepalive()} | {error, any()}.
 restart(KeepAlive) -> start(KeepAlive).
 
 %%------------------------------------------------------------------------------
 %% @doc Resume KeepAlive, called when timeout.
 %% @end
 %%------------------------------------------------------------------------------
--spec resume(KeepAlive) -> timeout | {resumed, KeepAlive} when
-    KeepAlive  :: keepalive() | undefined.
+-spec resume(keepalive()) -> timeout | {resumed, keepalive()} | {error, any()}.
 resume(undefined) -> undefined;
 resume(KeepAlive = #keepalive{socket      = Socket,
                               stat_name   = StatName,
@@ -96,21 +94,25 @@ resume(KeepAlive = #keepalive{socket      = Socket,
                               timeout_sec = TimeoutSec,
                               timeout_msg = TimeoutMsg,
                               timer_ref   = Ref}) ->
-    {ok, [{StatName, NewStatVal}]} = emqttc_socket:getstat(Socket, [StatName]),
-    if
-        NewStatVal =:= StatVal ->
-            timeout;
-        true ->
-            cancel(Ref), %need?
-            NewRef = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
-            {resumed, KeepAlive#keepalive{stat_val = NewStatVal, timer_ref = NewRef}}
+    case emqttc_socket:getstat(Socket, [StatName]) of
+        {ok, [{StatName, NewStatVal}]} ->
+            if
+                NewStatVal =:= StatVal ->
+                    timeout;
+                true ->
+                    cancel(Ref), %need?
+                    NewRef = erlang:send_after(TimeoutSec*1000, self(), TimeoutMsg),
+                    {resumed, KeepAlive#keepalive{stat_val = NewStatVal, timer_ref = NewRef}}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 %%------------------------------------------------------------------------------
 %% @doc Cancel KeepAlive.
 %% @end
 %%------------------------------------------------------------------------------
--spec cancel(keepalive() | undefined | reference()) -> any().
+-spec cancel(keepalive() | reference()) -> any().
 cancel(undefined) ->
     ok;
 cancel(#keepalive{timer_ref = Ref}) ->

@@ -482,15 +482,18 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
 
     %% Start keepalive
-    KeepAlive1 = emqttc_keepalive:start(KeepAlive),
+    case emqttc_keepalive:start(KeepAlive) of
+        {ok, KeepAlive1} ->
+            %% Tell parent to subscribe
+            Parent ! {mqttc, self(), connected},
 
-    %% Tell parent to subscribe
-    Parent ! {mqttc, self(), connected},
-
-    next_state(connected, State#state{proto_state = ProtoState1,
-                                      keepalive = KeepAlive1,
-                                      connack_tref = undefined,
-                                      pending_pubsub = []});
+            {next_state, connected, State#state{proto_state = ProtoState1,
+                                                keepalive = KeepAlive1,
+                                                connack_tref = undefined,
+                                                pending_pubsub = []}};
+        {error, Error} ->
+            {stop, {shutdown, Error}, State}
+    end;
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
@@ -808,15 +811,20 @@ handle_info({reconnect, timeout}, disconnected, State) ->
     connect(State);
 
 handle_info({keepalive, timeout}, connected, State = #state{proto_state = ProtoState, keepalive = KeepAlive}) ->
-    NewKeepAlive =
     case emqttc_keepalive:resume(KeepAlive) of
-        timeout -> 
+        timeout ->
             emqttc_protocol:ping(ProtoState),
-            emqttc_keepalive:restart(KeepAlive);
-        {resumed, KeepAlive1} -> 
-            KeepAlive1
-    end,
-    next_state(connected, State#state{keepalive = NewKeepAlive});
+            case emqttc_keepalive:restart(KeepAlive) of
+                {ok, NewKeepAlive} ->
+                    next_state(connected, State#state{keepalive = NewKeepAlive});
+                {error, Error} ->
+                    {stop, {shutdown, Error}, State}
+            end;
+        {resumed, NewKeepAlive} ->
+            next_state(connected, State#state{keepalive = NewKeepAlive});
+        {error, Error} ->
+            {stop, {shutdown, Error}, State}
+    end;
 
 handle_info({'EXIT', Receiver, normal}, StateName, State = #state{receiver = Receiver}) ->
     {next_state, StateName, State#state{receiver = undefined}};
