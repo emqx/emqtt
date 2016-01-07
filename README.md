@@ -93,10 +93,10 @@ Connect to MQTT Broker:
 
 ```erlang
 
-{ok, C1} = emqttc:start_link([{host, "test.mosquitto.org"}]).
+{ok, C1} = emqttc:start_link([{host, "t.emqtt.io"}]).
 
 %% with name 'emqttclient'
-{ok, C2} = emqttc:start_link(emqttclient, [{host, "test.mosquitto.org"}]).
+{ok, C2} = emqttc:start_link(emqttclient, [{host, "t.emqtt.io"}]).
 
 ```
 ### Connect Options
@@ -144,7 +144,7 @@ Default Clean Session value is true, If you want to set Clean Session = false, a
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {clean_sess, false}]).
+emqttc:start_link([{host, "t.emqtt.io"}, {clean_sess, false}]).
 
 ```
 
@@ -154,7 +154,7 @@ Default KeepAlive value is 60(secs), If you want to change KeepAlive, add option
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {keepalive, 60}]).
+emqttc:start_link([{host, "t.emqtt.io"}, {keepalive, 60}]).
 
 ```
 
@@ -164,7 +164,7 @@ Connect to broker with SSL Socket:
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {port, 8883}, ssl]).
+emqttc:start_link([{host, "t.emqtt.io"}, {port, 8883}, ssl]).
 
 ```
 
@@ -246,7 +246,7 @@ emqttc:publish(Client, <<"Topic">>, <<"Payload">>, 1).
 emqttc:publish(Client, <<"Topic">>, <<"Payload">>, qos1).
 
 %% publish(Client, Topic, Payload, PubOpts) with options
-emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain true}]).
+emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain, true}]).
 
 ```
 
