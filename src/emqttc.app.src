@@ -1,6 +1,6 @@
 {application, emqttc, [
   {id, "emqttc"},
-  {vsn, "0.7.0"},
+  {vsn, "0.7.1"},
   {description, "Erlang MQTT Client"},
   {registered, []},
   {applications, [kernel,
