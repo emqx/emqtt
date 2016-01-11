@@ -68,7 +68,11 @@ parse_remaining_len(<<>>, Header, Multiplier, Length) ->
 parse_remaining_len(<<1:1, Len:7, Rest/binary>>, Header, Multiplier, Value) ->
     parse_remaining_len(Rest, Header, Multiplier * ?HIGHBIT, Value + Len * Multiplier);
 parse_remaining_len(<<0:1, Len:7, Rest/binary>>, Header,  Multiplier, Value) ->
-    parse_frame(Rest, Header, Value + Len * Multiplier).
+    FrameLen = Value + Len * Multiplier,
+    if
+        FrameLen > ?MAX_LEN -> {error, invalid_mqtt_frame_len};
+        true -> parse_frame(Rest, Header, FrameLen)
+    end.
 
 parse_frame(Bin, #mqtt_packet_header{type = Type,
                                      qos  = Qos} = Header, Length) ->
