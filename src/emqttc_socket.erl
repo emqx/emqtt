@@ -224,14 +224,16 @@ parse_received_bytes(_ClientPid, <<>>, ParseState) ->
     {ok, ParseState};
 
 parse_received_bytes(ClientPid, Data, ParseState) ->
-    case emqttc_parser:parse(Data, ParseState) of
+    case catch emqttc_parser:parse(Data, ParseState) of
     {more, ParseState1} ->
         {ok, ParseState1};
     {ok, Packet, Rest} -> 
         gen_fsm:send_event(ClientPid, Packet),
         parse_received_bytes(ClientPid, Rest, emqttc_parser:new());
     {error, Error} ->
-        {error, Error}
+        {error, Error};
+    {'EXIT', Reason} ->
+        {error, Reason}
     end.
 
 connection_lost(ClientPid, Reason) ->
