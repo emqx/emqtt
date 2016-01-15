@@ -53,6 +53,8 @@
 -define(SSLOPTIONS, [{depth, 0}]).
 
 -record(ssl_socket, {tcp, ssl}).
+-record(sslsocket, {gen_tcp, pid}).
+-record(gen_tcp, { port, conn_type, unknown }).
 
 -type ssl_socket() :: #ssl_socket{}.
 
@@ -89,14 +91,9 @@ connect(ClientPid, Transport, Host, Port, TcpOpts) when is_pid(ClientPid) ->
 connect(tcp, Host, Port, TcpOpts) ->
     gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT);
 connect(ssl, Host, Port, TcpOpts) ->
-    case gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT) of
-        {ok, Socket} ->
-            case ssl:connect(Socket, ?SSLOPTIONS, ?TIMEOUT) of
-                {ok, SslSocket} -> {ok, #ssl_socket{tcp = Socket, ssl = SslSocket}};
-                {error, SslReason} -> {error, SslReason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
+    case ssl:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT) of
+        {ok, SslSocket} -> {ok, #ssl_socket{ssl = SslSocket}};
+        {error, SslReason} -> {error, SslReason}
     end.
 
 %%------------------------------------------------------------------------------
@@ -157,6 +154,9 @@ setopts(#ssl_socket{ssl = SslSocket}, Opts) ->
     Values  :: list().
 getstat(Socket, Stats) when is_port(Socket) ->
     inet:getstat(Socket, Stats);
+getstat(#ssl_socket{tcp = undefined, ssl = SSL}, Stats) ->
+    Port = SSL#sslsocket.gen_tcp#gen_tcp.port,
+    inet:getstat(Port, Stats);
 getstat(#ssl_socket{tcp = Socket}, Stats) -> 
     inet:getstat(Socket, Stats).
 
