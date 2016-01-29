@@ -93,10 +93,10 @@ Connect to MQTT Broker:
 
 ```erlang
 
-{ok, C1} = emqttc:start_link([{host, "test.mosquitto.org"}]).
+{ok, C1} = emqttc:start_link([{host, "t.emqtt.io"}]).
 
 %% with name 'emqttclient'
-{ok, C2} = emqttc:start_link(emqttclient, [{host, "test.mosquitto.org"}]).
+{ok, C2} = emqttc:start_link(emqttclient, [{host, "t.emqtt.io"}]).
 
 ```
 ### Connect Options
@@ -115,7 +115,7 @@ Connect to MQTT Broker:
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
                    | {suback_timeout,  pos_integer()}
-                   | ssl
+                   | ssl | {ssl, [ssl:ssloption()]}
                    | auto_resub
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
@@ -133,7 +133,7 @@ username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
 connack_timeout | pos_integer() | 30 | ConnAck Timeout | {connack_timeout, 10}
-ssl |
+ssl | list(ssl:ssloption()) | [] | SSL Options | [{certfile, "path/to/ssl.crt"}, {keyfile,  "path/to/ssl.key"}]}]
 auto_resub |
 logger | atom() or {atom(), atom()} | info | Client Logger | error, {opt, info}, {lager, error}
 reconnect | false, or integer() | false | Client Reconnect | false, 4, {4, 60}
@@ -144,7 +144,7 @@ Default Clean Session value is true, If you want to set Clean Session = false, a
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {clean_sess, false}]).
+emqttc:start_link([{host, "t.emqtt.io"}, {clean_sess, false}]).
 
 ```
 
@@ -154,7 +154,7 @@ Default KeepAlive value is 60(secs), If you want to change KeepAlive, add option
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {keepalive, 60}]).
+emqttc:start_link([{host, "t.emqtt.io"}, {keepalive, 60}]).
 
 ```
 
@@ -164,7 +164,14 @@ Connect to broker with SSL Socket:
 
 ```erlang
 
-emqttc:start_link([{host, "test.mosquitto.org"}, {port, 8883}, ssl]).
+emqttc:start_link([{host, "t.emqtt.io"}, {port, 8883}, ssl]).
+
+emqttc:start_link([{host, "t.emqtt.io"}, {port, 8883}, {ssl, [
+    {certfile, "path/to/ssl.crt"},
+    {keyfile,  "path/to/ssl.key"}]}
+]).
+
+More SSL Options: http://erlang.org/doc/man/ssl.html
 
 ```
 
@@ -246,7 +253,7 @@ emqttc:publish(Client, <<"Topic">>, <<"Payload">>, 1).
 emqttc:publish(Client, <<"Topic">>, <<"Payload">>, qos1).
 
 %% publish(Client, Topic, Payload, PubOpts) with options
-emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain true}]).
+emqttc:publish(Client, <<"/test/TopicA">>, <<"Payload...">>, [{qos, 1}, {retain, true}]).
 
 ```
 

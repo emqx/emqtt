@@ -2,6 +2,34 @@
 ChangeLog
 ==================
 
+0.8.0-beta (2016-01-29)
+------------------------
+
+Fully SSL Options Support (#27)
+
+
+0.7.1-beta (2016-01-07)
+------------------------
+
+Merge PR #25
+
+
+0.7.0-beta (2015-11-08)
+------------------------
+
+Hibernate emqttc and emqttc_socket to reduce memory usage
+
+Bugfix: emqttc send willmsg (#23)
+
+
+0.6.0-alpha (2015-10-08)
+------------------------
+
+Feature: Support to specify 'local ipaddress' (#20)
+
+Improve: add emqttc:start_link(MqttOpts, TcpOpts) api
+
+
 0.5.0-alpha (2015-06-05)
 ------------------------
 

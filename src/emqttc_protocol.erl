@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -81,7 +81,7 @@
     State    :: proto_state().
 init(MqttOpts) ->
 	init(MqttOpts, #proto_state{client_id   = random_id(),
-                                will_msg    = #mqtt_message{} }).
+                                will_msg    = #mqtt_message{}}).
 
 init([], State) ->
     State;
@@ -96,13 +96,14 @@ init([{clean_sess, CleanSess} | Opts], State) when is_boolean(CleanSess) ->
 init([{keepalive, KeepAlive} | Opts], State) when is_integer(KeepAlive) ->
     init(Opts, State#proto_state{keepalive = KeepAlive});
 init([{username, Username} | Opts], State) when is_binary(Username)->
-    init(Opts, State#proto_state{ username = Username});
+    init(Opts, State#proto_state{username = Username});
 init([{password, Password} | Opts], State) when is_binary(Password) ->
-    init(Opts, State#proto_state{ password = Password });
-init([{will_msg, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
-    init(Opts, State#proto_state{will_msg = init_willmsg(WillOpts, WillMsg)});
+    init(Opts, State#proto_state{password = Password});
+init([{will, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
+    init(Opts, State#proto_state{will_flag = true,
+                                 will_msg  = init_willmsg(WillOpts, WillMsg)});
 init([{logger, Logger} | Opts], State) ->
-    init(Opts, State#proto_state { logger = Logger });
+    init(Opts, State#proto_state{logger = Logger});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -120,6 +121,8 @@ init_willmsg([_Opt | Opts], State) ->
     init_willmsg(Opts, State).
 
 random_id() ->
+    % erlang 18.x
+    %random:seed(erlang:timestamp()),
     random:seed(now()),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
@@ -155,10 +158,10 @@ connect(State = #proto_state{client_id  = ClientId,
                              password   = Password}) ->
 
 
-    Connect = #mqtt_packet_connect{client_id  = ClientId,
-                                   proto_ver  = ProtoVer,
-                                   proto_name = ProtoName,
-                                   will_flag  = WillFlag,
+    Connect = #mqtt_packet_connect{client_id   = ClientId,
+                                   proto_ver   = ProtoVer,
+                                   proto_name  = ProtoName,
+                                   will_flag   = WillFlag,
                                    will_retain = WillRetain,
                                    will_qos    = WillQos,
                                    clean_sess  = CleanSess,
@@ -288,11 +291,11 @@ received({'PUBCOMP', PacketId}, State = #proto_state{awaiting_comp = AwaitingCom
     end,
     {ok, State#proto_state{ awaiting_comp  = maps:remove(PacketId, AwaitingComp)}};
 
-received({'SUBACK', PacketId, QosTable}, State) ->
+received({'SUBACK', _PacketId, _QosTable}, State) ->
     %%  TODO...
     {ok, State};
 
-received({'UNSUBACK', PacketId}, State) ->
+received({'UNSUBACK', _PacketId}, State) ->
     %%  TODO...
     {ok, State}.
 

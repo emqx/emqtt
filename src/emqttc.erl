@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2015-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
-
 -module(emqttc).
 
 -author("hiroe.orz@gmail.com").
@@ -39,7 +38,7 @@
 -export([start/0]).
 
 %% Start emqttc client
--export([start_link/0, start_link/1, start_link/2]).
+-export([start_link/0, start_link/1, start_link/2, start_link/3]).
 
 %% Lookup topics
 -export([topics/1]).
@@ -83,7 +82,7 @@
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
                    | {suback_timeout,  pos_integer()}
-                   | ssl
+                   | ssl | {ssl, [ssl:ssloption()]}
                    | {logger, atom() | {atom(), atom()}}
                    | auto_resub
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
@@ -114,7 +113,9 @@
                 connack_tref        :: reference(),
                 transport = tcp     :: tcp | ssl,
                 reconnector         :: emqttc_reconnector:reconnector() | undefined,
-                logger              :: gen_logger:logmod()}).
+                logger              :: gen_logger:logmod(),
+                tcp_opts            :: [gen_tcp:connect_option()],
+                ssl_opts            :: [ssl:ssloption()]}).
 
 %% 60 secs
 -define(CONNACK_TIMEOUT, 60).
@@ -151,17 +152,31 @@ start_link() ->
     MqttOpts  :: [mqttc_opt()],
     Client    :: pid().
 start_link(MqttOpts) when is_list(MqttOpts) ->
-    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts], []).
+    start_link(MqttOpts, []).
 
 %%------------------------------------------------------------------------------
 %% @doc Start emqttc client with name, options.
 %% @end
 %%------------------------------------------------------------------------------
--spec start_link(Name, MqttOpts) -> {ok, pid()} | ignore | {error, any()} when
+-spec start_link(Name | MqttOpts, TcpOpts) -> {ok, pid()} | ignore | {error, any()} when
     Name      :: atom(),
-    MqttOpts  :: [mqttc_opt()].
+    MqttOpts  :: [mqttc_opt()],
+    TcpOpts   :: [gen_tcp:connect_option()].
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts], []).
+    start_link(Name, MqttOpts, []);
+start_link(MqttOpts, TcpOpts) when is_list(MqttOpts), is_list(TcpOpts) ->
+    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts, TcpOpts], []).
+
+%%------------------------------------------------------------------------------
+%% @doc Start emqttc client with name, options, tcp options.
+%% @end
+%%------------------------------------------------------------------------------
+-spec start_link(Name, MqttOpts, TcpOpts) -> {ok, pid()} | ignore | {error, any()} when
+    Name      :: atom(),
+    MqttOpts  :: [mqttc_opt()],
+    TcpOpts   :: [gen_tcp:connect_option()].
+start_link(Name, MqttOpts, TcpOpts) when is_atom(Name), is_list(MqttOpts), is_list(TcpOpts) ->
+    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts, TcpOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Lookup topics subscribed
@@ -353,10 +368,10 @@ disconnect(Client) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([undefined, Parent, MqttOpts]) ->
-    init([pid_to_list(self()), Parent, MqttOpts]);
+init([undefined, Parent, MqttOpts, TcpOpts]) ->
+    init([pid_to_list(self()), Parent, MqttOpts, TcpOpts]);
 
-init([Name, Parent, MqttOpts]) ->
+init([Name, Parent, MqttOpts, TcpOpts]) ->
 
     process_flag(trap_exit, true),
 
@@ -370,21 +385,21 @@ init([Name, Parent, MqttOpts]) ->
     end,
 
     ProtoState = emqttc_protocol:init(
-                   merge_opts([{logger, Logger},
-                               {keepalive, ?KEEPALIVE}], MqttOpts1)),
-
-    IsSSL = get_value(ssl, MqttOpts1, false),
+                   emqttc_opts:merge([{logger, Logger},
+                                      {keepalive, ?KEEPALIVE}], MqttOpts1)),
 
     State = init(MqttOpts1, #state{name            = Name,
                                    parent          = Parent,
-                                   host            = "localhost",
-                                   port            = if IsSSL -> 8883; true  -> 1883 end,
+                                   host            = "127.0.0.1",
+                                   port            = 1883,
                                    proto_state     = ProtoState,
                                    keepalive_after = ?KEEPALIVE,
                                    connack_timeout = ?CONNACK_TIMEOUT,
                                    puback_timeout  = ?PUBACK_TIMEOUT,
                                    suback_timeout  = ?SUBACK_TIMEOUT,
-                                   logger          = Logger}),
+                                   logger          = Logger,
+                                   tcp_opts        = TcpOpts,
+                                   ssl_opts        = []}),
 
     {ok, connecting, State, 0}.
 
@@ -397,6 +412,9 @@ init([{port, Port} | Opts], State) ->
 init([ssl | Opts], State) ->
     ssl:start(), % ok?
     init(Opts, State#state{transport = ssl});
+init([{ssl, SslOpts} | Opts], State) ->
+    ssl:start(), % ok?
+    init(Opts, State#state{transport = ssl, ssl_opts = SslOpts});
 init([auto_resub | Opts], State) ->
     init(Opts, State#state{auto_resub= true});
 init([{logger, Cfg} | Opts], State) ->
@@ -418,27 +436,6 @@ init_reconnector(false) ->
     undefined;
 init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
     emqttc_reconnector:new(Params).
-
-%%------------------------------------------------------------------------------
-%% @private
-%% @doc Merge Options
-%% @end
-%%------------------------------------------------------------------------------
-merge_opts(Defaults, Options) ->
-    lists:foldl(
-        fun({Opt, Val}, Acc) ->
-                case lists:keymember(Opt, 1, Acc) of
-                    true ->
-                        lists:keyreplace(Opt, 1, Acc, {Opt, Val});
-                    false ->
-                        [{Opt, Val}|Acc]
-                end;
-            (Opt, Acc) ->
-                case lists:member(Opt, Acc) of
-                    true -> Acc;
-                    false -> [Opt | Acc]
-                end
-        end, Defaults, Options).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -488,31 +485,34 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
 
     %% Start keepalive
-    KeepAlive1 = emqttc_keepalive:start(KeepAlive),
+    case emqttc_keepalive:start(KeepAlive) of
+        {ok, KeepAlive1} ->
+            %% Tell parent to subscribe
+            Parent ! {mqttc, self(), connected},
 
-    %% Tell parent to subscribe
-    Parent ! {mqttc, self(), connected},
-
-    {next_state, connected, State#state{proto_state = ProtoState1,
-                                        keepalive = KeepAlive1,
-                                        connack_tref = undefined,
-                                        pending_pubsub = []}};
+            {next_state, connected, State#state{proto_state = ProtoState1,
+                                                keepalive = KeepAlive1,
+                                                connack_tref = undefined,
+                                                pending_pubsub = []}};
+        {error, Error} ->
+            {stop, {shutdown, Error}, State}
+    end;
 
 waiting_for_connack(?CONNACK_PACKET(ReturnCode), State = #state{name = Name, logger = Logger}) ->
     ErrConnAck = emqttc_packet:connack_name(ReturnCode),
     Logger:debug("[Client ~s] RECV: ~s", [Name, ErrConnAck]),
-    {stop, {shutdown, emqttc_packet:connack_name(ErrConnAck)}, State};
+    {stop, {shutdown, {connack_error, ErrConnAck}}, State};
 
 waiting_for_connack(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] RECV: ~s, when waiting for connack!", [Name, emqttc_packet:dump(Packet)]),
-    {next_state, waiting_for_connack, State};
+    next_state(waiting_for_connack, State);
 
 waiting_for_connack(Event = {publish, _Msg}, State) ->
-    {next_state, waiting_for_connack, pending(Event, State)};
+    next_state(waiting_for_connack, pending(Event, State));
 
 waiting_for_connack(Event = {Tag, _From, _Topics}, State) 
         when Tag =:= subscribe orelse Tag =:= unsubscribe ->
-    {next_state, waiting_for_connack, pending(Event, State)};
+    next_state(waiting_for_connack, pending(Event, State));
 
 waiting_for_connack(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
@@ -543,7 +543,7 @@ waiting_for_connack(Event, _From, State = #state{name = Name, logger = Logger}) 
 %%------------------------------------------------------------------------------
 connected({publish, Msg}, State=#state{proto_state = ProtoState}) ->
     {ok, _, ProtoState1} = emqttc_protocol:publish(Msg, ProtoState),
-    {next_state, connected, State#state{proto_state = ProtoState1}};
+    next_state(connected, State#state{proto_state = ProtoState1});
 
 connected({subscribe, SubPid, Topics}, State = #state{subscribers = Subscribers,
                                                       pubsub_map  = PubSubMap,
@@ -583,10 +583,10 @@ connected({subscribe, SubPid, Topics}, State = #state{subscribers = Subscribers,
             end
         end, PubSubMap, Topics),
 
-    {next_state, connected, State#state{subscribers    = Subscribers1,
-                                        pubsub_map     = PubSubMap1,
-                                        inflight_msgid = MsgId,
-                                        proto_state    = ProtoState1}};
+    next_state(connected, State#state{subscribers    = Subscribers1,
+                                      pubsub_map     = PubSubMap1,
+                                      inflight_msgid = MsgId,
+                                      proto_state    = ProtoState1});
 
 connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
                                                     pubsub_map  = PubSubMap,
@@ -626,9 +626,9 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
             Subscribers
     end,
 
-    {next_state, connected, State#state{subscribers = Subscribers1,
-                                        pubsub_map  = PubSubMap1,
-                                        proto_state = ProtoState1}};
+    next_state(connected, State#state{subscribers = Subscribers1,
+                                      pubsub_map  = PubSubMap1,
+                                      proto_state = ProtoState1});
 
 connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState}) ->
     emqttc_protocol:disconnect(ProtoState),
@@ -638,11 +638,11 @@ connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState
 connected(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
     Logger:debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, NewState} = received(Packet, State),
-    {next_state, connected, NewState};
+    next_state(connected, NewState);
 
 connected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:warning("[Client ~s] Unexpected Event: ~p, when broker connected!", [Name, Event]),
-    {next_state, connected, State}.
+    next_state(connected, State).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -697,18 +697,18 @@ connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
 %% @end
 %%------------------------------------------------------------------------------
 disconnected(Event = {publish, _Msg}, State) ->
-    {next_state, disconnected, pending(Event, State)};
+    next_state(disconnected, pending(Event, State));
 
 disconnected(Event = {Tag, _From, _Topics}, State) when 
       Tag =:= subscribe orelse Tag =:= unsubscribe ->
-    {next_state, disconnected, pending(Event, State)};
+    next_state(disconnected, pending(Event, State));
 
 disconnected(disconnect, State) ->
     {stop, normal, State};
 
 disconnected(Event, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] Unexpected Event: ~p, when disconnected from broker!", [Name, Event]),
-    {next_state, disconnected, State}.
+    next_state(disconnected, State).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -814,15 +814,20 @@ handle_info({reconnect, timeout}, disconnected, State) ->
     connect(State);
 
 handle_info({keepalive, timeout}, connected, State = #state{proto_state = ProtoState, keepalive = KeepAlive}) ->
-    NewKeepAlive =
     case emqttc_keepalive:resume(KeepAlive) of
-        timeout -> 
+        timeout ->
             emqttc_protocol:ping(ProtoState),
-            emqttc_keepalive:restart(KeepAlive);
-        {resumed, KeepAlive1} -> 
-            KeepAlive1
-    end,
-    {next_state, connected, State#state{keepalive = NewKeepAlive}};
+            case emqttc_keepalive:restart(KeepAlive) of
+                {ok, NewKeepAlive} ->
+                    next_state(connected, State#state{keepalive = NewKeepAlive});
+                {error, Error} ->
+                    {stop, {shutdown, Error}, State}
+            end;
+        {resumed, NewKeepAlive} ->
+            next_state(connected, State#state{keepalive = NewKeepAlive});
+        {error, Error} ->
+            {stop, {shutdown, Error}, State}
+    end;
 
 handle_info({'EXIT', Receiver, normal}, StateName, State = #state{receiver = Receiver}) ->
     {next_state, StateName, State#state{receiver = undefined}};
@@ -861,13 +866,13 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
             {Subscribers, PubSubMap}
     end,
 
-    {next_state, StateName, State#state{subscribers = Subscribers1,
-                                        pubsub_map = PubSubMap1,
-                                        ping_reqs = PingReqs1 }};
+    next_state(StateName, State#state{subscribers = Subscribers1,
+                                      pubsub_map = PubSubMap1,
+                                      ping_reqs = PingReqs1});
 
 handle_info({inet_reply, Socket, ok}, StateName, State = #state{socket = Socket}) ->
     %socket send reply.
-    {next_state, StateName, State};
+    next_state(StateName, State);
     
 handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] Unexpected Info when ~s: ~p", [Name, StateName, Info]),
@@ -907,6 +912,10 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
+
+next_state(StateName, State) ->
+    {next_state, StateName, State, hibernate}.
+
 connect(State = #state{name = Name, 
                        host = Host, 
                        port = Port, 
@@ -916,9 +925,11 @@ connect(State = #state{name = Name,
                        keepalive_after = KeepAliveTime,
                        connack_timeout = ConnAckTimeout,
                        transport = Transport,
-                       logger = Logger}) ->
+                       logger = Logger,
+                       tcp_opts = TcpOpts,
+                       ssl_opts = SslOpts}) ->
     Logger:info("[Client ~s]: connecting to ~s:~p", [Name, Host, Port]),
-    case emqttc_socket:connect(self(), Transport, Host, Port) of
+    case emqttc_socket:connect(self(), Transport, Host, Port, TcpOpts, SslOpts) of
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),
@@ -1094,3 +1105,4 @@ qos_opt([_|PubOpts]) ->
 
 unique(L) ->
     sets:to_list(sets:from_list(L)).
+

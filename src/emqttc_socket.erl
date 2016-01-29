@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -32,12 +32,12 @@
 -include("emqttc_packet.hrl").
 
 %% API
--export([connect/4, controlling_process/2, send/2, close/1, stop/1]).
+-export([connect/6, controlling_process/2, send/2, close/1, stop/1]).
 
 -export([sockname/1, sockname_s/1, setopts/2, getstat/2]).
 
 %% Internal export
--export([receiver/2]).
+-export([receiver/2, receiver_loop/3]).
 
 %% 30 (secs)
 -define(TIMEOUT, 90000).
@@ -63,15 +63,17 @@
 %% @doc Connect to broker with TCP or SSL transport
 %% @end
 %%------------------------------------------------------------------------------
--spec connect(ClientPid, Transport, Host, Port) -> {ok, Socket, Receiver} | {error, term()} when
+-spec connect(ClientPid, Transport, Host, Port, TcpOpts, SslOpts) -> {ok, Socket, Receiver} | {error, term()} when
     ClientPid   :: pid(),
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
+    TcpOpts     :: [gen_tcp:connect_option()],
+    SslOpts     :: [ssl:ssloption()],
     Socket      :: inet:socket() | ssl_socket(),
     Receiver    :: pid().
-connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
-    case connect(Transport, Host, Port) of
+connect(ClientPid, Transport, Host, Port, TcpOpts, SslOpts) when is_pid(ClientPid) ->
+    case connect(Transport, Host, Port, TcpOpts, SslOpts) of
         {ok, Socket} ->
             ReceiverPid = spawn_link(?MODULE, receiver, [ClientPid, Socket]),
             controlling_process(Socket, ReceiverPid),
@@ -80,17 +82,19 @@ connect(ClientPid, Transport, Host, Port) when is_pid(ClientPid) ->
             {error, Reason}
     end.
 
--spec connect(Transport, Host, Port) -> {ok, Socket} | {error, any()} when
+-spec connect(Transport, Host, Port, TcpOpts, SslOpts) -> {ok, Socket} | {error, any()} when
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
+    TcpOpts     :: [gen_tcp:connect_option()],
+    SslOpts     :: [ssl:ssloption()],
     Socket      :: inet:socket() | ssl_socket().
-connect(tcp, Host, Port) ->
-    gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT); 
-connect(ssl, Host, Port) ->
-    case gen_tcp:connect(Host, Port, ?TCPOPTIONS, ?TIMEOUT) of
-        {ok, Socket} -> 
-            case ssl:connect(Socket, ?SSLOPTIONS, ?TIMEOUT) of
+connect(tcp, Host, Port, TcpOpts, _SslOpts) ->
+    gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT);
+connect(ssl, Host, Port, TcpOpts, SslOpts) ->
+    case gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT) of
+        {ok, Socket} ->
+            case ssl:connect(Socket, emqttc_opts:merge(?SSLOPTIONS, SslOpts), ?TIMEOUT) of
                 {ok, SslSocket} -> {ok, #ssl_socket{tcp = Socket, ssl = SslSocket}};
                 {error, SslReason} -> {error, SslReason}
             end;
@@ -185,15 +189,18 @@ sockname_s(Sock) ->
 %%%=============================================================================
 
 receiver(ClientPid, Socket) ->
-    receiver_loop(ClientPid, Socket, emqttc_parser:new()).
+    receiver_activate(ClientPid, Socket, emqttc_parser:new()).
+
+receiver_activate(ClientPid, Socket, ParseState) ->
+    setopts(Socket, [{active, once}]),
+    erlang:hibernate(?MODULE, receiver_loop, [ClientPid, Socket, ParseState]).
 
 receiver_loop(ClientPid, Socket, ParseState) ->
-    setopts(Socket, [{active, once}]),
     receive
         {tcp, Socket, Data} ->
             case parse_received_bytes(ClientPid, Data, ParseState) of
                 {ok, NewParserState} ->
-                    receiver_loop(ClientPid, Socket, NewParserState);
+                    receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
                     gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;
@@ -204,7 +211,7 @@ receiver_loop(ClientPid, Socket, ParseState) ->
         {ssl, _SslSocket, Data} ->
             case parse_received_bytes(ClientPid, Data, ParseState) of
                 {ok, NewParserState} ->
-                    receiver_loop(ClientPid, Socket, NewParserState);
+                    receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
                     gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;
@@ -220,14 +227,16 @@ parse_received_bytes(_ClientPid, <<>>, ParseState) ->
     {ok, ParseState};
 
 parse_received_bytes(ClientPid, Data, ParseState) ->
-    case emqttc_parser:parse(Data, ParseState) of
+    case catch emqttc_parser:parse(Data, ParseState) of
     {more, ParseState1} ->
         {ok, ParseState1};
     {ok, Packet, Rest} -> 
         gen_fsm:send_event(ClientPid, Packet),
         parse_received_bytes(ClientPid, Rest, emqttc_parser:new());
     {error, Error} ->
-        {error, Error}
+        {error, Error};
+    {'EXIT', Reason} ->
+        {error, Reason}
     end.
 
 connection_lost(ClientPid, Reason) ->
