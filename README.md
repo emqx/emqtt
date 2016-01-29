@@ -185,7 +185,7 @@ Use 'logger' option to configure emqttc log mechanism. Default log to stdout wit
 emqttc:start_link([{logger, info}]).
 
 %% log to otp standard error_logger with warning level
-emqttc:start_link([{logger, {otp, warning}}]).
+emqttc:start_link([{logger, {error_logger, warning}}]).
 
 %% log to lager with error level
 emqttc:start_link([{logger, {lager, error}}]).
@@ -194,11 +194,11 @@ emqttc:start_link([{logger, {lager, error}}]).
 
 #### Logger modules
 
-Module | Description
--------|------------
-stdout | io:format
-otp    | error_logger
-lager  | lager
+Module          | Description
+----------------|------------
+stdout          | io:format
+error_logger    | error_logger
+lager           | lager
 
 #### Logger Levels
 
