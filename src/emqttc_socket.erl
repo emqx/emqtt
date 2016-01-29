@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_socket).
 
 -author("feng@emqtt.io").
@@ -31,7 +32,7 @@
 -include("emqttc_packet.hrl").
 
 %% API
--export([connect/5, controlling_process/2, send/2, close/1, stop/1]).
+-export([connect/6, controlling_process/2, send/2, close/1, stop/1]).
 
 -export([sockname/1, sockname_s/1, setopts/2, getstat/2]).
 
@@ -39,7 +40,7 @@
 -export([receiver/2, receiver_loop/3]).
 
 %% 30 (secs)
--define(TIMEOUT, 60000).
+-define(TIMEOUT, 90000).
 
 -define(TCPOPTIONS, [
     binary,
@@ -62,16 +63,17 @@
 %% @doc Connect to broker with TCP or SSL transport
 %% @end
 %%------------------------------------------------------------------------------
--spec connect(ClientPid, Transport, Host, Port, TcpOpts) -> {ok, Socket, Receiver} | {error, term()} when
+-spec connect(ClientPid, Transport, Host, Port, TcpOpts, SslOpts) -> {ok, Socket, Receiver} | {error, term()} when
     ClientPid   :: pid(),
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
     TcpOpts     :: [gen_tcp:connect_option()],
+    SslOpts     :: [ssl:ssloption()],
     Socket      :: inet:socket() | ssl_socket(),
     Receiver    :: pid().
-connect(ClientPid, Transport, Host, Port, TcpOpts) when is_pid(ClientPid) ->
-    case connect(Transport, Host, Port, TcpOpts) of
+connect(ClientPid, Transport, Host, Port, TcpOpts, SslOpts) when is_pid(ClientPid) ->
+    case connect(Transport, Host, Port, TcpOpts, SslOpts) of
         {ok, Socket} ->
             ReceiverPid = spawn_link(?MODULE, receiver, [ClientPid, Socket]),
             controlling_process(Socket, ReceiverPid),
@@ -80,18 +82,19 @@ connect(ClientPid, Transport, Host, Port, TcpOpts) when is_pid(ClientPid) ->
             {error, Reason}
     end.
 
--spec connect(Transport, Host, Port, TcpOpts) -> {ok, Socket} | {error, any()} when
+-spec connect(Transport, Host, Port, TcpOpts, SslOpts) -> {ok, Socket} | {error, any()} when
     Transport   :: tcp | ssl,
     Host        :: inet:ip_address() | string(),
     Port        :: inet:port_number(),
     TcpOpts     :: [gen_tcp:connect_option()],
+    SslOpts     :: [ssl:ssloption()],
     Socket      :: inet:socket() | ssl_socket().
-connect(tcp, Host, Port, TcpOpts) ->
+connect(tcp, Host, Port, TcpOpts, _SslOpts) ->
     gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT);
-connect(ssl, Host, Port, TcpOpts) ->
+connect(ssl, Host, Port, TcpOpts, SslOpts) ->
     case gen_tcp:connect(Host, Port, emqttc_opts:merge(?TCPOPTIONS, TcpOpts), ?TIMEOUT) of
         {ok, Socket} ->
-            case ssl:connect(Socket, ?SSLOPTIONS, ?TIMEOUT) of
+            case ssl:connect(Socket, emqttc_opts:merge(?SSLOPTIONS, SslOpts), ?TIMEOUT) of
                 {ok, SslSocket} -> {ok, #ssl_socket{tcp = Socket, ssl = SslSocket}};
                 {error, SslReason} -> {error, SslReason}
             end;

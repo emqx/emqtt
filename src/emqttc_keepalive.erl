@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 %%%
 %%% @author Feng Lee <feng@emqtt.io>
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_keepalive).
 
 -record(keepalive, {socket,
@@ -39,10 +40,7 @@
 %% API
 -export([new/3, start/1, restart/1, resume/1, cancel/1]).
 
-%%------------------------------------------------------------------------------
 %% @doc Create a KeepAlive.
-%% @end
-%%------------------------------------------------------------------------------
 -spec new({Socket, StatName}, TimeoutSec, TimeoutMsg) -> KeepAlive when
     Socket        :: inet:socket() | ssl:sslsocket(),
     StatName      :: recv_oct | send_oct,
@@ -57,10 +55,7 @@ new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
                timeout_sec = TimeoutSec,
                timeout_msg = TimeoutMsg}.
 
-%%------------------------------------------------------------------------------
 %% @doc Start KeepAlive
-%% @end
-%%------------------------------------------------------------------------------
 -spec start(keepalive()) -> {ok, keepalive()} | {error, any()}.
 start(undefined) ->
     {ok, undefined};
@@ -75,17 +70,11 @@ start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName,
             {error, Error}
     end.
 
-%%------------------------------------------------------------------------------
 %% @doc Restart KeepAlive
-%% @end
-%%------------------------------------------------------------------------------
 -spec restart(keepalive()) -> {ok, keepalive()} | {error, any()}.
 restart(KeepAlive) -> start(KeepAlive).
 
-%%------------------------------------------------------------------------------
 %% @doc Resume KeepAlive, called when timeout.
-%% @end
-%%------------------------------------------------------------------------------
 -spec resume(keepalive()) -> timeout | {resumed, keepalive()} | {error, any()}.
 resume(undefined) -> undefined;
 resume(KeepAlive = #keepalive{socket      = Socket,
@@ -108,10 +97,7 @@ resume(KeepAlive = #keepalive{socket      = Socket,
             {error, Error}
     end.
 
-%%------------------------------------------------------------------------------
 %% @doc Cancel KeepAlive.
-%% @end
-%%------------------------------------------------------------------------------
 -spec cancel(keepalive() | reference()) -> any().
 cancel(undefined) ->
     ok;

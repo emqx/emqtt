@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -24,15 +24,15 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_parser).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -include("emqttc_packet.hrl").
 
 %% API
 -export([new/0, parse/2]).
-
 
 %%%-----------------------------------------------------------------------------
 %% @doc Initialize a parser.

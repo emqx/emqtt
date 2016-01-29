@@ -115,7 +115,7 @@ Connect to MQTT Broker:
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
                    | {suback_timeout,  pos_integer()}
-                   | ssl
+                   | ssl | {ssl, [ssl:ssloption()]}
                    | auto_resub
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
@@ -133,7 +133,7 @@ username | binary()
 password | binary()
 will | list(tuple()) | undefined | MQTT Will Message | [{qos, 1}, {retain, false}, {topic, <<"WillTopic">>}, {payload, <<"I die">>}]
 connack_timeout | pos_integer() | 30 | ConnAck Timeout | {connack_timeout, 10}
-ssl |
+ssl | list(ssl:ssloption()) | [] | SSL Options | [{certfile, "path/to/ssl.crt"}, {keyfile,  "path/to/ssl.key"}]}]
 auto_resub |
 logger | atom() or {atom(), atom()} | info | Client Logger | error, {opt, info}, {lager, error}
 reconnect | false, or integer() | false | Client Reconnect | false, 4, {4, 60}
@@ -166,6 +166,13 @@ Connect to broker with SSL Socket:
 
 emqttc:start_link([{host, "t.emqtt.io"}, {port, 8883}, ssl]).
 
+emqttc:start_link([{host, "t.emqtt.io"}, {port, 8883}, {ssl, [
+    {certfile, "path/to/ssl.crt"},
+    {keyfile,  "path/to/ssl.key"}]}
+]).
+
+More SSL Options: http://erlang.org/doc/man/ssl.html
+
 ```
 
 ### Logger
@@ -178,7 +185,7 @@ Use 'logger' option to configure emqttc log mechanism. Default log to stdout wit
 emqttc:start_link([{logger, info}]).
 
 %% log to otp standard error_logger with warning level
-emqttc:start_link([{logger, {otp, warning}}]).
+emqttc:start_link([{logger, {error_logger, warning}}]).
 
 %% log to lager with error level
 emqttc:start_link([{logger, {lager, error}}]).
@@ -187,11 +194,11 @@ emqttc:start_link([{logger, {lager, error}}]).
 
 #### Logger modules
 
-Module | Description
--------|------------
-stdout | io:format
-otp    | error_logger
-lager  | lager
+Module          | Description
+----------------|------------
+stdout          | io:format
+error_logger    | error_logger
+lager           | lager
 
 #### Logger Levels
 

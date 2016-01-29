@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2015-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
                    | {suback_timeout,  pos_integer()}
-                   | ssl
+                   | ssl | {ssl, [ssl:ssloption()]}
                    | {logger, atom() | {atom(), atom()}}
                    | auto_resub
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
@@ -114,7 +114,8 @@
                 transport = tcp     :: tcp | ssl,
                 reconnector         :: emqttc_reconnector:reconnector() | undefined,
                 logger              :: gen_logger:logmod(),
-                tcp_opts            :: [gen_tcp:connect_option()]}).
+                tcp_opts            :: [gen_tcp:connect_option()],
+                ssl_opts            :: [ssl:ssloption()]}).
 
 %% 60 secs
 -define(CONNACK_TIMEOUT, 60).
@@ -387,19 +388,18 @@ init([Name, Parent, MqttOpts, TcpOpts]) ->
                    emqttc_opts:merge([{logger, Logger},
                                       {keepalive, ?KEEPALIVE}], MqttOpts1)),
 
-    IsSSL = get_value(ssl, MqttOpts1, false),
-
     State = init(MqttOpts1, #state{name            = Name,
                                    parent          = Parent,
-                                   host            = "localhost",
-                                   port            = if IsSSL -> 8883; true  -> 1883 end,
+                                   host            = "127.0.0.1",
+                                   port            = 1883,
                                    proto_state     = ProtoState,
                                    keepalive_after = ?KEEPALIVE,
                                    connack_timeout = ?CONNACK_TIMEOUT,
                                    puback_timeout  = ?PUBACK_TIMEOUT,
                                    suback_timeout  = ?SUBACK_TIMEOUT,
                                    logger          = Logger,
-                                   tcp_opts        = TcpOpts}),
+                                   tcp_opts        = TcpOpts,
+                                   ssl_opts        = []}),
 
     {ok, connecting, State, 0}.
 
@@ -412,6 +412,9 @@ init([{port, Port} | Opts], State) ->
 init([ssl | Opts], State) ->
     ssl:start(), % ok?
     init(Opts, State#state{transport = ssl});
+init([{ssl, SslOpts} | Opts], State) ->
+    ssl:start(), % ok?
+    init(Opts, State#state{transport = ssl, ssl_opts = SslOpts});
 init([auto_resub | Opts], State) ->
     init(Opts, State#state{auto_resub= true});
 init([{logger, Cfg} | Opts], State) ->
@@ -923,9 +926,10 @@ connect(State = #state{name = Name,
                        connack_timeout = ConnAckTimeout,
                        transport = Transport,
                        logger = Logger,
-                       tcp_opts = TcpOpts}) ->
+                       tcp_opts = TcpOpts,
+                       ssl_opts = SslOpts}) ->
     Logger:info("[Client ~s]: connecting to ~s:~p", [Name, Host, Port]),
-    case emqttc_socket:connect(self(), Transport, Host, Port, TcpOpts) of
+    case emqttc_socket:connect(self(), Transport, Host, Port, TcpOpts, SslOpts) of
         {ok, Socket, Receiver} ->
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),

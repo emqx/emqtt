@@ -1,5 +1,5 @@
 %%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2015 eMQTT.IO, All Rights Reserved.
+%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy
 %%% of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,10 @@
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
+
 -module(emqttc_topic).
 
--author("feng@emqtt.io").
+-author("Feng Lee <feng@emqtt.io>").
 
 -import(lists, [reverse/1]).
 
