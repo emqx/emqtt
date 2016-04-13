@@ -64,11 +64,13 @@ new() ->
 %%------------------------------------------------------------------------------
 -spec new(MinInterval) -> reconnector() when 
       MinInterval  :: non_neg_integer() | {non_neg_integer(), non_neg_integer()}.
-new(MinInterval) when is_integer(MinInterval) ->
+new(MinInterval) when is_integer(MinInterval), MinInterval =< ?MAX_INTERVAL ->
     new({MinInterval, ?MAX_INTERVAL});
 
-new({MinInterval, MaxInterval}) when is_integer(MinInterval), is_integer(MaxInterval) ->
+new({MinInterval, MaxInterval}) when is_integer(MinInterval), is_integer(MaxInterval), MinInterval =< MaxInterval ->
     new({MinInterval, MaxInterval, infinity});
+new({_MinInterval, _MaxInterval}) ->
+    new({?MIN_INTERVAL, ?MAX_INTERVAL, infinity});
 new({MinInterval, MaxInterval, MaxRetries}) when is_integer(MinInterval),
                                     is_integer(MaxInterval), ?IS_MAX_RETRIES(MaxRetries) ->
     #reconnector{min_interval = MinInterval, 
