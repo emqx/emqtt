@@ -123,7 +123,7 @@ init_willmsg([_Opt | Opts], State) ->
 random_id() ->
     % erlang 18.x
     %random:seed(erlang:timestamp()),
-    random:seed(now()),
+    random:seed(os:timestamp()),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
     {ok, Host} = inet:gethostname(),
