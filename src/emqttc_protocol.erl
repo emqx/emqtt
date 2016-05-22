@@ -123,16 +123,12 @@ init_willmsg([_Opt | Opts], State) ->
     init_willmsg(Opts, State).
 
 random_id() ->
-    Now =
-        try
-            % erlang 18.x
-            erlang:timestamp()
-        catch
-            error:undef ->
-            % erlang 17.x
-                erlang:now()
-        end,
-    random:seed(Now),
+    random:seed(case erlang:function_exported(erlang, timestamp, 0) of
+                    true  -> %% R18
+                        erlang:timestamp();
+                    false -> %% R17
+                        erlang:now()
+                end),
     I1 = random:uniform(round(math:pow(2, 48))) - 1,
     I2 = random:uniform(round(math:pow(2, 32))) - 1,
     {ok, Host} = inet:gethostname(),
