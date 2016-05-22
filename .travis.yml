@@ -4,6 +4,8 @@ sudo: false
 
 otp_release:
    - 17.0
+   - 18.0
+   - 18.2.1
 
 script: 
   - make
