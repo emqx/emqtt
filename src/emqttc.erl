@@ -668,7 +668,7 @@ connected({publish, Msg = #mqtt_message{qos = _Qos}}, From, State=#state{infligh
 connected(Event = {subscribe, _SubPid, _Topics}, From, State = #state{inflight_reqs  = InflightReqs,
                                                                       suback_timeout = AckTimeout}) ->
 
-    {next_state, _, State1 = #state{inflight_msgid = MsgId}} = connected(Event, State),
+    {next_state, _, State1 = #state{inflight_msgid = MsgId}, _} = connected(Event, State),
 
     MRef = erlang:send_after(AckTimeout*1000, self(), {timeout, suback, MsgId}),
 
