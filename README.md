@@ -214,7 +214,7 @@ none
 
 ### Reconnect
 
-Use 'reconect' option to configure emqttc reconnect policy. Default is 'false'.
+Use 'reconnect' option to configure emqttc reconnect policy. Default is 'false'.
 
 Reconnect Policy: <code>{MinInterval, MaxInterval, MaxRetries}</code>.
 
