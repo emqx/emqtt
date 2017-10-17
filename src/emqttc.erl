@@ -43,6 +43,9 @@
 %% Lookup topics
 -export([topics/1]).
 
+%% Connection status
+-export([is_connected/1]).
+ 
 %% Publish, Subscribe API
 -export([publish/3, publish/4,
          sync_publish/4,
@@ -352,6 +355,14 @@ ping(Client) ->
 -spec disconnect(Client) -> ok when Client :: pid() | atom().
 disconnect(Client) ->
     gen_fsm:send_event(Client, disconnect).
+
+%%------------------------------------------------------------------------------
+%% @doc is the emqtt client connected to a broker
+%% @end
+%%------------------------------------------------------------------------------
+-spec is_connected(Client) -> false | {true, {Host :: string(), Port :: integer()}} when Client :: pid() | atom().
+is_connected(Client) ->
+    gen_fsm:sync_send_all_state_event(Client, is_connected).
 
 %%%=============================================================================
 %%% gen_fsm callbacks
@@ -791,6 +802,12 @@ handle_sync_event(topics, _From, StateName, State = #state{pubsub_map = PubsubMa
     TopicTable = [{Topic, Qos} || {Topic, {Qos, _Subs}} <- maps:to_list(PubsubMap)],
     {reply, TopicTable, StateName, State};
 
+handle_sync_event(is_connected, _From, StateName = connected, State = #state{host = Host, port = Port}) ->
+    {reply, {true, {Host, Port}}, StateName, State};
+
+handle_sync_event(is_connected, _From, StateName, State = #state{host = Host, port = Port}) ->
+    {reply, false, StateName, State};
+    
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
