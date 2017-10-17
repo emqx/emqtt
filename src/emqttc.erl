@@ -70,7 +70,8 @@
 
 -endif.
 
--type mqttc_opt() :: {host, inet:ip_address() | string()}
+-type mqttc_opt() :: {hosts, list()}
+		   | {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
@@ -93,6 +94,7 @@
 
 -record(state, {parent              :: pid(),
                 name                :: atom(),
+		hosts = []	    :: list(),
                 host = "localhost"  :: inet:ip_address() | string(),
                 port = 1883         :: inet:port_number(),
                 socket              :: inet:socket(),
@@ -390,6 +392,7 @@ init([Name, Parent, MqttOpts, TcpOpts]) ->
 
     State = init(MqttOpts1, #state{name            = Name,
                                    parent          = Parent,
+				   hosts	   = [],
                                    host            = "127.0.0.1",
                                    port            = 1883,
                                    proto_state     = ProtoState,
@@ -405,6 +408,8 @@ init([Name, Parent, MqttOpts, TcpOpts]) ->
 
 init([], State) ->
     State;
+init([{hosts, Hosts} | Opts], State) ->
+    init(Opts, State#state{hosts = Hosts});
 init([{host, Host} | Opts], State) ->
     init(Opts, State#state{host = Host});
 init([{port, Port} | Opts], State) ->
@@ -916,7 +921,25 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 next_state(StateName, State) ->
     {next_state, StateName, State, hibernate}.
 
-connect(State = #state{name = Name, 
+connect(State = #state{hosts = Hosts = [_|_]}) ->
+    connect(Hosts, none, State);
+
+connect(State = #state{host = Host, port = Port}) ->
+    connect([{Host, Port}], none, State).
+
+connect([{Host,Port} | Rest], _, State) ->
+    case try_connect(State#state{host=Host, port=Port}) of
+        {ok, NewState} ->
+	    {next_state, waiting_for_connack, NewState};
+        {error, Reason} ->
+	    connect(Rest, Reason, State)
+            
+    end;
+
+connect([], LastReason, State) ->
+    try_reconnect(LastReason, State). 
+
+try_connect(State = #state{name = Name, 
                        host = Host, 
                        port = Port, 
                        socket = undefined, 
@@ -936,14 +959,14 @@ connect(State = #state{name = Name,
             KeepAlive = emqttc_keepalive:new({Socket, send_oct}, KeepAliveTime, {keepalive, timeout}),
             TRef = gen_fsm:start_timer(ConnAckTimeout*1000, connack),
             Logger:info("[Client ~s] connected with ~s:~p", [Name, Host, Port]),
-            {next_state, waiting_for_connack, State#state{socket = Socket,
-                                                          receiver = Receiver,
-                                                          keepalive = KeepAlive,
-                                                          connack_tref = TRef,
-                                                          proto_state = ProtoState1}};
+	    {ok, State#state{socket = Socket,
+                             receiver = Receiver,
+                             keepalive = KeepAlive,
+                             connack_tref = TRef,
+                             proto_state = ProtoState1}};
         {error, Reason} ->
-            Logger:info("[Client ~s] connection failure: ~p", [Name, Reason]),
-            try_reconnect(Reason, State)
+            Logger:info("[Client ~s] failed to connect with ~s:~p: ~p", [Name, Host, Port, Reason]),
+	    {error, Reason}
     end.
 
 try_reconnect(Reason, State = #state{reconnector = undefined}) ->
