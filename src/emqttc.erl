@@ -415,7 +415,8 @@ init([Name, Parent, MqttOpts, TcpOpts]) ->
                                    tcp_opts        = TcpOpts,
                                    ssl_opts        = []}),
 
-    {ok, connecting, State, 0}.
+    State1 = init_hosts(State),
+    {ok, connecting, State1, 0}.
 
 init([], State) ->
     State;
@@ -453,6 +454,10 @@ init_reconnector(false) ->
 init_reconnector(Params) when is_integer(Params) orelse is_tuple(Params) ->
     emqttc_reconnector:new(Params).
 
+init_hosts(State = #state{hosts = [], host = Host, port = Port}) ->
+    State#state{hosts = [{Host, Port}]};
+init_hosts(State) ->
+    State.
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc Event Handler for state that connecting to MQTT broker.
@@ -938,11 +943,8 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 next_state(StateName, State) ->
     {next_state, StateName, State, hibernate}.
 
-connect(State = #state{hosts = Hosts = [_|_]}) ->
-    connect(Hosts, none, State);
-
-connect(State = #state{host = Host, port = Port}) ->
-    connect([{Host, Port}], none, State).
+connect(State = #state{hosts = Hosts}) ->
+    connect(Hosts, none, State).
 
 connect([{Host,Port} | Rest], _, State) ->
     case try_connect(State#state{host=Host, port=Port}) of
