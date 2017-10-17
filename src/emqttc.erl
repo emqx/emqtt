@@ -810,7 +810,7 @@ handle_sync_event(topics, _From, StateName, State = #state{pubsub_map = PubsubMa
 handle_sync_event(is_connected, _From, StateName = connected, State = #state{host = Host, port = Port}) ->
     {reply, {true, {Host, Port}}, StateName, State};
 
-handle_sync_event(is_connected, _From, StateName, State = #state{host = Host, port = Port}) ->
+handle_sync_event(is_connected, _From, StateName, State) ->
     {reply, false, StateName, State};
     
 handle_sync_event(_Event, _From, StateName, State) ->
