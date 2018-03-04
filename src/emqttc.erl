@@ -636,7 +636,7 @@ connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState
     {stop, normal, State#state{socket = undefined, receiver = undefined}};
 
 connected(Packet = ?PACKET(_Type), State = #state{name = Name, logger = Logger}) ->
-    Logger:debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
+    % Logger:debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, NewState} = received(Packet, State),
     next_state(connected, NewState);
 
