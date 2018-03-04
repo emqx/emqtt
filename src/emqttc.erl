@@ -84,7 +84,8 @@
                    | {suback_timeout,  pos_integer()}
                    | ssl | {ssl, [ssl:ssloption()]}
                    | {logger, atom() | {atom(), atom()}}
-                   | auto_resub
+                   | force_ping | {force_ping, boolean()}
+                   | auto_resub | {auto_resub, boolean()}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 
 -type mqtt_qosopt() :: qos0 | qos1 | qos2 | mqtt_qos().
@@ -105,6 +106,7 @@
                 inflight_reqs = #{} :: map(),
                 inflight_msgid      :: pos_integer(),
                 auto_resub = false  :: boolean(),
+                force_ping = false  :: boolean(),
                 keepalive           :: emqttc_keepalive:keepalive() | undefined,
                 keepalive_after     :: non_neg_integer(),
                 connack_timeout     :: pos_integer(),
@@ -415,8 +417,14 @@ init([ssl | Opts], State) ->
 init([{ssl, SslOpts} | Opts], State) ->
     ssl:start(), % ok?
     init(Opts, State#state{transport = ssl, ssl_opts = SslOpts});
+init([{auto_resub, Cfg} | Opts], State) when is_boolean(Cfg) ->
+    init(Opts, State#state{auto_resub= Cfg});
 init([auto_resub | Opts], State) ->
     init(Opts, State#state{auto_resub= true});
+init([{force_ping, Cfg} | Opts], State) when is_boolean(Cfg) ->
+    init(Opts, State#state{force_ping = Cfg});
+init([force_ping | Opts], State) ->
+    init(Opts, State#state{force_ping = true});
 init([{logger, Cfg} | Opts], State) ->
     init(Opts, State#state{logger = gen_logger:new(Cfg)});
 init([{keepalive, Time} | Opts], State) ->
@@ -799,11 +807,11 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%
 %% @end
 %%------------------------------------------------------------------------------
+
 -spec(handle_info(Info :: term(), StateName :: atom(), StateData :: term()) ->
     {next_state, NextStateName :: atom(), NewStateData :: term()} |
     {next_state, NextStateName :: atom(), NewStateData :: term(), timeout() | hibernate} |
     {stop, Reason :: normal | term(), NewStateData :: term()}).
-
 handle_info({timeout, suback, MsgId}, StateName, State) ->
     {next_state, StateName, reply_timeout({suback, MsgId}, State)};
 
@@ -813,7 +821,8 @@ handle_info({timeout, puback, MsgId}, StateName,  State) ->
 handle_info({reconnect, timeout}, disconnected, State) ->
     connect(State);
 
-handle_info({keepalive, timeout}, connected, State = #state{proto_state = ProtoState, keepalive = KeepAlive}) ->
+handle_info({keepalive, timeout}, connected, State =
+            #state{proto_state = ProtoState, keepalive = KeepAlive, force_ping = ForcePing}) ->
     case emqttc_keepalive:resume(KeepAlive) of
         timeout ->
             emqttc_protocol:ping(ProtoState),
@@ -824,6 +833,10 @@ handle_info({keepalive, timeout}, connected, State = #state{proto_state = ProtoS
                     {stop, {shutdown, Error}, State}
             end;
         {resumed, NewKeepAlive} ->
+            case ForcePing of
+                true  -> emqttc_protocol:ping(ProtoState);
+                false -> ignore
+            end,
             next_state(connected, State#state{keepalive = NewKeepAlive});
         {error, Error} ->
             {stop, {shutdown, Error}, State}

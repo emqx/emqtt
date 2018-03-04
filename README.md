@@ -116,7 +116,8 @@ Connect to MQTT Broker:
                    | {puback_timeout,  pos_integer()}
                    | {suback_timeout,  pos_integer()}
                    | ssl | {ssl, [ssl:ssloption()]}
-                   | auto_resub
+                   | force_ping | {force_ping, boolean()}
+                   | auto_resub | {auto_resub, boolean()}
                    | {logger, atom() | {atom(), atom()}}
                    | {reconnect, non_neg_integer() | {non_neg_integer(), non_neg_integer()} | false}.
 ```
