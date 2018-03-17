@@ -851,7 +851,7 @@ handle_info({'EXIT', Receiver, Reason}, _StateName,
     %% event occured when receiver error
     Logger:error("[Client ~s] receiver exit: ~p", [Name, Reason]),
     emqttc_keepalive:cancel(KeepAlive),
-    try_reconnect({receiver, Reason}, State#state{receiver = undefined});
+    try_reconnect({receiver, Reason}, State#state{receiver = undefined, socket = undefined});
 
 handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
             State = #state{name = Name,
