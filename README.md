@@ -103,7 +103,8 @@ Connect to MQTT Broker:
 
 ```erlang
 
--type mqttc_opt() :: {host, inet:ip_address() | string()}
+-type mqttc_opt() :: {hosts, [{inet:ip_address(), inet:port_number()}]},
+		     {host, inet:ip_address() | string()}
                    | {port, inet:port_number()}
                    | {client_id, binary()}
                    | {clean_sess, boolean()}
@@ -124,6 +125,7 @@ Connect to MQTT Broker:
 
 Option | Value | Default | Description | Example
 -------|-------|---------|-------------|---------
+hosts  | list(tuple()) | [] | List of hosts to connect to | [{"127.0.0.1", 8883}, {"127.0.0.2", 8883}]
 host   | inet:ip_address() or string() | "locahost" | Broker Address | "locahost"
 port   | inet:port_number() | 1883 | Broker Port | 
 client_id | binary() | random clientId | MQTT ClientId | <<"slimpleClientId">>
