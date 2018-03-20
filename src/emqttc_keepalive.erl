@@ -76,7 +76,7 @@ restart(KeepAlive) -> start(KeepAlive).
 
 %% @doc Resume KeepAlive, called when timeout.
 -spec resume(keepalive()) -> timeout | {resumed, keepalive()} | {error, any()}.
-resume(undefined) -> undefined;
+resume(undefined) -> {resumed, undefined};
 resume(KeepAlive = #keepalive{socket      = Socket,
                               stat_name   = StatName,
                               stat_val    = StatVal,
