@@ -38,7 +38,7 @@
 -export([start/0]).
 
 %% Start emqttc client
--export([start_link/0, start_link/1, start_link/2, start_link/3]).
+-export([start_link/0, start_link/1, start_link/2, start_link/3, start_link/4]).
 
 %% Lookup topics
 -export([topics/1]).
@@ -92,7 +92,7 @@
 
 -type mqtt_pubopt() :: mqtt_qosopt() | {qos, mqtt_qos()} | {retain, boolean()}.
 
--record(state, {parent              :: pid(),
+-record(state, {recipient           :: pid(),
                 name                :: atom(),
                 host = "localhost"  :: inet:ip_address() | string(),
                 port = 1883         :: inet:port_number(),
@@ -178,7 +178,19 @@ start_link(MqttOpts, TcpOpts) when is_list(MqttOpts), is_list(TcpOpts) ->
     MqttOpts  :: [mqttc_opt()],
     TcpOpts   :: [gen_tcp:connect_option()].
 start_link(Name, MqttOpts, TcpOpts) when is_atom(Name), is_list(MqttOpts), is_list(TcpOpts) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [Name, self(), MqttOpts, TcpOpts], []).
+    start_link(Name, self(), MqttOpts, TcpOpts).
+
+%%------------------------------------------------------------------------------
+%% @doc Start emqttc client with Recipient, name, options, tcp options.
+%% @end
+%%------------------------------------------------------------------------------
+-spec start_link(Name, Recipient, MqttOpts, TcpOpts) -> {ok, pid()} | ignore | {error, any()} when
+    Name      :: atom(),
+    Recipient :: pid() | atom(),
+    MqttOpts  :: [mqttc_opt()],
+    TcpOpts   :: [gen_tcp:connect_option()].
+start_link(Name, Recipient, MqttOpts, TcpOpts) when is_pid(Recipient), is_atom(Name), is_list(MqttOpts), is_list(TcpOpts) ->
+    gen_fsm:start_link({local, Name}, ?MODULE, [Name, Recipient, MqttOpts, TcpOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Lookup topics subscribed
@@ -283,7 +295,7 @@ subscribe(Client, [{_Topic, _Qos} | _] = Topics) ->
     Client    :: pid() | atom(),
     Topics    :: [{binary(), mqtt_qos()}] | {binary(), mqtt_qos()} | binary().
 sync_subscribe(Client, Topic) when is_binary(Topic) ->
-    sync_subscribe(Client, {Topic, ?QOS_0}); 
+    sync_subscribe(Client, {Topic, ?QOS_0});
 sync_subscribe(Client, {Topic, Qos}) when is_binary(Topic), (?IS_QOS(Qos) orelse is_atom(Qos)) ->
     case sync_subscribe(Client, [{Topic, qos_opt(Qos)}]) of
         {ok, [GrantedQos]} ->
@@ -370,10 +382,10 @@ disconnect(Client) ->
     {ok, StateName :: atom(), StateData :: #state{}} |
     {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([undefined, Parent, MqttOpts, TcpOpts]) ->
-    init([pid_to_list(self()), Parent, MqttOpts, TcpOpts]);
+init([undefined, Recipient, MqttOpts, TcpOpts]) ->
+    init([pid_to_list(Recipient), Recipient, MqttOpts, TcpOpts]);
 
-init([Name, Parent, MqttOpts, TcpOpts]) ->
+init([Name, Recipient, MqttOpts, TcpOpts]) ->
 
     process_flag(trap_exit, true),
 
@@ -391,7 +403,7 @@ init([Name, Parent, MqttOpts, TcpOpts]) ->
                                       {keepalive, ?KEEPALIVE}], MqttOpts1)),
 
     State = init(MqttOpts1, #state{name            = Name,
-                                   parent          = Parent,
+                                   recipient       = Recipient,
                                    host            = "127.0.0.1",
                                    port            = 1883,
                                    proto_state     = ProtoState,
@@ -459,7 +471,7 @@ connecting(timeout, State) ->
 %% @end
 %%------------------------------------------------------------------------------
 waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
-                parent = Parent,
+                recipient = Recipient,
                 name = Name,
                 pending_pubsub = Pending,
                 auto_resub = AutoResub,
@@ -495,8 +507,8 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     %% Start keepalive
     case emqttc_keepalive:start(KeepAlive) of
         {ok, KeepAlive1} ->
-            %% Tell parent to subscribe
-            Parent ! {mqttc, self(), connected},
+            %% Tell recipient to subscribe
+            Recipient ! {mqttc, self(), connected},
 
             {next_state, connected, State#state{proto_state = ProtoState1,
                                                 keepalive = KeepAlive1,
@@ -518,7 +530,7 @@ waiting_for_connack(Packet = ?PACKET(_Type), State = #state{name = Name, logger 
 waiting_for_connack(Event = {publish, _Msg}, State) ->
     next_state(waiting_for_connack, pending(Event, State));
 
-waiting_for_connack(Event = {Tag, _From, _Topics}, State) 
+waiting_for_connack(Event = {Tag, _From, _Topics}, State)
         when Tag =:= subscribe orelse Tag =:= unsubscribe ->
     next_state(waiting_for_connack, pending(Event, State));
 
@@ -559,33 +571,33 @@ connected({subscribe, SubPid, Topics}, State = #state{subscribers = Subscribers,
                                                       logger = Logger}) ->
 
     {ok, MsgId, ProtoState1} = emqttc_protocol:subscribe(Topics, ProtoState),
-    
+
     %% monitor subscriber
-    Subscribers1 = 
+    Subscribers1 =
     case lists:keyfind(SubPid, 1, Subscribers) of
-        {SubPid, _MonRef} -> 
+        {SubPid, _MonRef} ->
             Subscribers;
-        false -> 
+        false ->
             [{SubPid, erlang:monitor(process, SubPid)} | Subscribers]
     end,
 
     %% register to pubsub
     PubSubMap1 = lists:foldl(
         fun({Topic, Qos}, Map) ->
-            case maps:find(Topic, Map) of 
+            case maps:find(Topic, Map) of
                 {ok, {OldQos, Subs}} ->
                     case lists:member(SubPid, Subs) of
                         true ->
                             if
-                            Qos =:= OldQos -> 
+                            Qos =:= OldQos ->
                                 Map;
-                            true -> 
+                            true ->
                                 Logger:error("Subscribe topic '~s' with different qos: old=~p, new=~p", [Topic, OldQos, Qos]),
                                 maps:put(Topic, {Qos, Subs}, Map)
                             end;
-                        false -> 
+                        false ->
                             maps:put(Topic, {Qos, [SubPid| Subs]}, Map)
-                    end; 
+                    end;
                 error ->
                     maps:put(Topic, {Qos, [SubPid]}, Map)
             end
@@ -603,7 +615,7 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     {ok, ProtoState1} = emqttc_protocol:unsubscribe(Topics, ProtoState),
 
     %% unregister from pubsub
-    PubSubMap1 = 
+    PubSubMap1 =
     lists:foldl(
         fun(Topic, Map) ->
             case maps:find(Topic, Map) of
@@ -622,15 +634,15 @@ connected({unsubscribe, From, Topics}, State=#state{subscribers = Subscribers,
     %% demonitor
     Subscribers1 =
     case lists:keyfind(From, 1, Subscribers) of
-        {From, MonRef} -> 
+        {From, MonRef} ->
             case lists:member(From, lists:append([Subs || {_Qos, Subs} <- maps:values(PubSubMap1)])) of
-                true -> 
+                true ->
                     Subscribers;
                 false ->
                     erlang:demonitor(MonRef, [flush]),
                     lists:keydelete(From, 1, Subscribers)
             end;
-        false -> 
+        false ->
             Subscribers
     end,
 
@@ -681,7 +693,7 @@ connected(Event = {subscribe, _SubPid, _Topics}, From, State = #state{inflight_r
     MRef = erlang:send_after(AckTimeout*1000, self(), {timeout, suback, MsgId}),
 
     InflightReqs1 = maps:put(MsgId, {subscribe, From, MRef}, InflightReqs),
-    
+
     {next_state, connected, State1#state{inflight_reqs = InflightReqs1}};
 
 connected({Pid, ping}, From, State = #state{ping_reqs = PingReqs, proto_state = ProtoState}) ->
@@ -707,7 +719,7 @@ connected(Event, _From, State = #state{name = Name, logger = Logger}) ->
 disconnected(Event = {publish, _Msg}, State) ->
     next_state(disconnected, pending(Event, State));
 
-disconnected(Event = {Tag, _From, _Topics}, State) when 
+disconnected(Event = {Tag, _From, _Topics}, State) when
       Tag =:= subscribe orelse Tag =:= unsubscribe ->
     next_state(disconnected, pending(Event, State));
 
@@ -747,7 +759,7 @@ handle_event({frame_error, Error}, _StateName, State = #state{name = Name, logge
     Logger:error("[Client ~s] Frame Error: ~p", [Name, Error]),
     {stop, {shutdown, {frame_error, Error}}, State};
 
-handle_event({connection_lost, Reason}, StateName, State = #state{parent = Parent, name = Name, keepalive = KeepAlive, connack_tref = TRef, logger = Logger}) 
+handle_event({connection_lost, Reason}, StateName, State = #state{recipient = Recipient, name = Name, keepalive = KeepAlive, connack_tref = TRef, logger = Logger})
         when StateName =:= connected; StateName =:= waiting_for_connack ->
 
     Logger:warning("[Client ~s] Connection lost for: ~p", [Name, Reason]),
@@ -762,8 +774,8 @@ handle_event({connection_lost, Reason}, StateName, State = #state{parent = Paren
     %% cancel keepalive
     emqttc_keepalive:cancel(KeepAlive),
 
-    %% tell parent
-    Parent ! {mqttc, self(), disconnected},
+    %% tell recipient
+    Recipient ! {mqttc, self(), disconnected},
 
     try_reconnect(Reason, State#state{socket = undefined, connack_tref = TRef});
 
@@ -845,8 +857,8 @@ handle_info({keepalive, timeout}, connected, State =
 handle_info({'EXIT', Receiver, normal}, StateName, State = #state{receiver = Receiver}) ->
     {next_state, StateName, State#state{receiver = undefined}};
 
-handle_info({'EXIT', Receiver, Reason}, _StateName, 
-            State = #state{name = Name, receiver = Receiver, 
+handle_info({'EXIT', Receiver, Reason}, _StateName,
+            State = #state{name = Name, receiver = Receiver,
                            keepalive = KeepAlive, logger = Logger}) ->
     %% event occured when receiver error
     Logger:error("[Client ~s] receiver exit: ~p", [Name, Reason]),
@@ -886,7 +898,7 @@ handle_info(Down = {'DOWN', MonRef, process, Pid, _Why}, StateName,
 handle_info({inet_reply, Socket, ok}, StateName, State = #state{socket = Socket}) ->
     %socket send reply.
     next_state(StateName, State);
-    
+
 handle_info(Info, StateName, State = #state{name = Name, logger = Logger}) ->
     Logger:error("[Client ~s] Unexpected Info when ~s: ~p", [Name, StateName, Info]),
     {next_state, StateName, State}.
@@ -929,12 +941,12 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 next_state(StateName, State) ->
     {next_state, StateName, State, hibernate}.
 
-connect(State = #state{name = Name, 
-                       host = Host, 
-                       port = Port, 
-                       socket = undefined, 
+connect(State = #state{name = Name,
+                       host = Host,
+                       port = Port,
+                       socket = undefined,
                        receiver = undefined,
-                       proto_state = ProtoState, 
+                       proto_state = ProtoState,
                        keepalive_after = KeepAliveTime,
                        connack_timeout = ConnAckTimeout,
                        transport = Transport,
@@ -999,7 +1011,7 @@ received(Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, _PacketId, _Payload), State = 
     {ok, State#state{proto_state = ProtoState1}};
 
 received(?PUBACK_PACKET(?PUBACK, PacketId), State = #state{proto_state = ProtoState}) ->
-    
+
     {ok, ProtoState1} = emqttc_protocol:received({'PUBACK', PacketId}, ProtoState),
 
     {ok, reply({publish, PacketId}, {ok, PacketId}, State#state{proto_state = ProtoState1})};
@@ -1011,7 +1023,7 @@ received(?PUBACK_PACKET(?PUBREC, PacketId), State = #state{proto_state = ProtoSt
     {ok, State#state{proto_state = ProtoState1}};
 
 received(?PUBACK_PACKET(?PUBREL, PacketId), State = #state{proto_state = ProtoState}) ->
-    ProtoState2 = 
+    ProtoState2 =
     case emqttc_protocol:received({'PUBREL', PacketId}, ProtoState) of
         {ok, ?PUBLISH_PACKET(?QOS_2, Topic, PacketId, Payload), ProtoState1} ->
             dispatch({publish, Topic, Payload}, State), ProtoState1;
@@ -1074,23 +1086,23 @@ reply_timeout({Ack, ReqId}, State=#state{inflight_reqs = InflightReqs, logger = 
 %% @doc Dispatch Publish Message to subscribers.
 %% @end
 %%------------------------------------------------------------------------------
-dispatch(Publish = {publish, TopicName, _Payload}, #state{parent = Parent,
+dispatch(Publish = {publish, TopicName, _Payload}, #state{recipient = Recipient,
                                                           pubsub_map = PubSubMap}) ->
     Matched =
     lists:foldl(
         fun(TopicFilter, Acc) ->
-                case emqttc_topic:match(TopicName, TopicFilter) of 
+                case emqttc_topic:match(TopicName, TopicFilter) of
                     true ->
                         {_Qos, Subs} = maps:get(TopicFilter, PubSubMap),
                         lists:append(Subs, Acc);
                     false ->
-                        Acc 
+                        Acc
                 end
         end, [], maps:keys(PubSubMap)),
     if
         length(Matched) =:= 0 ->
-            %% Dispath to Parent if no subscription matched.
-            Parent ! Publish;
+            %% Dispath to Recipient if no subscription matched.
+            Recipient ! Publish;
         true ->
             [Sub ! Publish || Sub <- unique(Matched)], ok
     end.
@@ -1118,4 +1130,3 @@ qos_opt([_|PubOpts]) ->
 
 unique(L) ->
     sets:to_list(sets:from_list(L)).
-
