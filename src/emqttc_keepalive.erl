@@ -59,8 +59,8 @@ new({Socket, StatName}, TimeoutSec, TimeoutMsg) when TimeoutSec > 0 ->
 -spec start(keepalive()) -> {ok, keepalive()} | {error, any()}.
 start(undefined) ->
     {ok, undefined};
-start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName, 
-                             timeout_sec = TimeoutSec, 
+start(KeepAlive = #keepalive{socket = Socket, stat_name = StatName,
+                             timeout_sec = TimeoutSec,
                              timeout_msg = TimeoutMsg}) ->
     case emqttc_socket:getstat(Socket, [StatName]) of
         {ok, [{StatName, StatVal}]} ->

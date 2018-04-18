@@ -39,11 +39,11 @@
 -define(IS_MAX_RETRIES(Max), (is_integer(Max) orelse Max =:= infinity)).
 
 -record(reconnector, {
-          min_interval  = ?MIN_INTERVAL, 
+          min_interval  = ?MIN_INTERVAL,
           max_interval  = ?MAX_INTERVAL,
-          max_retries   = infinity, 
-          interval      = ?MIN_INTERVAL, 
-          retries       = 0, 
+          max_retries   = infinity,
+          interval      = ?MIN_INTERVAL,
+          retries       = 0,
           timer         = undefined}).
 
 -opaque reconnector() :: #reconnector{}.
@@ -62,7 +62,7 @@ new() ->
 %% @doc Create a reconnector with min_interval, max_interval seconds and max retries.
 %% @end
 %%------------------------------------------------------------------------------
--spec new(MinInterval) -> reconnector() when 
+-spec new(MinInterval) -> reconnector() when
       MinInterval  :: non_neg_integer() | {non_neg_integer(), non_neg_integer()}.
 new(MinInterval) when is_integer(MinInterval), MinInterval =< ?MAX_INTERVAL ->
     new({MinInterval, ?MAX_INTERVAL});
@@ -73,9 +73,9 @@ new({_MinInterval, _MaxInterval}) ->
     new({?MIN_INTERVAL, ?MAX_INTERVAL, infinity});
 new({MinInterval, MaxInterval, MaxRetries}) when is_integer(MinInterval),
                                     is_integer(MaxInterval), ?IS_MAX_RETRIES(MaxRetries) ->
-    #reconnector{min_interval = MinInterval, 
-                 interval     = MinInterval, 
-                 max_interval = MaxInterval, 
+    #reconnector{min_interval = MinInterval,
+                 interval     = MinInterval,
+                 max_interval = MaxInterval,
                  max_retries  = MaxRetries}.
 
 %%------------------------------------------------------------------------------
@@ -85,13 +85,13 @@ new({MinInterval, MaxInterval, MaxRetries}) when is_integer(MinInterval),
 -spec execute(Reconntor, TimeoutMsg) -> {stop, any()} | {ok, reconnector()} when
       Reconntor  :: reconnector(),
       TimeoutMsg :: tuple().
-execute(#reconnector{retries = Retries, max_retries = MaxRetries}, _TimoutMsg) when 
+execute(#reconnector{retries = Retries, max_retries = MaxRetries}, _TimoutMsg) when
     MaxRetries =/= infinity andalso (Retries > MaxRetries) ->
     {stop, retries_exhausted};
 
-execute(Reconnector=#reconnector{min_interval = MinInterval, 
-                                 max_interval = MaxInterval, 
-                                 interval     = Interval, 
+execute(Reconnector=#reconnector{min_interval = MinInterval,
+                                 max_interval = MaxInterval,
+                                 interval     = Interval,
                                  retries      = Retries,
                                  timer        = Timer}, TimeoutMsg) ->
     % cancel timer first...
@@ -99,13 +99,13 @@ execute(Reconnector=#reconnector{min_interval = MinInterval,
     % power
     Interval1 = Interval * 2,
     Interval2 =
-    if 
+    if
         Interval1 > MaxInterval -> MinInterval;
         true -> Interval1
     end,
     NewTimer = erlang:send_after(Interval2*1000, self(), TimeoutMsg),
     {ok, Reconnector#reconnector{interval = Interval2, retries = Retries+1, timer = NewTimer }}.
-    
+
 %%------------------------------------------------------------------------------
 %% @doc Reset reconnector
 %% @end

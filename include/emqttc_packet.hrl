@@ -207,7 +207,7 @@
     #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREL, qos = ?QOS_1},
                  variable = #mqtt_packet_puback{packet_id = PacketId}}).
 
--define(SUBSCRIBE_PACKET(PacketId, TopicTable), 
+-define(SUBSCRIBE_PACKET(PacketId, TopicTable),
     #mqtt_packet{header = #mqtt_packet_header{type = ?SUBSCRIBE, qos = ?QOS_1},
                  variable = #mqtt_packet_subscribe{packet_id   = PacketId,
                                                    topic_table = TopicTable}}).
@@ -215,7 +215,7 @@
     #mqtt_packet{header = #mqtt_packet_header{type = ?SUBACK},
                  variable = #mqtt_packet_suback{packet_id = PacketId,
                                                 qos_table = QosTable}}).
--define(UNSUBSCRIBE_PACKET(PacketId, Topics), 
+-define(UNSUBSCRIBE_PACKET(PacketId, Topics),
     #mqtt_packet{header = #mqtt_packet_header{type = ?UNSUBSCRIBE, qos = ?QOS_1},
                  variable = #mqtt_packet_unsubscribe{packet_id = PacketId,
                                                      topics    = Topics}}).

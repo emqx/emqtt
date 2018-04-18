@@ -150,14 +150,14 @@ set_socket(State, Socket) ->
 %% @end
 %%------------------------------------------------------------------------------
 connect(State = #proto_state{client_id  = ClientId,
-                             proto_ver  = ProtoVer, 
+                             proto_ver  = ProtoVer,
                              proto_name = ProtoName,
                              clean_sess = CleanSess,
                              keepalive  = KeepAlive,
                              will_flag  = WillFlag,
-                             will_msg   = #mqtt_message{qos = WillQos, 
-                                                        retain = WillRetain, 
-                                                        topic = WillTopic, 
+                             will_msg   = #mqtt_message{qos = WillQos,
+                                                        retain = WillRetain,
+                                                        topic = WillTopic,
                                                         payload = WillMsg},
                              username   = Username,
                              password   = Password}) ->
@@ -175,7 +175,7 @@ connect(State = #proto_state{client_id  = ClientId,
                                    will_msg    = WillMsg,
                                    username    = Username,
                                    password    = Password},
-    
+
     send(?CONNECT_PACKET(Connect), State).
 
 %%------------------------------------------------------------------------------
@@ -201,7 +201,7 @@ publish(Message = #mqtt_message{qos = Qos}, State = #proto_state{
         true -> Message1
     end,
     Awaiting1 = maps:put(PacketId, Message2, AwaitingAck),
-	{ok, NewState} = send(emqttc_message:to_packet(Message2), 
+	{ok, NewState} = send(emqttc_message:to_packet(Message2),
                               next_packet_id(State#proto_state{awaiting_ack = Awaiting1})),
     {ok, PacketId, NewState}.
 
@@ -220,7 +220,7 @@ pubcomp(PacketId, State) when is_integer(PacketId) ->
 subscribe(Topics, State = #proto_state{packet_id = PacketId,
                                                subscriptions = SubMap,
                                                logger = Logger}) ->
-    Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)], 
+    Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)],
     case Resubs of
         [] -> ok;
         _  -> Logger:warning("[~s] resubscribe ~p", [logtag(State), Resubs])
@@ -257,7 +257,7 @@ received('CONNACK', State = #proto_state{clean_sess = false}) ->
 received({'PUBLISH', ?PUBLISH_PACKET(?QOS_1, _Topic, PacketId, _Payload)}, State) ->
     puback(PacketId, State);
 
-received({'PUBLISH', Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload)}, 
+received({'PUBLISH', Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload)},
          State = #proto_state{awaiting_rel = AwaitingRel}) ->
     pubrec(PacketId, State),
     {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}};
@@ -269,22 +269,22 @@ received({'PUBACK', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck, 
     end,
     {ok, State#proto_state{awaiting_ack = maps:remove(PacketId, AwaitingAck)}};
 
-received({'PUBREC', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck, 
-                                                    awaiting_comp = AwaitingComp, 
+received({'PUBREC', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck,
+                                                    awaiting_comp = AwaitingComp,
                                                     logger = Logger}) ->
     case maps:is_key(PacketId, AwaitingAck) of
         true -> ok;
         false -> Logger:warning("[~s] PUBREC PacketId '~p' not found!", [logtag(State), PacketId])
     end,
     pubrel(PacketId, State),
-    {ok, State#proto_state{awaiting_ack   = maps:remove(PacketId, AwaitingAck), 
+    {ok, State#proto_state{awaiting_ack   = maps:remove(PacketId, AwaitingAck),
                            awaiting_comp  = maps:put(PacketId, true, AwaitingComp)}};
 
 received({'PUBREL', PacketId}, State = #proto_state{awaiting_rel = AwaitingRel, logger = Logger}) ->
     case maps:find(PacketId, AwaitingRel) of
-        {ok, Publish} -> 
-            {ok, Publish, State#proto_state{awaiting_rel = maps:remove(PacketId, AwaitingRel)}}; 
-        error -> 
+        {ok, Publish} ->
+            {ok, Publish, State#proto_state{awaiting_rel = maps:remove(PacketId, AwaitingRel)}};
+        error ->
             Logger:warning("[~s] PUBREL PacketId '~p' not found!", [logtag(State), PacketId]),
             {ok, State}
     end;

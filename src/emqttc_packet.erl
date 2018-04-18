@@ -40,7 +40,7 @@
 %% @doc Protocol name of version
 %% @end
 %%------------------------------------------------------------------------------
--spec protocol_name(mqtt_vsn()) -> binary(). 
+-spec protocol_name(mqtt_vsn()) -> binary().
 protocol_name(Ver) when Ver =:= ?MQTT_PROTO_V31; Ver =:= ?MQTT_PROTO_V311->
     proplists:get_value(Ver, ?PROTOCOL_NAMES).
 
@@ -76,13 +76,13 @@ dump_header(#mqtt_packet_header{type = Type,
                                 dup = Dup,
                                 qos = QoS,
                                 retain = Retain}, S) ->
-    S1 = if 
+    S1 = if
              S == undefined -> <<>>;
              true           -> [", ", S]
          end,
     io_lib:format("~s(Q~p, R~p, D~p~s)", [type_name(Type), QoS, i(Retain), i(Dup), S1]).
 
-dump_variable(undefined, _) -> 
+dump_variable(undefined, _) ->
     undefined;
 dump_variable(Variable, undefined) ->
     dump_variable(Variable);
@@ -98,13 +98,13 @@ dump_variable(#mqtt_packet_connect{
                  clean_sess    = CleanSess,
                  keep_alive    = KeepAlive,
                  client_id     = ClientId,
-                 will_topic    = WillTopic, 
-                 will_msg      = WillMsg, 
-                 username      = Username, 
+                 will_topic    = WillTopic,
+                 will_msg      = WillMsg,
+                 username      = Username,
                  password      = Password}) ->
     Format = "ClientId=~s, ProtoName=~s, ProtoVsn=~p, CleanSess=~s, KeepAlive=~p, Username=~s, Password=~s",
     Args = [ClientId, ProtoName, ProtoVer, CleanSess, KeepAlive, Username, dump_password(Password)],
-    {Format1, Args1} = if 
+    {Format1, Args1} = if
                         WillFlag -> { Format ++ ", Will(Q~p, R~p, Topic=~s, Msg=~s)",
                                       Args ++ [WillQoS, i(WillRetain), WillTopic, WillMsg] };
                         true -> {Format, Args}

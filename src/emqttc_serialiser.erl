@@ -42,7 +42,7 @@ serialise(#mqtt_packet{header = Header = #mqtt_packet_header{type = Type},
         serialise_variable(Type, Variable,
             serialise_payload(Payload))).
 
-serialise_header(#mqtt_packet_header{type   = Type, 
+serialise_header(#mqtt_packet_header{type   = Type,
                                      dup    = Dup,
                                      qos    = Qos,
                                      retain = Retain},
