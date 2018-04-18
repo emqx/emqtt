@@ -43,6 +43,7 @@
 -define(QOS_0, 0).
 -define(QOS_1, 1).
 -define(QOS_2, 2).
+-define(QOS_UNAUTHORIZED, 128).
 
 -define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
 
