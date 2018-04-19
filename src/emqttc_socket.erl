@@ -48,7 +48,6 @@
     {reuseaddr, true},
     {nodelay,   true},
     {active, 	false},
-    {reuseaddr, true},
     {send_timeout,  ?TIMEOUT}]).
 
 -define(SSLOPTIONS, [{depth, 0}]).
