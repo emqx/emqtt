@@ -63,8 +63,7 @@
         subscriptions = #{}     :: map(),
         awaiting_ack  = #{}     :: map(),
         awaiting_rel  = #{}     :: map(),
-        awaiting_comp = #{}     :: map(),
-        logger                  :: gen_logger:logmod()}).
+        awaiting_comp = #{}     :: map()}).
 
 -type proto_state() :: #proto_state{}.
 
@@ -104,8 +103,6 @@ init([{password, Password} | Opts], State) when is_binary(Password) ->
 init([{will, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
     init(Opts, State#proto_state{will_flag = true,
                                  will_msg  = init_willmsg(WillOpts, WillMsg)});
-init([{logger, Logger} | Opts], State) ->
-    init(Opts, State#proto_state{logger = Logger});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -218,22 +215,21 @@ pubcomp(PacketId, State) when is_integer(PacketId) ->
     send(?PUBACK_PACKET(?PUBCOMP, PacketId), State).
 
 subscribe(Topics, State = #proto_state{packet_id = PacketId,
-                                               subscriptions = SubMap,
-                                               logger = Logger}) ->
+                                               subscriptions = SubMap}) ->
     Resubs = [Topic || {Name, _Qos} = Topic <- Topics, maps:is_key(Name, SubMap)],
     case Resubs of
         [] -> ok;
-        _  -> Logger:warning("[~s] resubscribe ~p", [logtag(State), Resubs])
+        _  -> ?warn("[~s] resubscribe ~p", [logtag(State), Resubs])
     end,
     SubMap1 = lists:foldl(fun({Name, Qos}, Acc) -> maps:put(Name, Qos, Acc) end, SubMap, Topics),
     %% send packet
     {ok, NewState} = send(?SUBSCRIBE_PACKET(PacketId, Topics), next_packet_id(State#proto_state{subscriptions = SubMap1})),
     {ok, PacketId, NewState}.
 
-unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId, logger = Logger}) ->
+unsubscribe(Topics, State = #proto_state{subscriptions = SubMap, packet_id = PacketId}) ->
     case Topics -- maps:keys(SubMap) of
         [] -> ok;
-        BadUnsubs -> Logger:warning("[~s] should not unsubscribe ~p", [logtag(State), BadUnsubs])
+        BadUnsubs -> ?warn("[~s] should not unsubscribe ~p", [logtag(State), BadUnsubs])
     end,
     %% unsubscribe from topic tree
     SubMap1 = lists:foldl(fun(Topic, Acc) -> maps:remove(Topic, Acc) end, SubMap, Topics),
@@ -262,37 +258,36 @@ received({'PUBLISH', Packet = ?PUBLISH_PACKET(?QOS_2, _Topic, PacketId, _Payload
     pubrec(PacketId, State),
     {ok, State#proto_state{awaiting_rel = maps:put(PacketId, Packet, AwaitingRel)}};
 
-received({'PUBACK', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck, logger = Logger}) ->
+received({'PUBACK', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck}) ->
     case maps:is_key(PacketId, AwaitingAck) of
         true -> ok;
-        false -> Logger:warning("[~s] PUBACK PacketId '~p' not found!", [logtag(State), PacketId])
+        false -> ?warn("[~s] PUBACK PacketId '~p' not found!", [logtag(State), PacketId])
     end,
     {ok, State#proto_state{awaiting_ack = maps:remove(PacketId, AwaitingAck)}};
 
 received({'PUBREC', PacketId}, State = #proto_state{awaiting_ack = AwaitingAck,
-                                                    awaiting_comp = AwaitingComp,
-                                                    logger = Logger}) ->
+                                                    awaiting_comp = AwaitingComp}) ->
     case maps:is_key(PacketId, AwaitingAck) of
         true -> ok;
-        false -> Logger:warning("[~s] PUBREC PacketId '~p' not found!", [logtag(State), PacketId])
+        false -> ?warn("[~s] PUBREC PacketId '~p' not found!", [logtag(State), PacketId])
     end,
     pubrel(PacketId, State),
     {ok, State#proto_state{awaiting_ack   = maps:remove(PacketId, AwaitingAck),
                            awaiting_comp  = maps:put(PacketId, true, AwaitingComp)}};
 
-received({'PUBREL', PacketId}, State = #proto_state{awaiting_rel = AwaitingRel, logger = Logger}) ->
+received({'PUBREL', PacketId}, State = #proto_state{awaiting_rel = AwaitingRel}) ->
     case maps:find(PacketId, AwaitingRel) of
         {ok, Publish} ->
             {ok, Publish, State#proto_state{awaiting_rel = maps:remove(PacketId, AwaitingRel)}};
         error ->
-            Logger:warning("[~s] PUBREL PacketId '~p' not found!", [logtag(State), PacketId]),
+            ?warn("[~s] PUBREL PacketId '~p' not found!", [logtag(State), PacketId]),
             {ok, State}
     end;
 
-received({'PUBCOMP', PacketId}, State = #proto_state{awaiting_comp = AwaitingComp, logger = Logger}) ->
+received({'PUBCOMP', PacketId}, State = #proto_state{awaiting_comp = AwaitingComp}) ->
     case maps:is_key(PacketId, AwaitingComp) of
         true -> ok;
-        false -> Logger:warning("[~s] PUBREC PacketId '~p' not exist", [logtag(State), PacketId])
+        false -> ?warn("[~s] PUBREC PacketId '~p' not exist", [logtag(State), PacketId])
     end,
     {ok, State#proto_state{ awaiting_comp  = maps:remove(PacketId, AwaitingComp)}};
 
@@ -315,11 +310,11 @@ received({'UNSUBACK', _PacketId}, State) ->
 %%
 %% @end
 %%------------------------------------------------------------------------------
-send(Packet, State = #proto_state{socket = Socket, logger = Logger}) ->
+send(Packet, State = #proto_state{socket = Socket}) ->
     LogTag = logtag(State),
-    Logger:debug("[~s] SENT: ~s", [LogTag, emqttc_packet:dump(Packet)]),
+    ?debug("[~s] SENT: ~s", [LogTag, emqttc_packet:dump(Packet)]),
     Data = emqttc_serialiser:serialise(Packet),
-    Logger:debug("[~s] SENT: ~p", [LogTag, Data]),
+    ?debug("[~s] SENT: ~p", [LogTag, Data]),
     emqttc_socket:send(Socket, Data),
     {ok, State}.
 
@@ -331,5 +326,3 @@ next_packet_id(State = #proto_state{packet_id = Id }) ->
 
 logtag(#proto_state{socket_name = SocketName, client_id = ClientId}) ->
     io_lib:format("~s@~s", [ClientId, SocketName]).
-
-

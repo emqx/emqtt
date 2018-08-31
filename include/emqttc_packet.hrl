@@ -25,6 +25,23 @@
 %%%-----------------------------------------------------------------------------
 
 %%------------------------------------------------------------------------------
+%% Logging wrappers
+%%------------------------------------------------------------------------------
+
+%% this macro only exists in OTP21 and above where logger already exists
+-ifdef(OTP_RELEASE).
+-define(debug(Message, Opts), logger:debug(Message, Opts)).
+-define(info(Message, Opts), logger:info(Message, Opts)).
+-define(warn(Message, Opts), logger:warning(Message, Opts)).
+-define(error(Message, Opts), logger:error(Message, Opts)).
+-else.
+-define(debug(Message, Opts), error_logger:info_msg(Message, Opts)).
+-define(info(Message, Opts), error_logger:info_msg(Message, Opts)).
+-define(warn(Message, Opts), error_logger:warning_msg(Message, Opts)).
+-define(error(Message, Opts), error_logger:error_msg(Message, Opts)).
+-endif.
+
+%%------------------------------------------------------------------------------
 %% MQTT Protocol Version and Levels
 %%------------------------------------------------------------------------------
 -define(MQTT_PROTO_V31, 3).

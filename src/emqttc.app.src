@@ -5,6 +5,6 @@
   {registered, []},
   {applications, [kernel,
                   stdlib]},
-  {included_applications, [gen_logger]},
+  {included_applications, []},
   {env, []}
 ]}.
