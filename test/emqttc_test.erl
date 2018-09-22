@@ -66,6 +66,13 @@ clean_sess_test() ->
     emqttc:publish(C2, <<"Topic1">>, <<"Playload">>, [{qos, 1}]),
     emqttc:disconnect(C2).
 
+password_refresher_test() ->
+    PasswordRefresher = fun() -> <<"1234">> end,
+    {ok, C} = start_client([{client_id, <<"testClient">>}, {password_refresher, PasswordRefresher}]),
+    timer:sleep(1000),
+    pong = emqttc:ping(C),
+    emqttc:disconnect(C).
+
 start_client() ->
     emqttc:start_link([{logger, {error_logger, info}}]).
 

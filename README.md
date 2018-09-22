@@ -14,7 +14,7 @@ emqttc requires Erlang R17+.
 
 ## Usage
 
-### simple 
+### simple
 
 examples/simple_example.erl
 
@@ -63,7 +63,7 @@ init(_Args) ->
 handle_info({publish, Topic, Payload}, State) ->
     io:format("Message from ~s: ~p~n", [Topic, Payload]),
     {noreply, State};
-    
+
 %% Client connected
 handle_info({mqttc, C, connected}, State = #state{mqttc = C}) ->
     io:format("Client ~p is connected~n", [C]),
@@ -71,7 +71,7 @@ handle_info({mqttc, C, connected}, State = #state{mqttc = C}) ->
     emqttc:subscribe(C, <<"TopicB">>, 2),
     self() ! publish,
     {noreply, State};
-    
+
 %% Client disconnected
 handle_info({mqttc, C,  disconnected}, State = #state{mqttc = C}) ->
     io:format("Client ~p is disconnected~n", [C]),
@@ -111,6 +111,7 @@ Connect to MQTT Broker:
                    | {proto_ver, mqtt_vsn()}
                    | {username, binary()}
                    | {password, binary()}
+                   | {password_refresher, fun()}
                    | {will, list(tuple())}
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
@@ -125,10 +126,10 @@ Connect to MQTT Broker:
 Option | Value | Default | Description | Example
 -------|-------|---------|-------------|---------
 host   | inet:ip_address() or string() | "locahost" | Broker Address | "locahost"
-port   | inet:port_number() | 1883 | Broker Port | 
+port   | inet:port_number() | 1883 | Broker Port |
 client_id | binary() | random clientId | MQTT ClientId | <<"slimpleClientId">>
-clean_sess | boolean() | true | MQTT CleanSession | 
-keepalive | non_neg_integer() | 60 | MQTT KeepAlive(secs) 
+clean_sess | boolean() | true | MQTT CleanSession |
+keepalive | non_neg_integer() | 60 | MQTT KeepAlive(secs)
 proto_ver | mqtt_vsn()			| 4 | MQTT Protocol Version | 3,4
 username | binary()
 password | binary()
@@ -221,7 +222,7 @@ Reconnect Policy: <code>{MinInterval, MaxInterval, MaxRetries}</code>.
 
 ```erlang
 
-%% reconnect with 4(secs) min interval, 60 max interval  
+%% reconnect with 4(secs) min interval, 60 max interval
 emqttc:start_link([{reconnect, 4}]).
 
 %% reconnect with 3(secs) min interval, 120(secs) max interval and 10 max retries.
@@ -235,7 +236,7 @@ emqttc:start_link([{reconnect, {3, 120, 10}}]).
 
 ```erlang
 
-%% Resubscribe topics automatically when reconnected.  
+%% Resubscribe topics automatically when reconnected.
 emqttc:start_link([auto_resub, {reconnect, 4}]).
 
 ```
@@ -324,7 +325,7 @@ emqttc:disconnect(Client).
 emqttc:topics(Client).
 ```
 
-## Design 
+## Design
 
 ![Design](https://raw.githubusercontent.com/emqtt/emqttc/master/doc/Socket.png)
 

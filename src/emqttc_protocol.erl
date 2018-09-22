@@ -45,6 +45,7 @@
          unsubscribe/2,
          ping/1,
          disconnect/1,
+         refresh_password/2,
          received/2]).
 
 -record(proto_state, {
@@ -100,6 +101,8 @@ init([{username, Username} | Opts], State) when is_binary(Username)->
     init(Opts, State#proto_state{username = Username});
 init([{password, Password} | Opts], State) when is_binary(Password) ->
     init(Opts, State#proto_state{password = Password});
+init([{password_refresher, PasswordRefresher} | Opts], State) when is_function(PasswordRefresher) ->
+    init(Opts, State#proto_state{password = PasswordRefresher()});
 init([{will, WillOpts} | Opts], State = #proto_state{will_msg = WillMsg}) ->
     init(Opts, State#proto_state{will_flag = true,
                                  will_msg  = init_willmsg(WillOpts, WillMsg)});
@@ -118,6 +121,9 @@ init_willmsg([{retain, Retain} | Opts], WillMsg) when is_boolean(Retain) ->
     init_willmsg(Opts, WillMsg#mqtt_message{retain = Retain});
 init_willmsg([_Opt | Opts], State) ->
     init_willmsg(Opts, State).
+
+refresh_password([{password_refresher, PasswordRefresher}], State) when is_function(PasswordRefresher) ->
+    init([], State#proto_state{password = PasswordRefresher()}).
 
 random_id() ->
     random:seed(case erlang:function_exported(erlang, timestamp, 0) of
