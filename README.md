@@ -111,7 +111,7 @@ Connect to MQTT Broker:
                    | {proto_ver, mqtt_vsn()}
                    | {username, binary()}
                    | {password, binary()}
-                   | {password_refresher, fun()}
+                   | {password_refresher, fun() | undefined}
                    | {will, list(tuple())}
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}

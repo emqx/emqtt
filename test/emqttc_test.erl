@@ -73,6 +73,13 @@ password_refresher_test() ->
     pong = emqttc:ping(C),
     emqttc:disconnect(C).
 
+password_refresher_can_be_undefined_test() ->
+    PasswordRefresher = undefined,
+    {ok, C} = start_client([{client_id, <<"testClient">>}, {password_refresher, PasswordRefresher}]),
+    timer:sleep(1000),
+    pong = emqttc:ping(C),
+    emqttc:disconnect(C).
+
 start_client() ->
     emqttc:start_link([{logger, {error_logger, info}}]).
 

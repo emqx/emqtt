@@ -122,6 +122,9 @@ init_willmsg([{retain, Retain} | Opts], WillMsg) when is_boolean(Retain) ->
 init_willmsg([_Opt | Opts], State) ->
     init_willmsg(Opts, State).
 
+refresh_password([{password_refresher, undefined}], State) ->
+    init([], State);
+
 refresh_password([{password_refresher, PasswordRefresher}], State) when is_function(PasswordRefresher) ->
     init([], State#proto_state{password = PasswordRefresher()}).
 
