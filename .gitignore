@@ -16,3 +16,4 @@ doc/edoc-info
 doc/erlang.png
 .idea/
 emqttc.iml
+_build

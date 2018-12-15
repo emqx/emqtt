@@ -1,1 +1,6 @@
-[].
+{"1.1.0",
+[{<<"gen_fsm_compat">>,{pkg,<<"gen_fsm_compat">>,<<"0.3.0">>},0}]}.
+[
+{pkg_hash,[
+ {<<"gen_fsm_compat">>, <<"5903549F67D595F58A7101154CBE0FDD46955FBFBE40813F1E53C23A970FF5F4">>}]}
+].
