@@ -1,19 +1,11 @@
 .PHONY: test
 
 ERL=erl
-BEAMDIR=./deps/*/ebin ./ebin
-REBAR=./rebar
-REBAR_GEN=../../rebar
+REBAR ?= rebar3
 DIALYZER=dialyzer
 
 #update-deps 
-all: get-deps compile
-
-get-deps:
-	@$(REBAR) get-deps
-
-update-deps:
-	@$(REBAR) update-deps
+all: compile
 
 compile:
 	@$(REBAR) compile
