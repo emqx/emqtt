@@ -52,9 +52,9 @@
          ping/1,
          disconnect/1]).
 
--behaviour(gen_fsm_compat).
+-behaviour(gen_fsm).
 
-%% gen_fsm_compat callbacks
+%% gen_fsm callbacks
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
          terminate/3, code_change/4]).
 
@@ -165,7 +165,7 @@ start_link(MqttOpts) when is_list(MqttOpts) ->
 start_link(Name, MqttOpts) when is_atom(Name), is_list(MqttOpts) ->
     start_link(Name, MqttOpts, []);
 start_link(MqttOpts, TcpOpts) when is_list(MqttOpts), is_list(TcpOpts) ->
-    gen_fsm_compat:start_link(?MODULE, [undefined, self(), MqttOpts, TcpOpts], []).
+    gen_fsm:start_link(?MODULE, [undefined, self(), MqttOpts, TcpOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Start emqttc client with name, options, tcp options.
@@ -188,7 +188,7 @@ start_link(Name, MqttOpts, TcpOpts) when is_atom(Name), is_list(MqttOpts), is_li
     MqttOpts  :: [mqttc_opt()],
     TcpOpts   :: [gen_tcp:connect_option()].
 start_link(Name, Recipient, MqttOpts, TcpOpts) when is_pid(Recipient), is_atom(Name), is_list(MqttOpts), is_list(TcpOpts) ->
-    gen_fsm_compat:start_link({local, Name}, ?MODULE, [Name, Recipient, MqttOpts, TcpOpts], []).
+    gen_fsm:start_link({local, Name}, ?MODULE, [Name, Recipient, MqttOpts, TcpOpts], []).
 
 %%------------------------------------------------------------------------------
 %% @doc Lookup topics subscribed
@@ -196,7 +196,7 @@ start_link(Name, Recipient, MqttOpts, TcpOpts) when is_pid(Recipient), is_atom(N
 %%------------------------------------------------------------------------------
 -spec topics(Client :: pid()) -> [{binary(), mqtt_qos()}].
 topics(Client) ->
-    gen_fsm_compat:sync_send_all_state_event(Client, topics).
+    gen_fsm:sync_send_all_state_event(Client, topics).
 
 %%------------------------------------------------------------------------------
 %% @doc Publish message to broker with QoS0.
@@ -249,7 +249,7 @@ sync_publish(Client, Topic, Payload, PubOpts) when is_list(PubOpts) ->
     Client    :: pid() | atom(),
     Message   :: mqtt_message().
 publish(Client, Msg) when is_record(Msg, mqtt_message) ->
-    gen_fsm_compat:send_event(Client, {publish, Msg}).
+    gen_fsm:send_event(Client, {publish, Msg}).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -257,7 +257,7 @@ publish(Client, Msg) when is_record(Msg, mqtt_message) ->
 %% @end
 %%------------------------------------------------------------------------------
 sync_publish(Client, Msg) when is_record(Msg, mqtt_message) ->
-    gen_fsm_compat:sync_send_event(Client, {publish, Msg}).
+    gen_fsm:sync_send_event(Client, {publish, Msg}).
 
 %% make mqtt message
 message(Topic, Payload, QosOpt) when ?IS_QOS(QosOpt); is_atom(QosOpt) ->
@@ -330,10 +330,10 @@ sync_subscribe(Client, Topic, Qos) when is_binary(Topic), (?IS_QOS(Qos) orelse i
     end.
 
 send_subscribe(Client, TopicTable) ->
-    gen_fsm_compat:send_event(Client, {subscribe, self(), TopicTable}).
+    gen_fsm:send_event(Client, {subscribe, self(), TopicTable}).
 
 sync_send_subscribe(Client, TopicTable) ->
-    gen_fsm_compat:sync_send_event(Client, {subscribe, self(), TopicTable}, ?SYNC_SEND_TIMEOUT*1000).
+    gen_fsm:sync_send_event(Client, {subscribe, self(), TopicTable}, ?SYNC_SEND_TIMEOUT*1000).
 
 %%------------------------------------------------------------------------------
 %% @doc Unsubscribe Topics
@@ -345,7 +345,7 @@ sync_send_subscribe(Client, TopicTable) ->
 unsubscribe(Client, Topic) when is_binary(Topic) ->
     unsubscribe(Client, [Topic]);
 unsubscribe(Client, [Topic | _] = Topics) when is_binary(Topic) ->
-    gen_fsm_compat:send_event(Client, {unsubscribe, self(), Topics}).
+    gen_fsm:send_event(Client, {unsubscribe, self(), Topics}).
 
 %%------------------------------------------------------------------------------
 %% @doc Sync Send ping to broker.
@@ -353,7 +353,7 @@ unsubscribe(Client, [Topic | _] = Topics) when is_binary(Topic) ->
 %%------------------------------------------------------------------------------
 -spec ping(Client) -> pong when Client :: pid() | atom().
 ping(Client) ->
-    gen_fsm_compat:sync_send_event(Client, {self(), ping}, ?SYNC_SEND_TIMEOUT*1000).
+    gen_fsm:sync_send_event(Client, {self(), ping}, ?SYNC_SEND_TIMEOUT*1000).
 
 %%------------------------------------------------------------------------------
 %% @doc Disconnect from broker.
@@ -361,17 +361,17 @@ ping(Client) ->
 %%------------------------------------------------------------------------------
 -spec disconnect(Client) -> ok when Client :: pid() | atom().
 disconnect(Client) ->
-    gen_fsm_compat:send_event(Client, disconnect).
+    gen_fsm:send_event(Client, disconnect).
 
 %%%=============================================================================
-%%% gen_fsm_compat callbacks
+%%% gen_fsm callbacks
 %%%=============================================================================
 
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a gen_fsm_compat is started using gen_fsm_compat:start/[3,4] or
-%% gen_fsm_compat:start_link/[3,4], this function is called by the new
+%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
+%% gen_fsm:start_link/[3,4], this function is called by the new
 %% process to initialize.
 %%
 %% @end
@@ -474,7 +474,7 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     %% Cancel connack timer
     if
         TRef =:= undefined -> ok;
-        true -> gen_fsm_compat:cancel_timer(TRef)
+        true -> gen_fsm:cancel_timer(TRef)
     end,
 
     {ok, ProtoState1} = emqttc_protocol:received('CONNACK', ProtoState),
@@ -491,7 +491,7 @@ waiting_for_connack(?CONNACK_PACKET(?CONNACK_ACCEPT), State = #state{
     end,
 
     %% Send the pending pubsub
-    [gen_fsm_compat:send_event(self(), Event) || Event <- lists:reverse(Pending)],
+    [gen_fsm:send_event(self(), Event) || Event <- lists:reverse(Pending)],
 
     %% Start keepalive
     case emqttc_keepalive:start(KeepAlive) of
@@ -643,7 +643,7 @@ connected(disconnect, State=#state{receiver = Receiver, proto_state = ProtoState
     emqttc_socket:stop(Receiver),
     {stop, normal, State#state{socket = undefined, receiver = undefined}};
 
-connected(Packet = ?PACKET(_Type), State = #state{name = _Name}) ->
+connected(Packet = ?PACKET(_Type), State = #state{name = Name}) ->
     % ?debug("[Client ~s] RECV: ~s", [Name, emqttc_packet:dump(Packet)]),
     {ok, NewState} = received(Packet, State),
     next_state(connected, NewState);
@@ -730,8 +730,8 @@ disconnected(Event, _From, State = #state{name = Name}) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a gen_fsm_compat receives an event sent using
-%% gen_fsm_compat:send_all_state_event/2, this function is called to handle
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:send_all_state_event/2, this function is called to handle
 %% the event.
 %%
 %% @end
@@ -755,7 +755,7 @@ handle_event({connection_lost, Reason}, StateName, State = #state{recipient = Re
     %% cancel connack timer first, if connection lost when waiting for connack.
     case {StateName, TRef} of
         {waiting_for_connack, undefined} -> ok;
-        {waiting_for_connack, TRef} -> gen_fsm_compat:cancel_timer(TRef);
+        {waiting_for_connack, TRef} -> gen_fsm:cancel_timer(TRef);
         _ -> ok
     end,
 
@@ -774,8 +774,8 @@ handle_event(Event, StateName, State = #state{name = Name}) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a gen_fsm_compat receives an event sent using
-%% gen_fsm_compat:sync_send_all_state_event/[2,3], this function is called
+%% Whenever a gen_fsm receives an event sent using
+%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
 %% to handle the event.
 %%
 %% @end
@@ -801,7 +801,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_fsm_compat when it receives any
+%% This function is called by a gen_fsm when it receives any
 %% message other than a synchronous or asynchronous event
 %% (or a system message).
 %%
@@ -893,9 +893,9 @@ handle_info(Info, StateName, State = #state{name = Name}) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_fsm_compat when it is about to
+%% This function is called by a gen_fsm when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_fsm_compat terminates with
+%% necessary cleaning up. When it returns, the gen_fsm terminates with
 %% Reason. The return value is ignored.
 %%
 %% @end
@@ -945,7 +945,7 @@ connect(State = #state{name = Name,
             ProtoState1 = emqttc_protocol:set_socket(ProtoState, Socket),
             emqttc_protocol:connect(ProtoState1),
             KeepAlive = emqttc_keepalive:new({Socket, send_oct}, KeepAliveTime, {keepalive, timeout}),
-            TRef = gen_fsm_compat:start_timer(ConnAckTimeout*1000, connack),
+            TRef = gen_fsm:start_timer(ConnAckTimeout*1000, connack),
             ?info("[Client ~s] connected with ~s:~p", [Name, Host, Port]),
             {next_state, waiting_for_connack, State#state{socket = Socket,
                                                           receiver = Receiver,
@@ -1035,7 +1035,7 @@ received(?UNSUBACK_PACKET(PacketId), State = #state{proto_state = ProtoState}) -
     {ok, State#state{proto_state = ProtoState1}};
 
 received(?PACKET(?PINGRESP), State= #state{ping_reqs = PingReqs}) ->
-    [begin erlang:demonitor(Mon), gen_fsm_compat:reply(Caller, pong) end || {Caller, Mon} <- PingReqs],
+    [begin erlang:demonitor(Mon), gen_fsm:reply(Caller, pong) end || {Caller, Mon} <- PingReqs],
     {ok, State#state{ping_reqs = []}}.
 
 %%------------------------------------------------------------------------------
@@ -1048,7 +1048,7 @@ reply({PubSub, ReqId}, Reply, State = #state{inflight_reqs = InflightReqs}) ->
     case maps:find(ReqId, InflightReqs) of
         {ok, {PubSub, From, MRef}} ->
             erlang:cancel_timer(MRef),
-            gen_fsm_compat:reply(From, Reply),
+            gen_fsm:reply(From, Reply),
             maps:remove(ReqId, InflightReqs);
         error ->
             InflightReqs
@@ -1059,7 +1059,7 @@ reply_timeout({Ack, ReqId}, State=#state{inflight_reqs = InflightReqs}) ->
     InflightReqs1 =
     case maps:find(ReqId, InflightReqs) of
         {ok, {_Pubsub, From, _MRef}} ->
-            gen_fsm_compat:reply(From, {error, ack_timeout}),
+            gen_fsm:reply(From, {error, ack_timeout}),
             maps:remove(ReqId, InflightReqs);
        error ->
             ?error("~s timeout, cannot find inflight reqid: ~p", [Ack, ReqId]),

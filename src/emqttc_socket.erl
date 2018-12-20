@@ -201,7 +201,7 @@ receiver_loop(ClientPid, Socket, ParseState) ->
                 {ok, NewParserState} ->
                     receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
-                    gen_fsm_compat:send_all_state_event(ClientPid, {frame_error, Error})
+                    gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;
         {tcp_error, Socket, Reason} ->
             connection_lost(ClientPid, {tcp_error, Reason});
@@ -212,7 +212,7 @@ receiver_loop(ClientPid, Socket, ParseState) ->
                 {ok, NewParserState} ->
                     receiver_activate(ClientPid, Socket, NewParserState);
                 {error, Error} ->
-                    gen_fsm_compat:send_all_state_event(ClientPid, {frame_error, Error})
+                    gen_fsm:send_all_state_event(ClientPid, {frame_error, Error})
             end;
         {ssl_error, _SslSocket, Reason} ->
             connection_lost(ClientPid, {ssl_error, Reason});
@@ -230,7 +230,7 @@ parse_received_bytes(ClientPid, Data, ParseState) ->
     {more, ParseState1} ->
         {ok, ParseState1};
     {ok, Packet, Rest} ->
-        gen_fsm_compat:send_event(ClientPid, Packet),
+        gen_fsm:send_event(ClientPid, Packet),
         parse_received_bytes(ClientPid, Rest, emqttc_parser:new());
     {error, Error} ->
         {error, Error};
@@ -239,7 +239,7 @@ parse_received_bytes(ClientPid, Data, ParseState) ->
     end.
 
 connection_lost(ClientPid, Reason) ->
-    gen_fsm_compat:send_all_state_event(ClientPid, {connection_lost, Reason}).
+    gen_fsm:send_all_state_event(ClientPid, {connection_lost, Reason}).
 
 maybe_ntoab(Addr) when is_tuple(Addr) -> ntoab(Addr);
 maybe_ntoab(Host)                     -> Host.

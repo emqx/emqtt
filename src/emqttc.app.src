@@ -4,9 +4,7 @@
   {description, "Erlang MQTT Client"},
   {registered, []},
   {applications, [kernel,
-                  stdlib,
-                  gen_fsm_compat
-                 ]},
+                  stdlib]},
   {included_applications, []},
   {env, []}
 ]}.

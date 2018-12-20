@@ -3,13 +3,10 @@ language: erlang
 sudo: false
 
 otp_release:
-   - 21.2
-   - 20.3
-   - 19.3
-   - 18.3
+   - 17.0
+   - 18.0
+   - 18.2.1
 
-install:
-  - wget -c https://github.com/erlang/rebar3/releases/download/3.7.5/rebar3 && chmod +x rebar3
+script: 
+  - make
 
-script:
-  - REBAR3=./rebar3 make
