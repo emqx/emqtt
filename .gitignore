@@ -17,3 +17,4 @@ doc/erlang.png
 .idea/
 emqttc.iml
 _build
+rebar.lock
