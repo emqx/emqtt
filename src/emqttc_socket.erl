@@ -45,7 +45,6 @@
 -define(TCPOPTIONS, [
     binary,
     {packet,    raw},
-    {reuseaddr, true},
     {nodelay,   true},
     {active, 	false},
     {send_timeout,  ?TIMEOUT}]).
