@@ -78,6 +78,7 @@
                    | {proto_ver, mqtt_vsn()}
                    | {username, binary()}
                    | {password, binary()}
+                   | {password_refresher, fun() | undefined}
                    | {will, list(tuple())}
                    | {connack_timeout, pos_integer()}
                    | {puback_timeout,  pos_integer()}
@@ -108,6 +109,7 @@
                 force_ping = false  :: boolean(),
                 keepalive           :: emqttc_keepalive:keepalive() | undefined,
                 keepalive_after     :: non_neg_integer(),
+                password_refresher  :: fun() | undefined,
                 connack_timeout     :: pos_integer(),
                 puback_timeout      :: pos_integer(),
                 suback_timeout      :: pos_integer(),
@@ -429,6 +431,8 @@ init([{force_ping, Cfg} | Opts], State) when is_boolean(Cfg) ->
     init(Opts, State#state{force_ping = Cfg});
 init([force_ping | Opts], State) ->
     init(Opts, State#state{force_ping = true});
+init([{password_refresher, PasswordRefresher} | Opts], State) ->
+    init(Opts, State#state{password_refresher = PasswordRefresher});
 init([{keepalive, Time} | Opts], State) ->
     init(Opts, State#state{keepalive_after = Time});
 init([{connack_timeout, Timeout}| Opts], State) ->
@@ -818,8 +822,10 @@ handle_info({timeout, suback, MsgId}, StateName, State) ->
 handle_info({timeout, puback, MsgId}, StateName,  State) ->
     {next_state, StateName, reply_timeout({puback, MsgId}, State)};
 
-handle_info({reconnect, timeout}, disconnected, State) ->
-    connect(State);
+handle_info({reconnect, timeout}, disconnected, State =
+            #state{proto_state = ProtoState, password_refresher = PasswordRefresher}) ->
+    NewProtoState = emqttc_protocol:refresh_password([{password_refresher, PasswordRefresher}], ProtoState),
+    connect(State#state{proto_state = NewProtoState});
 
 handle_info({keepalive, timeout}, connected, State =
             #state{proto_state = ProtoState, keepalive = KeepAlive, force_ping = ForcePing}) ->
