@@ -1,37 +1,31 @@
-.PHONY: test
+REBAR := rebar3
 
-ERL=erl
-BEAMDIR=./deps/*/ebin ./ebin
-REBAR=./rebar
-REBAR_GEN=../../rebar
-DIALYZER=dialyzer
-
-#update-deps 
-all: get-deps compile
-
-get-deps:
-	@$(REBAR) get-deps
-
-update-deps:
-	@$(REBAR) update-deps
+.PHONY: all
+all: compile
 
 compile:
-	@$(REBAR) compile
+	$(REBAR) compile
 
+.PHONY: clean
+clean: distclean
+
+.PHONY: distclean
+distclean:
+	@rm -rf _build erl_crash.dump rebar3.crashdump rebar.lock
+
+.PHONY: xref
 xref:
-	@$(REBAR) xref skip_deps=true
+	$(REBAR) xref
 
-clean:
-	@$(REBAR) clean
+.PHONY: eunit
+eunit: compile
+	$(REBAR) eunit verbose=truen
 
-test:
-	@$(REBAR) skip_deps=true eunit
+.PHONY: ct
+ct: compile
+	$(REBAR) ct -v
 
-edoc:
-	@$(REBAR) doc
+.PHONY: dialyzer
+dialyzer:
+	$(REBAR) dialyzer
 
-dialyzer: compile
-	@$(DIALYZER) ebin deps/ossp_uuid/ebin
-
-setup-dialyzer:
-	@$(DIALYZER) --build_plt --apps kernel stdlib mnesia eunit erts crypto
