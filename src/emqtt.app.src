@@ -1,0 +1,15 @@
+{application, emqtt,
+ [{id, "emqtt"},
+  {description, "Erlang MQTT v5.0 Client"},
+  {vsn, "2.0.0"},
+  {registered, []},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+  {maintainers,["Feng Lee <feng@emqx.io>"]},
+  {licenses, ["Apache-2.0"]},
+  {links, [{"Github", "https://github.com/emqx/emqtt"}]}
+ ]}.
