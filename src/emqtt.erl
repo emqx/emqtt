@@ -758,7 +758,7 @@ connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
             Inflight1 = maps:put(PacketId, {publish, Msg1, os:timestamp()}, Inflight),
             State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
             Actions = [{reply, From, {ok, PacketId}}],
-            case is_inflight_full(Inflight1) of
+            case is_inflight_full(State1) of
                 true -> {next_state, inflight_full, State1, Actions};
                 false -> {keep_state, State1, Actions}
             end;
@@ -1039,11 +1039,11 @@ delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
             State
      end.
 
-delete_inflight_when_full(Packet, State0) ->
-    State = #state{inflight = Inflight} = delete_inflight(Packet, State0),
-    case is_inflight_full(Inflight) of
-        true -> {keep_state, State};
-        false -> {next_state, connected, State}
+delete_inflight_when_full(Packet, State) ->
+    State1 = delete_inflight(Packet, State),
+    case is_inflight_full(State1) of
+        true -> {keep_state, State1};
+        false -> {next_state, connected, State1}
     end.
 
 assign_id(?NO_CLIENT_ID, Props) ->
