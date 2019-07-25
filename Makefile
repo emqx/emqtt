@@ -3,11 +3,14 @@ REBAR := rebar3
 .PHONY: all
 all: compile
 
-compile:
+compile: get_deps
 	$(REBAR) compile
 
-with_ws:
+with_ws: get_deps
 	$(REBAR) compile as ws
+
+get_deps:
+	$(REBAR) get-deps
 
 .PHONY: clean
 clean: distclean
