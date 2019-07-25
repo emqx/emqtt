@@ -6,6 +6,9 @@ all: compile
 compile:
 	$(REBAR) compile
 
+with_ws:
+	$(REBAR) compile as ws
+
 .PHONY: clean
 clean: distclean
 
