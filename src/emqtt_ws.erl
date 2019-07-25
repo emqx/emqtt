@@ -21,11 +21,21 @@
         , close/1
         ]).
 
+-export([ setopts/2
+        , getstat/2
+        ]).
+
+-type(option() :: {ws_path, string()}).
+
+-export_type([option/0]).
+
 -define(WS_OPTS, #{compress => false,
                    protocols => [{<<"mqtt">>, gun_ws_h}]
                   }).
 
-connect(Host, Port, WsOpts, Timeout) ->
+-define(WS_HEADERS, [{"cache-control", "no-cache"}]).
+
+connect(Host, Port, Opts, Timeout) ->
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
     ConnOpts = #{connect_timeout => Timeout,
@@ -35,7 +45,7 @@ connect(Host, Port, WsOpts, Timeout) ->
     case gun:open(Host, Port, ConnOpts) of
         {ok, ConnPid} ->
             {ok, _} = gun:await_up(ConnPid, Timeout),
-            case upgrade(ConnPid, WsOpts, Timeout) of
+            case upgrade(ConnPid, Opts, Timeout) of
                 {ok, _Headers} -> {ok, ConnPid};
                 Error -> Error
             end;
@@ -44,10 +54,10 @@ connect(Host, Port, WsOpts, Timeout) ->
 
 -spec(upgrade(pid(), list(), timeout())
       -> {ok, Headers :: list()} | {error, Reason :: term()}).
-upgrade(ConnPid, WsOpts, Timeout) ->
+upgrade(ConnPid, Opts, Timeout) ->
     %% 2. websocket upgrade
-    Path = proplists:get_value(ws_path, WsOpts, "/mqtt"),
-    StreamRef = gun:ws_upgrade(ConnPid, Path, [], ?WS_OPTS),
+    Path = proplists:get_value(ws_path, Opts, "/mqtt"),
+    StreamRef = gun:ws_upgrade(ConnPid, Path, ?WS_HEADERS, ?WS_OPTS),
     receive
         {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], Headers} ->
             {ok, Headers};
@@ -59,6 +69,13 @@ upgrade(ConnPid, WsOpts, Timeout) ->
         {error, timeout}
     end.
 
+%% fake stats:)
+getstat(_WsPid, Options) ->
+    {ok, [{Opt, 0} || Opt <- Options]}.
+
+setopts(_WsPid, _Opts) ->
+    ok.
+
 -spec(send(pid(), iodata()) -> ok).
 send(WsPid, Data) ->
     gun:ws_send(WsPid, {binary, Data}).
@@ -66,4 +83,5 @@ send(WsPid, Data) ->
 -spec(close(pid()) -> ok).
 close(WsPid) ->
     gun:shutdown(WsPid).
+
 
