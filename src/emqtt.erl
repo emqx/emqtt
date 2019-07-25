@@ -964,6 +964,11 @@ handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
     ?LOG(debug, "RECV Data: ~p", [Data], State),
     process_incoming(iolist_to_binary(Data), [], State);
 
+handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
+             _StateName, State = #state{socket = ConnPid}) ->
+    ?LOG(debug, "WebSocket down! Reason: ~p", [Reason], State),
+    {stop, Reason, State};
+
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
     when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
     ?LOG(debug, "RECV Data: ~p", [Data], State),
@@ -983,11 +988,6 @@ handle_event(info, {Closed, _Sock}, _StateName, State)
 handle_event(info, {'EXIT', Owner, Reason}, _, State = #state{owner = Owner}) ->
     ?LOG(debug, "Got EXIT from owner, Reason: ~p", [Reason], State),
     {stop, {shutdown, Reason}, State};
-
-%%TODO: Handle exit of ws...
-handle_event(info, {'EXIT', ConnPid, Reason}, _, State = #state{socket = ConnPid}) ->
-    ?LOG(debug, "WebSocket EXIT for: ~p", [Reason], State),
-    {stop, Reason, State};
 
 handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
     keep_state_and_data;
