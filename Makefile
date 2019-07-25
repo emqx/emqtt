@@ -3,14 +3,9 @@ REBAR := rebar3
 .PHONY: all
 all: compile
 
-compile: get_deps
+.PHONY: compile
+compile:
 	$(REBAR) compile
-
-with_ws: get_deps
-	$(REBAR) compile as ws
-
-get_deps:
-	$(REBAR) get-deps
 
 .PHONY: clean
 clean: distclean
@@ -25,7 +20,7 @@ xref:
 
 .PHONY: eunit
 eunit: compile
-	$(REBAR) eunit verbose=truen
+	$(REBAR) eunit verbose=true
 
 .PHONY: ct
 ct: compile
