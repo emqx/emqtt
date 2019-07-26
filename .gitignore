@@ -20,4 +20,4 @@ _build/
 rebar3.crashdump
 *.swp
 rebar.lock
-src/emqtt.app.src
+emqtt.app.src

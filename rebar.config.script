@@ -5,27 +5,12 @@ DEPS = case lists:keyfind(deps, 1, CONFIG) of
 
 GUN = {gun, "1.3.0"},
 
-AddApp = fun (Apps, NewApp) -> Apps ++ [NewApp] end,
-
-DelApp = fun (Apps, OldApp) -> Apps -- [OldApp] end,
-
-UpdateApps = fun (OperateApps) ->
-                 FilePath = filename:join(["src", "emqtt.app.src"]),
-                 {ok, [{application, emqtt, PropLists0}]} = file:consult(FilePath),
-                 Applications0 = proplists:get_value(applications, PropLists0),
-                 Applications = OperateApps(Applications0, gun),
-                 PropLists = [{applications, Applications} | proplists:delete(applications, PropLists0)],
-                 NewAppSrc = {application, emqtt, PropLists},
-                 ok = file:write_file(FilePath, [io_lib:format("~p.\n", [NewAppSrc])])
-             end,
-
-CONFIG1 = case os:getenv("with_websocket") of
+CONFIG1 = case os:getenv("WITH_WS") of
               "true" ->
-                  UpdateApps(AddApp),
                   [{deps, [GUN]} | CONFIG];
               _ ->
-                  UpdateApps(DelApp),
                   CONFIG
           end,
 
 CONFIG1.
+
