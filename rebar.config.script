@@ -1,0 +1,16 @@
+DEPS = case lists:keyfind(deps, 1, CONFIG) of
+           {_, Deps} -> Deps;
+           _ -> []
+       end,
+
+GUN = {gun, "1.3.0"},
+
+CONFIG1 = case os:getenv("WITH_WS") of
+              "true" ->
+                  [{deps, [GUN]} | CONFIG];
+              _ ->
+                  CONFIG
+          end,
+
+CONFIG1.
+

@@ -25,6 +25,7 @@
         ]).
 
 -export([ connect/1
+        , ws_connect/1
         , disconnect/1
         , disconnect/2
         , disconnect/3
@@ -110,6 +111,7 @@
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
                 | {ssl_opts, [ssl:ssl_option()]}
+                | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
                 | {client_id, iodata()}
@@ -154,60 +156,63 @@
 -type(subscribe_ret() ::
       {ok, properties(), [reason_code()]} | {error, term()}).
 
+-type(conn_mod() :: emqtt_sock | emqtt_ws).
+
 -type(client() :: pid() | atom()).
 
 -record(mqtt_msg, {
-	  qos = ?QOS_0,
-	  retain = false,
-	  dup = false,
-	  packet_id,
-	  topic,
-	  props,
-	  payload
-	 }).
+          qos = ?QOS_0   :: qos(),
+          retain = false :: boolean(),
+          dup = false    :: boolean(),
+          packet_id      :: packet_id(),
+          topic          :: topic(),
+          props          :: properties(),
+          payload        :: binary()
+         }).
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
--record(state, {name            :: atom(),
-                owner           :: pid(),
-                msg_handler     :: ?NO_MSG_HDLR | msg_handler(),
-                host            :: host(),
-                port            :: inet:port_number(),
-                hosts           :: [{host(), inet:port_number()}],
-                socket          :: inet:socket(),
-                sock_opts       :: [emqtt_sock:option()],
-                connect_timeout :: pos_integer(),
-                bridge_mode     :: boolean(),
-                client_id       :: binary(),
-                clean_start     :: boolean(),
-                username        :: maybe(binary()),
-                password        :: maybe(binary()),
-                proto_ver       :: version(),
-                proto_name      :: iodata(),
-                keepalive       :: non_neg_integer(),
-                keepalive_timer :: maybe(reference()),
-                force_ping      :: boolean(),
-                paused          :: boolean(),
-                will_flag       :: boolean(),
-                will_msg        :: mqtt_msg(),
-                properties      :: properties(),
-                pending_calls   :: list(),
-                subscriptions   :: map(),
-                max_inflight    :: infinity | pos_integer(),
-                inflight        :: #{packet_id() => term()},
-                awaiting_rel    :: map(),
-                auto_ack        :: boolean(),
-                ack_timeout     :: pos_integer(),
-                ack_timer       :: reference(),
-                retry_interval  :: pos_integer(),
-                retry_timer     :: reference(),
-                session_present :: boolean(),
-                last_packet_id  :: packet_id(),
-                parse_state     :: emqtt_frame:parse_state()
-               }).
+-record(state, {
+          name            :: atom(),
+          owner           :: pid(),
+          msg_handler     :: ?NO_MSG_HDLR | msg_handler(),
+          host            :: host(),
+          port            :: inet:port_number(),
+          hosts           :: [{host(), inet:port_number()}],
+          conn_mod        :: conn_mod(),
+          socket          :: inet:socket() | pid(),
+          sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
+          connect_timeout :: pos_integer(),
+          bridge_mode     :: boolean(),
+          client_id       :: binary(),
+          clean_start     :: boolean(),
+          username        :: maybe(binary()),
+          password        :: maybe(binary()),
+          proto_ver       :: version(),
+          proto_name      :: iodata(),
+          keepalive       :: non_neg_integer(),
+          keepalive_timer :: maybe(reference()),
+          force_ping      :: boolean(),
+          paused          :: boolean(),
+          will_flag       :: boolean(),
+          will_msg        :: mqtt_msg(),
+          properties      :: properties(),
+          pending_calls   :: list(),
+          subscriptions   :: map(),
+          max_inflight    :: infinity | pos_integer(),
+          inflight        :: #{packet_id() => term()},
+          awaiting_rel    :: map(),
+          auto_ack        :: boolean(),
+          ack_timeout     :: pos_integer(),
+          ack_timer       :: reference(),
+          retry_interval  :: pos_integer(),
+          retry_timer     :: reference(),
+          session_present :: boolean(),
+          last_packet_id  :: packet_id(),
+          parse_state     :: emqtt_frame:parse_state()
+         }).
 
 -record(call, {id, from, req, ts}).
-
 
 %% Default timeout
 -define(DEFAULT_KEEPALIVE, 60).
@@ -259,7 +264,14 @@ with_owner(Options) ->
 
 -spec(connect(client()) -> {ok, properties()} | {error, term()}).
 connect(Client) ->
-    gen_statem:call(Client, connect, infinity).
+    call(Client, {connect, emqtt_sock}).
+
+ws_connect(Client) ->
+    call(Client, {connect, emqtt_ws}).
+
+%% @private
+call(Client, Req) ->
+    gen_statem:call(Client, Req, infinity).
 
 -spec(subscribe(client(), topic() | {topic(), qos() | qos_name() | [subopt()]} | [{topic(), qos()}])
       -> subscribe_ret()).
@@ -451,6 +463,7 @@ init([Options]) ->
     State = init(Options, #state{host            = {127,0,0,1},
                                  port            = 1883,
                                  hosts           = [],
+                                 conn_mod        = emqtt_sock,
                                  sock_opts       = [],
                                  bridge_mode     = false,
                                  client_id       = ClientId,
@@ -525,6 +538,8 @@ init([{ssl_opts, SslOpts} | Opts], State = #state{sock_opts = SockOpts}) ->
         false ->
             init(Opts, State)
     end;
+init([{ws_path, Path} | Opts], State = #state{sock_opts = SockOpts}) ->
+    init(Opts, State#state{sock_opts = [{ws_path, Path}|SockOpts]});
 init([{client_id, ClientId} | Opts], State) ->
     init(Opts, State#state{client_id = iolist_to_binary(ClientId)});
 init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
@@ -609,11 +624,11 @@ merge_opts(Defaults, Options) ->
 
 callback_mode() -> state_functions.
 
-initialized({call, From}, connect, State = #state{sock_opts       = SockOpts,
-                                                  connect_timeout = Timeout}) ->
-    case sock_connect(hosts(State), SockOpts, Timeout) of
+initialized({call, From}, {connect, ConnMod}, State = #state{sock_opts = SockOpts,
+                                                             connect_timeout = Timeout}) ->
+    case sock_connect(ConnMod, hosts(State), SockOpts, Timeout) of
         {ok, Sock} ->
-            case mqtt_connect(run_sock(State#state{socket = Sock})) of
+            case mqtt_connect(run_sock(State#state{conn_mod = ConnMod, socket = Sock})) of
                 {ok, NewState} ->
                     {next_state, waiting_for_connack,
                      add_call(new_call(connect, From), NewState), [Timeout]};
@@ -898,8 +913,9 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) 
     end;
 
 connected(info, {timeout, TRef, keepalive},
-          State = #state{socket = Sock, paused = Paused, keepalive_timer = TRef}) ->
-    case (not Paused) andalso should_ping(Sock) of
+          State = #state{conn_mod = ConnMod, socket = Sock,
+                         paused = Paused, keepalive_timer = TRef}) ->
+    case (not Paused) andalso should_ping(ConnMod, Sock) of
         true ->
             case send(?PACKET(?PINGREQ), State) of
                 {ok, NewState} ->
@@ -942,6 +958,17 @@ inflight_full(EventType, EventContent, Data) ->
 
 handle_event({call, From}, stop, _StateName, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
+
+handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
+             _StateName, State = #state{socket = ConnPid}) ->
+    ?LOG(debug, "RECV Data: ~p", [Data], State),
+    process_incoming(iolist_to_binary(Data), [], State);
+
+handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
+             _StateName, State = #state{socket = ConnPid}) ->
+    ?LOG(debug, "WebSocket down! Reason: ~p", [Reason], State),
+    {stop, Reason, State};
+
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
     when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
     ?LOG(debug, "RECV Data: ~p", [Data], State),
@@ -980,7 +1007,7 @@ handle_event(EventType, EventContent, StateName, State) ->
     keep_state_and_data.
 
 %% Mandatory callback functions
-terminate(Reason, _StateName, State = #state{socket = Socket}) ->
+terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket}) ->
     case Reason of
         {disconnected, ReasonCode, Properties} ->
             %% backward compatible
@@ -990,7 +1017,7 @@ terminate(Reason, _StateName, State = #state{socket = Socket}) ->
     end,
     case Socket =:= undefined of
         true -> ok;
-        _ -> emqtt_sock:close(Socket)
+        _ -> ConnMod:close(Socket)
     end.
 
 code_change(_Vsn, State, Data, _Extra) ->
@@ -1000,8 +1027,8 @@ code_change(_Vsn, State, Data, _Extra) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
-should_ping(Sock) ->
-    case emqtt_sock:getstat(Sock, [send_oct]) of
+should_ping(ConnMod, Sock) ->
+    case ConnMod:getstat(Sock, [send_oct]) of
         {ok, [{send_oct, Val}]} ->
             OldVal = get(send_oct), put(send_oct, Val),
             OldVal == undefined orelse OldVal == Val;
@@ -1211,16 +1238,17 @@ msg_to_packet(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = Packe
 %%--------------------------------------------------------------------
 %% Socket Connect/Send
 
-sock_connect(Hosts, SockOpts, Timeout) ->
-    sock_connect(Hosts, SockOpts, Timeout, {error, no_hosts}).
+sock_connect(ConnMod, Hosts, SockOpts, Timeout) ->
+    sock_connect(ConnMod, Hosts, SockOpts, Timeout, {error, no_hosts}).
 
-sock_connect([], _SockOpts, _Timeout, LastErr) ->
+sock_connect(_ConnMod, [], _SockOpts, _Timeout, LastErr) ->
     LastErr;
-sock_connect([{Host, Port} | Hosts], SockOpts, Timeout, _LastErr) ->
-    case emqtt_sock:connect(Host, Port, SockOpts, Timeout) of
-        {ok, Socket} -> {ok, Socket};
-        Err = {error, _Reason} ->
-            sock_connect(Hosts, SockOpts, Timeout, Err)
+sock_connect(ConnMod, [{Host, Port} | Hosts], SockOpts, Timeout, _LastErr) ->
+    case ConnMod:connect(Host, Port, SockOpts, Timeout) of
+        {ok, SockOrPid} ->
+            {ok, SockOrPid};
+        Error = {error, _Reason} ->
+            sock_connect(ConnMod, Hosts, SockOpts, Timeout, Error)
     end.
 
 hosts(#state{hosts = [], host = Host, port = Port}) ->
@@ -1236,17 +1264,17 @@ send_puback(Packet, State) ->
 send(Msg, State) when is_record(Msg, mqtt_msg) ->
     send(msg_to_packet(Msg), State);
 
-send(Packet, State = #state{socket = Sock, proto_ver = Ver})
+send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
     ?LOG(debug, "SEND Data: ~1000p", [Packet], State),
-    case emqtt_sock:send(Sock, Data) of
+    case ConnMod:send(Sock, Data) of
         ok  -> {ok, bump_last_packet_id(State)};
         Error -> Error
     end.
 
-run_sock(State = #state{socket = Sock}) ->
-    emqtt_sock:setopts(Sock, [{active, once}]), State.
+run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
+    ConnMod:setopts(Sock, [{active, once}]), State.
 
 %%--------------------------------------------------------------------
 %% Process incomming
