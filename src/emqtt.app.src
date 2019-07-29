@@ -6,6 +6,5 @@
               {registered,[]},
               {env,[]},
               {modules,[]},
-              {maintainers,["Feng Lee <feng@emqx.io>"]},
               {licenses,["Apache-2.0"]},
               {links,[{"Github","https://github.com/emqx/emqtt"}]}]}.
