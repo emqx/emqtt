@@ -2,7 +2,7 @@
              [{applications,[kernel,stdlib]},
               {id,"emqtt"},
               {description,"Erlang MQTT v5.0 Client"},
-              {vsn,"2.0.0"},
+              {vsn,"git"},
               {registered,[]},
               {env,[]},
               {modules,[]},
