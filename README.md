@@ -6,7 +6,12 @@ Erlang MQTT v5.0 Client.
 Build
 -----
 
-    $ rebar3 compile
+    $ make
+
+Build with websocket dependencies
+---------------------------------
+
+     $ WITH_WS=true make
 
 ## License
 
