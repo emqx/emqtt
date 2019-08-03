@@ -24,7 +24,7 @@ eunit: compile
 	$(REBAR) eunit verbose=true
 
 ct: compile
-	$(REBAR) ct -v
+	$(REBAR) as test ct -v
 
 dialyzer:
 	$(REBAR) dialyzer

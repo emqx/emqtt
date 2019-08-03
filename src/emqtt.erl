@@ -160,16 +160,6 @@
 
 -type(client() :: pid() | atom()).
 
--record(mqtt_msg, {
-          qos = ?QOS_0   :: qos(),
-          retain = false :: boolean(),
-          dup = false    :: boolean(),
-          packet_id      :: packet_id(),
-          topic          :: topic(),
-          props          :: properties(),
-          payload        :: binary()
-         }).
-
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
 -record(state, {
