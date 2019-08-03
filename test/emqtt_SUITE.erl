@@ -40,9 +40,7 @@ groups() ->
        will_message_test,
        offline_message_queueing_test,
        overlapping_subscriptions_test,
-       %% keepalive_test,
        redelivery_on_reconnect_test,
-       %% subscribe_failure_test,
        dollar_topics_test]}].
 
 init_per_suite(Config) ->
@@ -145,22 +143,6 @@ overlapping_subscriptions_test(_) ->
     end,
     emqtt:disconnect(C).
 
-%% keepalive_test(_) ->
-%%     ct:print("Keepalive test starting"),
-%%     {ok, C1, _} = emqtt:start_link([{clean_start, true},
-%%                                           {keepalive, 5},
-%%                                           {will_flag, true},
-%%                                           {will_topic, nth(5, ?TOPICS)},
-%%                                           %% {will_qos, 2},
-%%                                           {will_payload, <<"keepalive expiry">>}]),
-%%     ok = emqtt:pause(C1),
-%%     {ok, C2, _} = emqtt:start_link([{clean_start, true},
-%%                                           {keepalive, 0}]),
-%%     {ok, _, [2]} = emqtt:subscribe(C2, nth(5, ?TOPICS), 2),
-%%     ok = emqtt:disconnect(C2),
-%%     ?assertEqual(1, length(receive_messages(1))),
-%%     ct:print("Keepalive test succeeded").
-
 redelivery_on_reconnect_test(_) ->
     ct:print("Redelivery on reconnect test starting"),
     {ok, C1} = emqtt:start_link([{clean_start, false},
@@ -184,13 +166,6 @@ redelivery_on_reconnect_test(_) ->
     timer:sleep(10),
     ok = emqtt:disconnect(C2),
     ?assertEqual(2, length(receive_messages(2))).
-
-%% subscribe_failure_test(_) ->
-%%     ct:print("Subscribe failure test starting"),
-%%     {ok, C, _} = emqtt:start_link([]),
-%%     {ok, _, [2]} = emqtt:subscribe(C, <<"$SYS/#">>, 2),
-%%     timer:sleep(10),
-%%     ct:print("Subscribe failure test succeeded").
 
 dollar_topics_test(_) ->
     ct:print("$ topics test starting"),
