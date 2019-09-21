@@ -109,7 +109,7 @@ serialize_parse_connect(_) ->
     Packet1 = ?CONNECT_PACKET(#mqtt_packet_connect{}),
     ?assertEqual(Packet1, parse_serialize(Packet1)),
     Packet2 = ?CONNECT_PACKET(#mqtt_packet_connect{
-                                 client_id    = <<"clientId">>,
+                                 clientid     = <<"clientId">>,
                                  will_qos     = ?QOS_1,
                                  will_flag    = true,
                                  will_retain  = true,
@@ -126,7 +126,7 @@ serialize_parse_v3_connect(_) ->
     Packet = ?CONNECT_PACKET(
                 #mqtt_packet_connect{proto_ver   = ?MQTT_PROTO_V3,
                                      proto_name  = <<"MQIsdp">>,
-                                     client_id   = <<"mosqpub/10451-iMac.loca">>,
+                                     clientid    = <<"mosqpub/10451-iMac.loca">>,
                                      clean_start = true,
                                      keepalive   = 60
                                     }),
@@ -137,7 +137,7 @@ serialize_parse_v4_connect(_) ->
             98,47,49,48,52,53,49,45,105,77,97,99,46,108,111,99,97>>,
     Packet = ?CONNECT_PACKET(#mqtt_packet_connect{proto_ver   = 4,
                                                   proto_name  = <<"MQTT">>,
-                                                  client_id   = <<"mosqpub/10451-iMac.loca">>,
+                                                  clientid    = <<"mosqpub/10451-iMac.loca">>,
                                                   clean_start = true,
                                                   keepalive   = 60}),
     ?assertEqual(Bin, serialize_to_binary(Packet)),
@@ -169,7 +169,7 @@ serialize_parse_v5_connect(_) ->
                                      proto_ver    = ?MQTT_PROTO_V5,
                                      is_bridge    = false,
                                      clean_start  = true,
-                                     client_id    = <<>>,
+                                     clientid     = <<>>,
                                      will_flag    = true,
                                      will_qos     = ?QOS_1,
                                      will_retain  = false,
@@ -188,7 +188,7 @@ serialize_parse_connect_without_clientid(_) ->
     Packet = ?CONNECT_PACKET(
                 #mqtt_packet_connect{proto_ver   = 4,
                                      proto_name  = <<"MQTT">>,
-                                     client_id   = <<>>,
+                                     clientid    = <<>>,
                                      clean_start = true,
                                      keepalive   = 60
                                     }),
@@ -203,7 +203,7 @@ serialize_parse_connect_with_will(_) ->
     Packet = #mqtt_packet{header   = #mqtt_packet_header{type = ?CONNECT},
                           variable = #mqtt_packet_connect{proto_ver    = ?MQTT_PROTO_V3,
                                                           proto_name   = <<"MQIsdp">>,
-                                                          client_id    = <<"mosqpub/10452-iMac.loca">>,
+                                                          clientid     = <<"mosqpub/10452-iMac.loca">>,
                                                           clean_start  = true,
                                                           keepalive    = 60,
                                                           will_retain  = false,
@@ -224,7 +224,7 @@ serialize_parse_bridge_connect(_) ->
             67,58,50,57,58,50,66,58,55,55,58,53,50,47,115,116,97,116,101,0,1,48>>,
     Topic = <<"$SYS/broker/connection/C_00:0C:29:2B:77:52/state">>,
     Packet = #mqtt_packet{header   = #mqtt_packet_header{type = ?CONNECT},
-                          variable = #mqtt_packet_connect{client_id    = <<"C_00:0C:29:2B:77:52">>,
+                          variable = #mqtt_packet_connect{clientid     = <<"C_00:0C:29:2B:77:52">>,
                                                           proto_ver    = 16#03,
                                                           proto_name   = <<"MQIsdp">>,
                                                           is_bridge    = true,
