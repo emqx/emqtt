@@ -1,10 +1,12 @@
 {application,emqtt,
              [{applications,[kernel,stdlib]},
-              {id,"emqtt"},
               {description,"Erlang MQTT v5.0 Client"},
+              {id,"emqtt"},
               {vsn,"git"},
+              {modules,[]},
               {registered,[]},
               {env,[]},
-              {modules,[]},
               {licenses,["Apache-2.0"]},
-              {links,[{"Github","https://github.com/emqx/emqtt"}]}]}.
+              {maintainers,["EMQ X Team <contact@emqx.io>"]},
+              {links,[{"Homepage","https://emqx.io/"},
+                      {"Github","https://github.com/emqx/emqtt"}]}]}.

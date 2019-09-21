@@ -114,7 +114,7 @@
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
-                | {client_id, iodata()}
+                | {clientid, iodata()}
                 | {clean_start, boolean()}
                 | {username, iodata()}
                 | {password, iodata()}
@@ -174,7 +174,7 @@
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
-          client_id       :: binary(),
+          clientid        :: binary(),
           clean_start     :: boolean(),
           username        :: maybe(binary()),
           password        :: maybe(binary()),
@@ -223,7 +223,7 @@
 
 -define(LOG(Level, Format, Args, State),
         begin
-          (logger:log(Level, #{}, #{report_cb => fun(_) -> {"emqtt(~s): "++(Format), ([State#state.client_id|Args])} end}))
+          (logger:log(Level, #{}, #{report_cb => fun(_) -> {"emqtt(~s): "++(Format), ([State#state.clientid|Args])} end}))
         end).
 
 %%--------------------------------------------------------------------
@@ -445,7 +445,7 @@ resume(Client) ->
 init([Options]) ->
     process_flag(trap_exit, true),
     ClientId = case {proplists:get_value(proto_ver, Options, v4),
-                     proplists:get_value(client_id, Options)} of
+                     proplists:get_value(clientid, Options)} of
                    {v5, undefined}   -> ?NO_CLIENT_ID;
                    {_ver, undefined} -> random_client_id();
                    {_ver, Id}        -> iolist_to_binary(Id)
@@ -456,7 +456,7 @@ init([Options]) ->
                                  conn_mod        = emqtt_sock,
                                  sock_opts       = [],
                                  bridge_mode     = false,
-                                 client_id       = ClientId,
+                                 clientid        = ClientId,
                                  clean_start     = true,
                                  proto_ver       = ?MQTT_PROTO_V4,
                                  proto_name      = <<"MQTT">>,
@@ -530,8 +530,8 @@ init([{ssl_opts, SslOpts} | Opts], State = #state{sock_opts = SockOpts}) ->
     end;
 init([{ws_path, Path} | Opts], State = #state{sock_opts = SockOpts}) ->
     init(Opts, State#state{sock_opts = [{ws_path, Path}|SockOpts]});
-init([{client_id, ClientId} | Opts], State) ->
-    init(Opts, State#state{client_id = iolist_to_binary(ClientId)});
+init([{clientid, ClientId} | Opts], State) ->
+    init(Opts, State#state{clientid = iolist_to_binary(ClientId)});
 init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
     init(Opts, State#state{clean_start = CleanStart});
 init([{username, Username} | Opts], State) ->
@@ -632,7 +632,7 @@ initialized({call, From}, {connect, ConnMod}, State = #state{sock_opts = SockOpt
 initialized(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, initialized, State).
 
-mqtt_connect(State = #state{client_id   = ClientId,
+mqtt_connect(State = #state{clientid    = ClientId,
                             clean_start = CleanStart,
                             bridge_mode = IsBridge,
                             username    = Username,
@@ -655,7 +655,7 @@ mqtt_connect(State = #state{client_id   = ClientId,
                                  will_retain  = WillRetain,
                                  keepalive    = KeepAlive,
                                  properties   = ConnProps,
-                                 client_id    = ClientId,
+                                 clientid     = ClientId,
                                  will_props   = WillProps,
                                  will_topic   = WillTopic,
                                  will_payload = WillPayload,
@@ -666,7 +666,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
                                           Properties),
                     State = #state{properties = AllProps,
-                                   client_id = ClientId}) ->
+                                   clientid   = ClientId}) ->
     case take_call(connect, State) of
         {value, #call{from = From}, State1} ->
             AllProps1 = case Properties of
@@ -674,7 +674,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
                             _ -> maps:merge(AllProps, Properties)
                         end,
             Reply = {ok, Properties},
-            State2 = State1#state{client_id = assign_id(ClientId, AllProps1),
+            State2 = State1#state{clientid = assign_id(ClientId, AllProps1),
                                   properties = AllProps1,
                                   session_present = SessPresent},
             {next_state, connected, ensure_keepalive_timer(State2),
@@ -729,7 +729,7 @@ connected({call, From}, pause, State) ->
 connected({call, From}, resume, State) ->
     {keep_state, State#state{paused = false}, [{reply, From, ok}]};
 
-connected({call, From}, client_id, #state{client_id = ClientId}) ->
+connected({call, From}, clientid, #state{clientid = ClientId}) ->
     {keep_state_and_data, [{reply, From, ClientId}]};
 
 connected({call, From}, SubReq = {subscribe, Properties, Topics},

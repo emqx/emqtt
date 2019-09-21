@@ -97,14 +97,12 @@ will_message_test(_Config) ->
     ct:print("Will message test succeeded").
 
 offline_message_queueing_test(_) ->
-    {ok, C1} = emqtt:start_link([{clean_start, false},
-                                       {client_id, <<"c1">>}]),
+    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}]),
     {ok, _} = emqtt:connect(C1),
 
     {ok, _, [2]} = emqtt:subscribe(C1, nth(6, ?WILD_TOPICS), 2),
     ok = emqtt:disconnect(C1),
-    {ok, C2} = emqtt:start_link([{clean_start, true},
-                                       {client_id, <<"c2">>}]),
+    {ok, C2} = emqtt:start_link([{clean_start, true}, {clientid, <<"c2">>}]),
     {ok, _} = emqtt:connect(C2),
 
     ok = emqtt:publish(C2, nth(2, ?TOPICS), <<"qos 0">>, 0),
@@ -112,8 +110,7 @@ offline_message_queueing_test(_) ->
     {ok, _} = emqtt:publish(C2, nth(4, ?TOPICS), <<"qos 2">>, 2),
     timer:sleep(10),
     emqtt:disconnect(C2),
-    {ok, C3} = emqtt:start_link([{clean_start, false},
-                                          {client_id, <<"c1">>}]),
+    {ok, C3} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}]),
     {ok, _} = emqtt:connect(C3),
 
     timer:sleep(10),
@@ -145,8 +142,7 @@ overlapping_subscriptions_test(_) ->
 
 redelivery_on_reconnect_test(_) ->
     ct:print("Redelivery on reconnect test starting"),
-    {ok, C1} = emqtt:start_link([{clean_start, false},
-                                       {client_id, <<"c">>}]),
+    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}]),
     {ok, _} = emqtt:connect(C1),
 
     {ok, _, [2]} = emqtt:subscribe(C1, nth(7, ?WILD_TOPICS), 2),
@@ -159,8 +155,7 @@ redelivery_on_reconnect_test(_) ->
     timer:sleep(10),
     ok = emqtt:disconnect(C1),
     ?assertEqual(0, length(receive_messages(2))),
-    {ok, C2} = emqtt:start_link([{clean_start, false},
-                                          {client_id, <<"c">>}]),
+    {ok, C2} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}]),
     {ok, _} = emqtt:connect(C2),
 
     timer:sleep(10),

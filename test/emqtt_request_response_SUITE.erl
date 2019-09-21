@@ -41,8 +41,8 @@ request_response_per_qos(QoS) ->
     RspTopic = <<"response_topic">>,
     {ok, Requester} = emqtt_request_sender:start_link(RspTopic, QoS,
                                                      [{proto_ver, v5},
-                                                      {client_id, <<"requester">>},
-                                                      {properties, #{ 'Request-Response-Information' => 1}}]),
+                                                      {clientid, <<"requester">>},
+                                                      {properties, #{'Request-Response-Information' => 1}}]),
     %% This is a square service
     Square = fun(_CorrData, ReqBin) ->
                      I = b2i(ReqBin),
@@ -50,7 +50,7 @@ request_response_per_qos(QoS) ->
               end,
     {ok, Responser} = emqtt_request_handler:start_link(ReqTopic, QoS, Square,
                                                       [{proto_ver, v5},
-                                                       {client_id, <<"responser">>}
+                                                       {clientid, <<"responser">>}
                                                       ]),
     ok = emqtt_request_sender:send(Requester, ReqTopic, RspTopic, <<"corr-1">>, <<"2">>, QoS),
     receive

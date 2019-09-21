@@ -26,6 +26,9 @@ eunit: compile
 ct: compile
 	$(REBAR) as test ct -v
 
+cover:
+	$(REBAR) cover
+
 dialyzer:
 	$(REBAR) dialyzer
 

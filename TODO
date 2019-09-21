@@ -1,7 +1,7 @@
-1. test
+1. Tests
 2. README
-3. docs
-4. Improve ws support
+3. Docs
+4. Improve ws support:
     #{ connect_timeout => Timeout,
     %% http_opts => http_opts(),
     %% http2_opts => http2_opts(),
