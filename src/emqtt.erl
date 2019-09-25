@@ -1276,7 +1276,7 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState}) ->
     try emqtt_frame:parse(Bytes, ParseState) of
         {ok, Packet, Rest, NParseState} ->
             process_incoming(Rest, [Packet|Packets], State#state{parse_state = NParseState});
-        {ok, NParseState} ->
+        {more, NParseState} ->
             {keep_state, State#state{parse_state = NParseState}, next_events(Packets)};
         {error, Reason} ->
             {stop, Reason}
@@ -1285,8 +1285,8 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState}) ->
             {stop, Error}
     end.
 
-next_events([]) ->
-    [];
+-compile({inline, [next_events/1]}).
+next_events([]) -> [];
 next_events([Packet]) ->
     {next_event, cast, Packet};
 next_events(Packets) ->
