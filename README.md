@@ -26,7 +26,7 @@ Here is the simple usage of `emqtt` library.
 
 ``` erlang
 ClientId = <<"test">>.
-{ok, ConnPid} = emqtt:start_link([{client_id, ClientId}]).
+{ok, ConnPid} = emqtt:start_link([{clientid, ClientId}]).
 {ok, _Props} = emqtt:connect(ConnPid).
 Topic = <<"guide/#">>.
 QoS = 1.
@@ -49,7 +49,7 @@ Receive().
 ok = emqtt:disconnect(ConnPid).
 ```
 
-Not only the `client_id` can be passed as parameter, but also a lot of other options
+Not only the `clientid` can be passed as parameter, but also a lot of other options
  can be passed as parameters.
  
 Here is the options which could be passed into emqtt:start_link/1.
@@ -67,7 +67,7 @@ Here is the options which could be passed into emqtt:start_link/1.
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
-                | {client_id, iodata()}
+                | {clientid, iodata()}
                 | {clean_start, boolean()}
                 | {username, iodata()}
                 | {password, iodata()}
