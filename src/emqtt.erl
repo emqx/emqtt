@@ -1277,12 +1277,9 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState}) ->
         {ok, Packet, Rest, NParseState} ->
             process_incoming(Rest, [Packet|Packets], State#state{parse_state = NParseState});
         {more, NParseState} ->
-            {keep_state, State#state{parse_state = NParseState}, next_events(Packets)};
-        {error, Reason} ->
-            {stop, Reason}
+            {keep_state, State#state{parse_state = NParseState}, next_events(Packets)}
     catch
-        error:Error ->
-            {stop, Error}
+        error:Error -> {stop, Error}
     end.
 
 -compile({inline, [next_events/1]}).
