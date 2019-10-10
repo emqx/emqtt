@@ -1,5 +1,5 @@
 {application,emqtt,
-             [{applications,[kernel,stdlib]},
+             [{applications,[kernel,stdlib, getopt]},
               {description,"Erlang MQTT v5.0 Client"},
               {id,"emqtt"},
               {vsn,"git"},
