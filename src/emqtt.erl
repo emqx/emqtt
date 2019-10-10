@@ -66,13 +66,15 @@
 
 %% For test cases
 -export([ pause/1
-	, resume/1
-	]).
+        , resume/1
+        ]).
 
 -export([ initialized/3
         , waiting_for_connack/3
         , connected/3
         , inflight_full/3
+        , random_client_id/0
+        , reason_code_name/1
         ]).
 
 -export([ init/1
@@ -81,6 +83,7 @@
         , terminate/3
         , code_change/4
         ]).
+
 
 -export_type([ host/0
              , option/0
@@ -139,8 +142,8 @@
 -type(reason_code() :: 0..16#FF).
 -type(properties() :: #{atom() => term()}).
 -type(version() :: ?MQTT_PROTO_V3
-      		 | ?MQTT_PROTO_V4
-		 | ?MQTT_PROTO_V5).
+                 | ?MQTT_PROTO_V4
+                 | ?MQTT_PROTO_V5).
 -type(qos() :: ?QOS_0 | ?QOS_1 | ?QOS_2).
 -type(qos_name() :: qos0 | at_most_once |
                     qos1 | at_least_once |
@@ -323,7 +326,9 @@ parse_subopt([{nl, true} | Opts], Result) ->
 parse_subopt([{nl, false} | Opts], Result) ->
     parse_subopt(Opts, Result#{nl := 0});
 parse_subopt([{qos, QoS} | Opts], Result) ->
-    parse_subopt(Opts, Result#{qos := ?QOS_I(QoS)}).
+    parse_subopt(Opts, Result#{qos := ?QOS_I(QoS)});
+parse_subopt([_ | Opts], Result) ->
+    parse_subopt(Opts, Result).
 
 -spec(publish(client(), topic(), payload()) -> ok | {error, term()}).
 publish(Client, Topic, Payload) when is_binary(Topic) ->
@@ -1118,8 +1123,9 @@ timeout_calls(Timeout, Calls) ->
 timeout_calls(Now, Timeout, Calls) ->
     lists:foldl(fun(C = #call{from = From, ts = Ts}, Acc) ->
                     case (timer:now_diff(Now, Ts) div 1000) >= Timeout of
-                        true  -> From ! {error, ack_timeout},
-                                 Acc;
+                        true  ->
+                            gen_statem:reply(From, {error, ack_timeout}),
+                            Acc;
                         false -> [C | Acc]
                     end
                 end, [], Calls).

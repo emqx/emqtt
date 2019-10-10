@@ -15,7 +15,7 @@ unlock:
 clean: distclean
 
 distclean:
-	@rm -rf _build erl_crash.dump rebar3.crashdump rebar.lock
+	@rm -rf _build erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
 
 xref:
 	$(REBAR) xref
