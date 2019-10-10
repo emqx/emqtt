@@ -7,13 +7,16 @@
 
 -import(proplists, [get_value/2]).
 
--define(CONN_OPTS,
+-define(HELP_OPT, 
+        [{help, undefined, "help", boolean,
+          "help information"}
+        ]).
+
+-define(CONN_SHORT_OPTS,
         [{host, $h, "host", {string, "localhost"},
           "mqtt server hostname or IP address"},
          {port, $p, "port", {integer, 1883},
           "mqtt server port number"},
-         {ifaddr, undefined, "ifaddr", string,
-          "local ipaddress or interface address"},
          {protocol_version, $V, "protocol-version", {integer, 5},
           "mqtt protocol version: 3 | 4 | 5"},
          {username, $u, "username", string,
@@ -22,6 +25,13 @@
           "password for connecting to server"},
          {clientid, $C, "clientid", string,
           "client identifier"},
+         {keepalive, $k, "keepalive", {integer, 300},
+          "keep alive in seconds"}
+        ]).
+
+-define(CONN_LONG_OPTS,
+        [{ifaddr, undefined, "ifaddr", string,
+          "local ipaddress or interface address"},
          {will_topic, undefined, "will-topic", string,
           "topic in will message"},
          {will_payload, undefined, "will-payload", string,
@@ -30,8 +40,6 @@
           "qos in will message"},
          {will_retain, undefined, "will-retain", {boolean, false},
           "retain in will message"},
-         {keepalive, $k, "keepalive", {integer, 300},
-          "keep alive in seconds"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
           "enable websocket transport or not"},
          {enable_ssl, undefined, "enable-ssl", {boolean, false},
@@ -44,31 +52,29 @@
           "path to the file containing the user's private pem-encoded key"}
         ]).
 
--define(PUB_OPTS,
-        [{help, undefined, "help", boolean,
-          "help information"},
-         {qos, $q, "qos", {integer, 0},
+-define(PUB_OPTS, ?CONN_SHORT_OPTS ++
+        [{qos, $q, "qos", {integer, 0},
           "qos level of assurance for delivery of an application message"},
          {retain, $r, "retain", {boolean, false},
           "retain message or not"},
          {topic, $t, "topic", string,
-          "mqtt topic to subscribe to"},
-         {payload, undefined, "payload", string,
+          "mqtt topic to subscribe to"}
+        ] ++ ?HELP_OPT ++ ?CONN_LONG_OPTS ++
+        [{payload, undefined, "payload", string,
           "application message that is being published."}
-        ] ++ ?CONN_OPTS).
+        ]).
 
--define(SUB_OPTS,
-        [{help, undefined, "help", boolean,
-          "help information"},
-         {topic, $t, "topic", string,
+-define(SUB_OPTS, ?CONN_SHORT_OPTS ++
+        [{topic, $t, "topic", string,
           "mqtt topic on which to publish the message"},
          {qos, $q, "qos", {integer, 0},
-          "maximum qos level at which the server can send application messages to the client"},
-         {retain_as_publish, undefined, "retain-as-publish", {boolean, false},
+          "maximum qos level at which the server can send application messages to the client"}
+        ] ++ ?HELP_OPT ++ ?CONN_LONG_OPTS ++
+        [{retain_as_publish, undefined, "retain-as-publish", {boolean, false},
           "retain as publih option in subscription options"},
          {retain_handling, undefined, "retain-handling", {integer, 0},
           "retain handling option in subscription options"}
-        ] ++ ?CONN_OPTS).
+        ]).
 
 main(["sub" | Argv]) ->
     {ok, {Opts, _Args}} = getopt:parse(?SUB_OPTS, Argv),

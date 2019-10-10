@@ -21,3 +21,4 @@ rebar3.crashdump
 *.swp
 rebar.lock
 emqtt.app.src
+emqtt_cli
