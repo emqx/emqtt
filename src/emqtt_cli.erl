@@ -7,7 +7,7 @@
 
 -import(proplists, [get_value/2]).
 
--define(HELP_OPT, 
+-define(HELP_OPT,
         [{help, undefined, "help", boolean,
           "help information"}
         ]).
@@ -96,7 +96,7 @@ main(_Argv) ->
 main(PubSub, Opts) ->
     application:ensure_all_started(emqtt),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
-    {ok, Client} = emqtt:start_link(NOpts),  
+    {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case proplists:get_bool(enable_websocket, NOpts) of
                   true  -> emqtt:ws_connect(Client);
                   false -> emqtt:connect(Client)
@@ -125,7 +125,7 @@ publish(Client, Opts) ->
         {error, _PacketId, Reason} ->
             io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
         _ ->
-            io:format("Client ~s sent PUBLISH (Q~p, R~p, D0, Topic=~s, Payload=...(~p bytes))~n", 
+            io:format("Client ~s sent PUBLISH (Q~p, R~p, D0, Topic=~s, Payload=...(~p bytes))~n",
                       [get_value(clientid, Opts),
                        get_value(qos, Opts),
                        i(get_value(retain, Opts)),
