@@ -1,4 +1,5 @@
-%% Copyright (c) 2013-2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%%--------------------------------------------------------------------
+%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -11,6 +12,7 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%--------------------------------------------------------------------
 
 -module(emqtt_SUITE).
 
@@ -64,6 +66,88 @@ receive_messages(Count, Msgs) ->
     after 100 ->
         Msgs
     end.
+
+t_connect(_) ->
+    error('TODO').
+
+t_ws_connect(_) ->
+    error('TODO').
+
+t_subscribe(_) ->
+    error('TODO').
+
+t_publish(_) ->
+    error('TODO').
+
+t_unsubscribe(_) ->
+    error('TODO').
+
+t_ping(_) ->
+    error('TODO').
+
+t_disconnect(_) ->
+    error('TODO').
+
+t_puback(_) ->
+    error('TODO').
+
+t_pubrec(_) ->
+    error('TODO').
+
+t_pubrel(_) ->
+    error('TODO').
+
+t_pubcomp(_) ->
+    error('TODO').
+
+t_subscriptions(_) ->
+    error('TODO').
+
+t_info(_) ->
+    error('TODO').
+
+t_stop(_) ->
+    error('TODO').
+
+t_pause(_) ->
+    error('TODO').
+
+t_resume(_) ->
+    error('TODO').
+
+t_init(_) ->
+    error('TODO').
+
+t_random_client_id(_) ->
+    error('TODO').
+
+t_callback_mode(_) ->
+    error('TODO').
+
+t_initialized(_) ->
+    error('TODO').
+
+t_waiting_for_connack(_) ->
+    error('TODO').
+
+t_connected(_) ->
+    error('TODO').
+
+t_inflight_full(_) ->
+    error('TODO').
+
+t_handle_event(_) ->
+    error('TODO').
+
+t_terminate(_) ->
+    error('TODO').
+
+t_code_change(_) ->
+    error('TODO').
+
+t_reason_code_name(_) ->
+    error('TODO').
+
 
 basic_test(_Config) ->
     Topic = nth(1, ?TOPICS),
