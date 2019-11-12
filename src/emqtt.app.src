@@ -1,12 +1,14 @@
-{application,emqtt,
-             [{applications,[kernel,stdlib, getopt]},
-              {description,"Erlang MQTT v5.0 Client"},
-              {id,"emqtt"},
-              {vsn,"git"},
-              {modules,[]},
-              {registered,[]},
-              {env,[]},
-              {licenses,["Apache-2.0"]},
-              {maintainers,["EMQ X Team <contact@emqx.io>"]},
-              {links,[{"Homepage","https://emqx.io/"},
-                      {"Github","https://github.com/emqx/emqtt"}]}]}.
+{application, emqtt,
+ [{description, "Erlang MQTT v5.0 Client"},
+  {id, "emqtt"},
+  {vsn, "git"},
+  {modules, []},
+  {registered,[]},
+  {applications,[kernel, stdlib, getopt]},
+  {env,[]},
+  {licenses,["Apache-2.0"]},
+  {maintainers,["EMQ X Team <contact@emqx.io>"]},
+  {links, [{"Homepage","https://emqx.io/"},
+           {"Github","https://github.com/emqx/emqtt"}
+          ]}
+ ]}.
