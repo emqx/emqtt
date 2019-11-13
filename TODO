@@ -1,6 +1,17 @@
+0. app.src
+
+Update app.src
+
 1. Tests
+
+Sock
+Frame
+Props
+
 2. README
+
 3. Docs
+
 4. Improve ws support:
     #{ connect_timeout => Timeout,
     %% http_opts => http_opts(),

@@ -2,6 +2,8 @@
 
 export WITH_WS
 
+CT_NODE_NAME = ct@127.0.0.1
+
 REBAR := rebar3
 
 all: compile
@@ -24,7 +26,7 @@ eunit: compile
 	$(REBAR) eunit verbose=true
 
 ct: compile
-	$(REBAR) as test ct -v
+	$(REBAR) as test ct -v --name $(CT_NODE_NAME)
 
 cover:
 	$(REBAR) cover

@@ -3,12 +3,12 @@
   {id, "emqtt"},
   {vsn, "git"},
   {modules, []},
-  {registered,[]},
-  {applications,[kernel, stdlib, getopt]},
-  {env,[]},
-  {licenses,["Apache-2.0"]},
-  {maintainers,["EMQ X Team <contact@emqx.io>"]},
-  {links, [{"Homepage","https://emqx.io/"},
-           {"Github","https://github.com/emqx/emqtt"}
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {licenses, ["Apache-2.0"]},
+  {maintainers, ["EMQ X Team <contact@emqx.io>"]},
+  {links, [{"Homepage", "https://emqx.io/"},
+           {"Github", "https://github.com/emqx/emqtt"}
           ]}
  ]}.

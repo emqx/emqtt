@@ -21,30 +21,48 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() ->
-    [t_connect, t_send, t_close, t_setopts, t_getstat, t_sockname].
+all() -> emqx_ct:all(?MODULE).
 
-init_per_testcase(_TestCase, Config) ->
-    Config.
+%%--------------------------------------------------------------------
+%% Test cases
+%%--------------------------------------------------------------------
 
-end_per_testcase(_TestCase, Config) ->
-    Config.
+t_tcp_sock(_) ->
+    Server = tcp_server:start_link(4000),
+    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4000, [], 3000),
+    send_and_recv_with(Sock),
+    ok = emqtt_sock:close(Sock),
+    ok = tcp_server:stop(Server).
 
-t_connect(_) ->
-    error('TODO').
+t_ssl_sock(Config) ->
+    SslOpts = [{certfile, certfile(Config)},
+               {keyfile,  keyfile(Config)}
+              ],
+    Server = ssl_server:start_link(4443, SslOpts),
+    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4443, [{ssl_opts, []}], 3000),
+    send_and_recv_with(Sock),
+    ok = emqtt_sock:close(Sock),
+    ssl_server:stop(Server).
 
-t_send(_) ->
-    error('TODO').
+send_and_recv_with(Sock) ->
+    {ok, {{127,0,0,1}, _}} = emqtt_sock:sockname(Sock),
+    ok = emqtt_sock:send(Sock, <<"hi">>),
+    {ok, <<"hi">>} = emqtt_sock:recv(Sock, 0),
+    ok = emqtt_sock:setopts(Sock, [{active, 100}]),
+    {ok, Stats} = emqtt_sock:getstat(Sock, [send_cnt, recv_cnt]),
+    [{send_cnt, Cnt}, {recv_cnt, Cnt}] = Stats,
+    ?assert((Cnt == 1) or (Cnt == 3)).
 
-t_close(_) ->
-    error('TODO').
+%%--------------------------------------------------------------------
+%% Helper functions
+%%--------------------------------------------------------------------
 
-t_setopts(_) ->
-    error('TODO').
+certfile(Config) ->
+    filename:join([test_dir(Config), "certs", "test.crt"]).
 
-t_getstat(_) ->
-    error('TODO').
+keyfile(Config) ->
+    filename:join([test_dir(Config), "certs", "test.key"]).
 
-t_sockname(_) ->
-    error('TODO').
+test_dir(Config) ->
+    filename:dirname(filename:dirname(proplists:get_value(data_dir, Config))).
 
