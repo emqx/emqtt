@@ -32,7 +32,7 @@ Usage: emqtt_cli sub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
                      [--retain-as-publish [<retain_as_publish>]]
                      [--retain-handling [<retain_handling>]]
 
-  -h, --host              mqtt server hostname or IP address [default: 
+  -h, --host              mqtt server hostname or IP address [default:
                           localhost]
   -p, --port              mqtt server port number [default: 1883]
   -V, --protocol-version  mqtt protocol version: 3 | 4 | 5 [default: 5]
@@ -41,7 +41,7 @@ Usage: emqtt_cli sub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
   -C, --clientid          client identifier
   -k, --keepalive         keep alive in seconds [default: 300]
   -t, --topic             mqtt topic on which to publish the message
-  -q, --qos               maximum qos level at which the server can send 
+  -q, --qos               maximum qos level at which the server can send
                           application messages to the client [default: 0]
   --help                  help information
   --ifaddr                local ipaddress or interface address
@@ -49,18 +49,18 @@ Usage: emqtt_cli sub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
   --will-payload          payload in will message
   --will-qos              qos in will message [default: 0]
   --will-retain           retain in will message [default: false]
-  --enable-websocket      enable websocket transport or not [default: 
+  --enable-websocket      enable websocket transport or not [default:
                           false]
   --enable-ssl            enable ssl/tls or not [default: false]
-  --cacertfile            path to a file containing pem-encoded ca 
+  --cacertfile            path to a file containing pem-encoded ca
                           certificates
-  --certfile              path to a file containing the user certificate 
+  --certfile              path to a file containing the user certificate
                           on pem format
-  --keyfile               path to the file containing the user's private 
+  --keyfile               path to the file containing the user's private
                           pem-encoded key
-  --retain-as-publish     retain as publih option in subscription options 
+  --retain-as-publish     retain as publih option in subscription options
                           [default: false]
-  --retain-handling       retain handling option in subscription options 
+  --retain-handling       retain handling option in subscription options
                           [default: 0]
 ```
 
@@ -79,7 +79,7 @@ Usage: emqtt_cli pub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
                      [--cacertfile <cacertfile>] [--certfile <certfile>]
                      [--keyfile <keyfile>] [--payload <payload>]
 
-  -h, --host              mqtt server hostname or IP address [default: 
+  -h, --host              mqtt server hostname or IP address [default:
                           localhost]
   -p, --port              mqtt server port number [default: 1883]
   -V, --protocol-version  mqtt protocol version: 3 | 4 | 5 [default: 5]
@@ -87,7 +87,7 @@ Usage: emqtt_cli pub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
   -P, --password          password for connecting to server
   -C, --clientid          client identifier
   -k, --keepalive         keep alive in seconds [default: 300]
-  -q, --qos               qos level of assurance for delivery of an 
+  -q, --qos               qos level of assurance for delivery of an
                           application message [default: 0]
   -r, --retain            retain message or not [default: false]
   -t, --topic             mqtt topic to subscribe to
@@ -97,14 +97,14 @@ Usage: emqtt_cli pub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
   --will-payload          payload in will message
   --will-qos              qos in will message [default: 0]
   --will-retain           retain in will message [default: false]
-  --enable-websocket      enable websocket transport or not [default: 
+  --enable-websocket      enable websocket transport or not [default:
                           false]
   --enable-ssl            enable ssl/tls or not [default: false]
-  --cacertfile            path to a file containing pem-encoded ca 
+  --cacertfile            path to a file containing pem-encoded ca
                           certificates
-  --certfile              path to a file containing the user certificate 
+  --certfile              path to a file containing the user certificate
                           on pem format
-  --keyfile               path to the file containing the user's private 
+  --keyfile               path to the file containing the user's private
                           pem-encoded key
   --payload               application message that is being published.
 ```
@@ -163,7 +163,7 @@ ok = emqtt:disconnect(ConnPid).
 
 Not only the `clientid` can be passed as parameter, but also a lot of other options
  can be passed as parameters.
- 
+
 Here is the options which could be passed into emqtt:start_link/1.
 
 ```erlang

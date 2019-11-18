@@ -14,15 +14,34 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(emqtt_cli_SUITE).
+-module(tcp_server).
 
--compile(export_all).
--compile(nowarn_export_all).
+-export([start_link/1, stop/1]).
 
--include_lib("eunit/include/eunit.hrl").
+%% Internal exports
+-export([accept/1]).
 
-all() -> [t_main].
+start_link(Port) ->
+    {ok, LSock} = gen_tcp:listen(Port, [{active, false}]),
+    spawn_link(?MODULE, accept, [LSock]).
 
-t_main(_) ->
-    error('TODO').
+accept(LSock) ->
+    {ok, Sock} = gen_tcp:accept(LSock),
+    inet:setopts(Sock, [{active, true}]),
+    {stop, _Reason} = recvloop(Sock),
+    gen_tcp:close(LSock).
+
+recvloop(Sock) ->
+    receive
+        {tcp, Sock, Data} ->
+            gen_tcp:send(Sock, Data),
+            recvloop(Sock);
+        {tcp_error, Sock, Reason} ->
+            {stop, Reason};
+        {tcp_closed, Sock} ->
+            {stop, closed};
+        stop -> {stop, normal}
+    end.
+
+stop(Server) -> Server ! stop, ok.
 
