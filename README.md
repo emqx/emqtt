@@ -6,11 +6,6 @@ Erlang MQTT v5.0 Client compatible with MQTT v3.0
 
     $ make
 
-## Build with websocket dependencies
-
-     $ export WITH_WS=true
-     $ make
-
 ### Getting started
 
 #### As a command line tool

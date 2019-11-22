@@ -1,7 +1,5 @@
 .PHONY: all compile unlock clean distclean xref eunit ct dialyzer
 
-export WITH_WS
-
 CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := rebar3
