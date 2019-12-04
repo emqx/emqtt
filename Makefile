@@ -6,7 +6,7 @@ REBAR := rebar3
 
 all: compile
 
-compile:
+compile: escript
 	$(REBAR) compile
 
 unlock:
@@ -31,4 +31,7 @@ cover:
 
 dialyzer:
 	$(REBAR) dialyzer
+
+escript:
+	$(REBAR) as escript escriptize
 
