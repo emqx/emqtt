@@ -625,8 +625,8 @@ initialized({call, From}, {connect, ConnMod}, State = #state{sock_opts = SockOpt
                 Error = {error, Reason} ->
                     {stop_and_reply, Reason, [{reply, From, Error}]}
             end;
-        Error = {error, Reason} ->
-            {stop_and_reply, Reason, [{reply, From, Error}]}
+        Error ->
+            {stop_and_reply, normal, [{reply, From, Error}]}
     end;
 
 initialized(EventType, EventContent, State) ->
