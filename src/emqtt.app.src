@@ -4,7 +4,7 @@
   {vsn, "git"},
   {modules, []},
   {registered, []},
-  {applications, [kernel, stdlib, getopt, gun]},
+  {applications, [kernel, stdlib]},
   {env, []},
   {licenses, ["Apache-2.0"]},
   {maintainers, ["EMQ X Team <contact@emqx.io>"]},

@@ -8,7 +8,7 @@ REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
 
 all: compile
 
-compile:
+compile: escript
 	$(REBAR) compile
 
 unlock:
@@ -34,9 +34,6 @@ cover:
 dialyzer:
 	$(REBAR) dialyzer
 
-.PHONY: $(REBAR)
-$(REBAR):
-ifneq ($(wildcard rebar3),rebar3)
-	@curl -Lo rebar3 $(REBAR_URL) || wget $(REBAR_URL)
-endif
-	@chmod a+x rebar3
+escript:
+	$(REBAR) as escript escriptize
+
