@@ -4,7 +4,14 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := rebar3
 
-all: compile
+all: emqtt
+
+emqtt: compile
+	$(REBAR) as $(@) release
+
+pkg: compile
+	$(REBAR) as emqtt_pkg release
+	make -C packages
 
 compile: escript
 	$(REBAR) compile
@@ -15,7 +22,7 @@ unlock:
 clean: distclean
 
 distclean:
-	@rm -rf _build erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
+	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
 
 xref:
 	$(REBAR) xref

@@ -7,6 +7,8 @@
 
 -import(proplists, [get_value/2]).
 
+-define(CMD_NAME, "emqtt").
+
 -define(HELP_OPT,
         [{help, undefined, "help", boolean,
           "help information"}
@@ -89,9 +91,7 @@ main(["pub" | Argv]) ->
     main(pub, Opts);
 
 main(_Argv) ->
-    ScriptPath = escript:script_name(),
-    Script = filename:basename(ScriptPath),
-    io:format("Usage: ~s pub | sub [--help]~n", [Script]).
+    io:format("Usage: ~s pub | sub [--help]~n", [?CMD_NAME]).
 
 main(PubSub, Opts) ->
     application:ensure_all_started(emqtt),
@@ -162,13 +162,11 @@ maybe_help(PubSub, Opts) ->
     end.
 
 usage(PubSub) ->
-    ScriptPath = escript:script_name(),
-    Script = filename:basename(ScriptPath),
     Opts = case PubSub of
                pub -> ?PUB_OPTS;
                sub -> ?SUB_OPTS
            end,
-    getopt:usage(Opts, Script ++ " " ++ atom_to_list(PubSub)).
+    getopt:usage(Opts, ?CMD_NAME ++ " " ++ atom_to_list(PubSub)).
 
 check_required_args(PubSub, Keys, Opts) ->
     lists:foreach(fun(Key) ->
