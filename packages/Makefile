@@ -4,15 +4,6 @@ ifneq ($(shell uname -s),Linux)
 	$(shell echo "Please execute this script under Linux")
 	exit
 endif
-# The version-release used for package
-ifneq ($(shell echo $(EMQX_DEPS_DEFAULT_VSN) | grep -oE "v[0-9]+\.[0-9]+(\.[0-9]+)?"),)
-	PKG_VSN := $(EMQX_DEPS_DEFAULT_VSN)
-else
-	PKG_VSN := $(shell git describe --tags --always)
-endif
-
-# Default name
-EMQX_NAME = emqtt
 
 ifneq ($(shell cat /etc/*-release |grep -o -i centos),)
 	ID := centos
@@ -36,13 +27,9 @@ else
 endif
 
 .PHONY: all
-all: clean
+all:
 	$(if $(PKGERDIR),,$(error "Operating system '$(OS)' not supported"))
 	$(MAKE) -C $(PKGERDIR)
-
-clean:
-	rm -rf package
-	make -C deb clean
 
 .PHONY: deb
 deb:

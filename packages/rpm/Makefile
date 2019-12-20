@@ -15,10 +15,11 @@ endif
 SOURCE_PKG := emqtt-$(SYSTEM)-v$(RPM_VSN)-$(RPM_REL).$(ARCH)
 
 .PHONY: all
-all: | prepare
+all: prepare
 	rpmbuild -v -bb \
 		--define "_package_name emqtt" \
 		--define "_name emqtt" \
+		--define "_builddir $(TOPDIR)/$(PKG_VSN)/BUILD" \
 		--define "_version $(RPM_VSN)" \
 		--define "_release $(RPM_REL)" \
 		--define "_ostype -$(SYSTEM)" \
@@ -28,5 +29,5 @@ all: | prepare
 
 prepare:
 	rm -rf $(TOPDIR)
-	mkdir -p $(TOPDIR)/BUILD
-	cp -r ../../_build/emqtt_pkg/rel/emqtt $(TOPDIR)/BUILD
+	mkdir -p $(TOPDIR)/$(PKG_VSN)/BUILD
+	cp -r ../../_build/emqtt_pkg/rel/emqtt $(TOPDIR)/$(PKG_VSN)/BUILD

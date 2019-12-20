@@ -29,24 +29,9 @@ install: build
 	dh_testroot
 	dh_prep
 	dh_installdirs
-	mkdir -p debian/emqx/usr/lib/emqx
-	mkdir -p debian/emqx/var/lib/emqx
-	mkdir -p debian/emqx/var/run/emqx
-	mkdir -p debian/emqx/var/log/emqx
 	
-	mkdir -p debian/emqx/usr/lib/emqx/bin
-	
-	mkdir -p debian/emqx/etc/emqx
-	mkdir -p debian/emqx/etc/init.d
-	
-	cp _build/emqx-pkg/rel/emqx/bin/* debian/emqx/usr/lib/emqx/bin
-	
-	cp -R _build/emqx-pkg/rel/emqx/lib debian/emqx/usr/lib/emqx
-	cp -R _build/emqx-pkg/rel/emqx/erts*  debian/emqx/usr/lib/emqx
-	cp -R _build/emqx-pkg/rel/emqx/releases debian/emqx/usr/lib/emqx
-	cp -R _build/emqx-pkg/rel/emqx/etc/* debian/emqx/etc/emqx
-	cp -R _build/emqx-pkg/rel/emqx/data/*  debian/emqx/var/lib/emqx
-	install -m755 debian/init.script debian/emqx/etc/init.d/emqx
+	mkdir -p debian/emqtt/usr/lib/emqtt
+	cp -R emqtt/* debian/emqtt/usr/lib/emqtt
 	
 	dh_shlibdeps
 
