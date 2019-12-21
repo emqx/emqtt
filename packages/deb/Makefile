@@ -19,4 +19,4 @@ all: prepare
 prepare:
 	rm -rf $(SRCDIR)
 	mkdir -p $(TOPDIR) $(SRCDIR)
-	cp -r ../../_build/emqtt_pkg/rel/emqtt $(SRCDIR) 
+	cp -r $(REL_PATH)/emqtt $(SRCDIR) 

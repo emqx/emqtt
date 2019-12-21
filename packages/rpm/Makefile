@@ -27,4 +27,4 @@ all: prepare
 prepare:
 	rm -rf $(TOPDIR)
 	mkdir -p $(TOPDIR)/$(PKG_VSN)/BUILD
-	cp -r ../../_build/emqtt_pkg/rel/emqtt $(TOPDIR)/$(PKG_VSN)/BUILD
+	cp -r $(REL_PATH)/emqtt $(TOPDIR)/$(PKG_VSN)/BUILD

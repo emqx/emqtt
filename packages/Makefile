@@ -5,9 +5,10 @@ ifneq ($(shell uname -s),Linux)
 	exit
 endif
 
-MKFILE := "$(abspath $(lastword $(MAKEFILE_LIST)))"
-SOURCE_PATH := "$(shell dirname $(MKFILE))/.."
-PACKAGES_PATH := "$(SOURCE_PATH)/_packages"
+MKFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+SOURCE_PATH := $(shell dirname $(MKFILE))/..
+REL_PATH := $(SOURCE_PATH)/_build/emqtt/rel
+PACKAGES_PATH := $(SOURCE_PATH)/_packages
 
 # The version-release used for package
 PKG_VSN := $(shell git describe --tags --always)
@@ -42,7 +43,7 @@ all: zip
 zip:
 	$(MAKE) -C ../ emqtt
 	mkdir -p $(PACKAGES_PATH)
-	cd $(SOURCE_PATH)/_build/emqtt/rel
+	cd $(REL_PATH)
 	zip -rq emqtt-$(SYSTEM)-$(PKG_VSN).zip emqtt
 	mv emqtt-$(SYSTEM)-$(PKG_VSN).zip $(PACKAGES_PATH)
 	cd -
