@@ -43,10 +43,8 @@ all: zip
 zip:
 	$(MAKE) -C ../ emqtt
 	mkdir -p $(PACKAGES_PATH)
-	cd $(REL_PATH)
-	zip -rq emqtt-$(SYSTEM)-$(PKG_VSN).zip emqtt
-	mv emqtt-$(SYSTEM)-$(PKG_VSN).zip $(PACKAGES_PATH)
-	cd -
+	cd $(REL_PATH) && zip -rq emqtt-$(SYSTEM)-$(PKG_VSN).zip emqtt
+	mv $(REL_PATH)/emqtt-$(SYSTEM)-$(PKG_VSN).zip $(PACKAGES_PATH)
 
 .PHONY: deb
 deb:
