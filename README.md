@@ -5,13 +5,15 @@ Erlang MQTT v5.0 Client compatible with MQTT v3.0
 ## Build
 
     $ make
+    $ cd _build/emqtt/rel/emqtt
+    $ ./bin/emqtt --help
 
 ### Getting started
 
 #### As a command line tool
 
 ```sh
-$ ./emqtt_cli sub --help
+$ ./bin/emqtt sub --help
 Usage: emqtt_cli sub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
                      [-u <username>] [-P <password>] [-C <clientid>]
                      [-k [<keepalive>]] [-t <topic>] [-q [<qos>]]
@@ -60,7 +62,7 @@ Usage: emqtt_cli sub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
 ```
 
 ```sh
-$ ./emqtt_cli pub --help
+$ ./bin/emqtt pub --help
 Usage: emqtt_cli pub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
                      [-u <username>] [-P <password>] [-C <clientid>]
                      [-k [<keepalive>]] [-q [<qos>]] [-r [<retain>]]
@@ -107,7 +109,7 @@ Usage: emqtt_cli pub [-h [<host>]] [-p [<port>]] [-V [<protocol_version>]]
 Subscribing to the topic named 'a' and maximum QoS level is 0. The client will wait for PUBLISH packet that matches the topic and output the payload of packet to the console:
 
 ```sh
-./emqtt_cli sub -C subscriber -t a -q 0
+./bin/emqtt sub -C subscriber -t a -q 0
 Client subscriber sent CONNECT
 Client subscriber subscribed to a
 ```
@@ -115,7 +117,7 @@ Client subscriber subscribed to a
 Publishing a application message to topic 'a':
 
 ```sh
-./emqtt_cli pub -C publisher -t a -q 0 --payload hello
+./bin/emqtt pub -C publisher -t a -q 0 --payload hello
 Client publisher sent CONNECT
 Client publisher sent PUBLISH (Q0, R0, D0, Topic=a, Payload=...(5 bytes))
 Client publisher sent DISCONNECT

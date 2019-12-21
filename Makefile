@@ -7,7 +7,7 @@ REBAR := rebar3
 all: emqtt
 
 emqtt: compile
-	$(REBAR) as $(@) release
+	$(REBAR) as emqtt release
 
 pkg: compile
 	$(REBAR) as emqtt_pkg release

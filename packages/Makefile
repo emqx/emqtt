@@ -5,6 +5,13 @@ ifneq ($(shell uname -s),Linux)
 	exit
 endif
 
+MKFILE := "$(abspath $(lastword $(MAKEFILE_LIST)))"
+PACKAGES_PATH := "$(shell dirname $(MKFILE))/../_packages"
+
+# The version-release used for package
+PKG_VSN := $(shell git describe --tags --always)
+ARCH := $(shell arch)
+
 ifneq ($(shell cat /etc/*-release |grep -o -i centos),)
 	ID := centos
 	VERSION_ID := $(shell rpm --eval '%{centos_ver}')
@@ -27,9 +34,18 @@ else
 endif
 
 .PHONY: all
-all:
+all: zip
 	$(if $(PKGERDIR),,$(error "Operating system '$(OS)' not supported"))
 	$(MAKE) -C $(PKGERDIR)
+
+.PHONY: zip
+zip:
+	$(MAKE) -C ../ emqtt
+	mkdir -p $(PACKAGES_PATH)
+	cd ../_build/emqtt/rel/emqtt
+	zip -rq emqtt-$(SYSTEM)-$(PKG_VSN)-$(ARCH).zip emqtt
+	mv emqtt-$(SYSTEM)-$(PKG_VSN)-$(ARCH).zip $(PACKAGES_PATH)
+	cd -
 
 .PHONY: deb
 deb:
