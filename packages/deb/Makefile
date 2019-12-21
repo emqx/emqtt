@@ -3,6 +3,7 @@ TOPDIR := /tmp/emqx
 SRCDIR := $(TOPDIR)/$(PKG_VSN)
 DEB_VSN := $(PKG_VSN:v%=%)
 
+ARCH := $(shell dpkg --print-architecture)
 SOURCE_PKG := emqtt_$(DEB_VSN)_$(ARCH)
 TARGET_PKG := emqtt-$(SYSTEM)-$(PKG_VSN)_$(ARCH)
 

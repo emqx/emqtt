@@ -6,11 +6,11 @@ ifneq ($(shell uname -s),Linux)
 endif
 
 MKFILE := "$(abspath $(lastword $(MAKEFILE_LIST)))"
-PACKAGES_PATH := "$(shell dirname $(MKFILE))/../_packages"
+SOURCE_PATH := "$(shell dirname $(MKFILE))/.."
+PACKAGES_PATH := "$(SOURCE_PATH)/_packages"
 
 # The version-release used for package
 PKG_VSN := $(shell git describe --tags --always)
-ARCH := $(shell arch)
 
 ifneq ($(shell cat /etc/*-release |grep -o -i centos),)
 	ID := centos
@@ -42,9 +42,9 @@ all: zip
 zip:
 	$(MAKE) -C ../ emqtt
 	mkdir -p $(PACKAGES_PATH)
-	cd ../_build/emqtt/rel/emqtt
-	zip -rq emqtt-$(SYSTEM)-$(PKG_VSN)-$(ARCH).zip emqtt
-	mv emqtt-$(SYSTEM)-$(PKG_VSN)-$(ARCH).zip $(PACKAGES_PATH)
+	cd $(SOURCE_PATH)/_build/emqtt/rel
+	zip -rq emqtt-$(SYSTEM)-$(PKG_VSN).zip emqtt
+	mv emqtt-$(SYSTEM)-$(PKG_VSN).zip $(PACKAGES_PATH)
 	cd -
 
 .PHONY: deb

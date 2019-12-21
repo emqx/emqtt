@@ -3,6 +3,7 @@ TOPDIR := $(shell rpm --eval "%{_topdir}")
 RPM_VSN ?= $(shell echo $(PKG_VSN) | grep -oE "[0-9]+\.[0-9]+(\.[0-9]+)?")
 RPM_REL ?= $(shell echo $(PKG_VSN) | grep -oE "(alpha|beta|rc)\.[0-9]")
 
+ARCH := $(shell arch)
 TARGET_PKG := emqtt-$(SYSTEM)-$(PKG_VSN).$(ARCH)
 ifeq ($(RPM_REL),)
 	# no tail
@@ -20,7 +21,7 @@ all: prepare
 		--define "_release $(RPM_REL)" \
 		--define "_ostype -$(SYSTEM)" \
 		emqtt.spec
-	mkdir -p ../../_packages
+	mkdir -p $(PACKAGES_PATH)
 	cp $(TOPDIR)/RPMS/$(ARCH)/$(SOURCE_PKG).rpm $(PACKAGES_PATH)/$(TARGET_PKG).rpm
 
 prepare:
