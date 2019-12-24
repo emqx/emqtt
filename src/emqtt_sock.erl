@@ -61,7 +61,6 @@ ssl_upgrade(Sock, SslOpts, Timeout) ->
     TlsVersions = proplists:get_value(versions, SslOpts, []),
     Ciphers = proplists:get_value(ciphers, SslOpts, default_ciphers(TlsVersions)),
     SslOpts2 = merge_opts(SslOpts, [{ciphers, Ciphers}]),
-    io:format("!!!SslOpts2: ~p~n", [SslOpts2]),
     case ssl:connect(Sock, SslOpts2, Timeout) of
         {ok, SslSock} ->
             ok = ssl:controlling_process(SslSock, self()),
