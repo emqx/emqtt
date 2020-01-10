@@ -15,10 +15,12 @@
 -define(CONN_SHORT_OPTS,
         [{host, $h, "host", {string, "localhost"},
           "mqtt server hostname or IP address"},
-         {port, $p, "port", {integer, 1883},
+         {port, $p, "port", integer,
           "mqtt server port number"},
-         {protocol_version, $V, "protocol-version", {integer, 5},
-          "mqtt protocol version: 3 | 4 | 5"},
+         {iface, $I, "iface", string,
+          "specify the network interface or ip address to use"},
+         {protocol_version, $V, "protocol-version", {atom, 'v5'},
+          "mqtt protocol version: v3.1 | v3.1.1 | v5"},
          {username, $u, "username", string,
           "username for connecting to server"},
          {password, $P, "password", string,
@@ -30,9 +32,7 @@
         ]).
 
 -define(CONN_LONG_OPTS,
-        [{ifaddr, undefined, "ifaddr", string,
-          "local ipaddress or interface address"},
-         {will_topic, undefined, "will-topic", string,
+        [{will_topic, undefined, "will-topic", string,
           "topic in will message"},
          {will_payload, undefined, "will-payload", string,
           "payload in will message"},
@@ -44,29 +44,35 @@
           "enable websocket transport or not"},
          {enable_ssl, undefined, "enable-ssl", {boolean, false},
           "enable ssl/tls or not"},
-         {cacertfile, undefined, "cacertfile", string,
+         {tls_version, undefined, "tls-version", {atom, 'tlsv1.2'},
+          "TLS protocol version used when the client connects to the broker"},
+         {cafile, undefined, "CAfile", string,
           "path to a file containing pem-encoded ca certificates"},
-         {certfile, undefined, "certfile", string,
+         {cert, undefined, "cert", string,
           "path to a file containing the user certificate on pem format"},
-         {keyfile, undefined, "keyfile", string,
+         {key, undefined, "key", string,
           "path to the file containing the user's private pem-encoded key"}
         ]).
 
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
-        [{qos, $q, "qos", {integer, 0},
+        [{topic, $t, "topic", string,
+          "mqtt topic on which to publish the message"},
+         {qos, $q, "qos", {integer, 0},
           "qos level of assurance for delivery of an application message"},
          {retain, $r, "retain", {boolean, false},
-          "retain message or not"},
-         {topic, $t, "topic", string,
-          "mqtt topic to subscribe to"}
+          "retain message or not"}
         ] ++ ?HELP_OPT ++ ?CONN_LONG_OPTS ++
         [{payload, undefined, "payload", string,
-          "application message that is being published."}
+          "application message that is being published"},
+         {repeat, undefined, "repeat", {integer, 1},
+          "the number of times the message will be repeatedly published"},
+         {repeat_delay, undefined, "repeat-delay", {integer, 0},
+          "the number of seconds to wait after the previous message was delivered before publishing the next"}
         ]).
 
 -define(SUB_OPTS, ?CONN_SHORT_OPTS ++
         [{topic, $t, "topic", string,
-          "mqtt topic on which to publish the message"},
+          "mqtt topic to subscribe to"},
          {qos, $q, "qos", {integer, 0},
           "maximum qos level at which the server can send application messages to the client"}
         ] ++ ?HELP_OPT ++ ?CONN_LONG_OPTS ++
@@ -96,6 +102,7 @@ main(_Argv) ->
 main(PubSub, Opts) ->
     application:ensure_all_started(emqtt),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
+    io:format("Opts: ~p~nNOpts: ~p~n", [Opts, NOpts]),
     {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case proplists:get_bool(enable_websocket, NOpts) of
                   true  -> emqtt:ws_connect(Client);
@@ -106,19 +113,29 @@ main(PubSub, Opts) ->
             io:format("Client ~s sent CONNECT~n", [get_value(clientid, NOpts)]),
             case PubSub of
                 pub ->
-                    publish(Client, NOpts),
+                    publish(Client, NOpts, proplists:get_value(repeat, Opts)),
                     disconnect(Client, NOpts);
                 sub ->
                     subscribe(Client, NOpts),
                     KeepAlive = maps:get('Server-Keep-Alive', Properties, get_value(keepalive, NOpts)) * 1000,
                     timer:send_interval(KeepAlive, ping),
-                    main_loop(Client)
+                    receive_loop(Client)
             end;
         {error, Reason} ->
             io:format("Client ~s failed to sent CONNECT due to ~p~n", [get_value(clientid, NOpts), Reason])
     end.
 
-publish(Client, Opts) ->
+publish(Client, Opts, 1) ->
+    do_publish(Client, Opts);
+publish(Client, Opts, Repeat) ->
+    do_publish(Client, Opts),
+    case proplists:get_value(repeat_delay, Opts) of
+        0 -> ok;
+        RepeatDelay -> timer:sleep(RepeatDelay * 1000)
+    end,
+    publish(Client, Opts, Repeat - 1).
+
+do_publish(Client, Opts) ->
     case emqtt:publish(Client, get_value(topic, Opts), get_value(payload, Opts), Opts) of
         {error, Reason} ->
             io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
@@ -190,14 +207,28 @@ parse_cmd_opts([{host, Host} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{host, Host} | Acc]);
 parse_cmd_opts([{port, Port} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{port, Port} | Acc]);
-parse_cmd_opts([{ifaddr, IfAddr} | Opts], Acc) ->
-    {ok, IpAddr} = inet_parse:address(IfAddr),
-    parse_cmd_opts(Opts, maybe_append(tcp_opts, {ip, IpAddr}, Acc));
-parse_cmd_opts([{protocol_version, 3} | Opts], Acc) ->
+parse_cmd_opts([{iface, Interface} | Opts], Acc) ->
+    NAcc = case inet:parse_address(Interface) of
+               {ok, IPAddress0} ->
+                   maybe_append(tcp_opts, {ifaddr, IPAddress0}, Acc);
+               _ ->
+                   case inet:getifaddrs() of
+                       {ok, IfAddrs} -> 
+                            case lists:filter(fun({addr, {_, _, _, _}}) -> true;
+                                                 (_) -> false
+                                              end, proplists:get_value(Interface, IfAddrs, [])) of
+                                [{addr, IPAddress0}] -> maybe_append(tcp_opts, {ifaddr, IPAddress0}, Acc);
+                                _ -> Acc
+                            end;
+                        _ -> Acc
+                    end
+           end,
+    parse_cmd_opts(Opts, NAcc);
+parse_cmd_opts([{protocol_version, 'v3.1'} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{proto_ver, v3} | Acc]);
-parse_cmd_opts([{protocol_version, 4} | Opts], Acc) ->
+parse_cmd_opts([{protocol_version, 'v3.1.1'} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{proto_ver, v4} | Acc]);
-parse_cmd_opts([{protocol_version, 5} | Opts], Acc) ->
+parse_cmd_opts([{protocol_version, 'v5'} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{proto_ver, v5} | Acc]);
 parse_cmd_opts([{username, Username} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{username, list_to_binary(Username)} | Acc]);
@@ -215,16 +246,20 @@ parse_cmd_opts([{will_retain, Retain} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{will_retain, Retain} | Acc]);
 parse_cmd_opts([{keepalive, I} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{keepalive, I} | Acc]);
-parse_cmd_opts([{enable_websocket, EnableWebsocket} | Opts], Acc) ->
-    parse_cmd_opts(Opts, [{enable_websocket, EnableWebsocket} | Acc]);
-parse_cmd_opts([{enable_ssl, EnableSSL} | Opts], Acc) ->
-    parse_cmd_opts(Opts, [{ssl, EnableSSL} | Acc]);
-parse_cmd_opts([{cacertfile, CacertFile} | Opts], Acc) ->
-    parse_cmd_opts(Opts, maybe_append(ssl_opts, {cacertfile, CacertFile}, Acc));
-parse_cmd_opts([{certfile, CertFile} | Opts], Acc) ->
-    parse_cmd_opts(Opts, maybe_append(ssl_opts, {certfile, CertFile}, Acc));
-parse_cmd_opts([{keyfile, KeyFile} | Opts], Acc) ->
-    parse_cmd_opts(Opts, maybe_append(ssl_opts, {keyfile, KeyFile}, Acc));
+parse_cmd_opts([{enable_websocket, Enable} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{enable_websocket, Enable} | Acc]);
+parse_cmd_opts([{enable_ssl, Enable} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{ssl, Enable} | Acc]);
+parse_cmd_opts([{tls_version, Version} | Opts], Acc) 
+  when Version =:= 'tlsv1' orelse Version =:= 'tlsv1.1'orelse
+       Version =:= 'tlsv1.2' orelse Version =:= 'tlsv1.3' ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {versions, [Version]}, Acc));
+parse_cmd_opts([{cafile, CAFile} | Opts], Acc) ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {cacertfile, CAFile}, Acc));
+parse_cmd_opts([{cert, Cert} | Opts], Acc) ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {certfile, Cert}, Acc));
+parse_cmd_opts([{key, Key} | Opts], Acc) ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {keyfile, Key}, Acc));
 parse_cmd_opts([{qos, QoS} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{qos, QoS} | Acc]);
 parse_cmd_opts([{retain_as_publish, RetainAsPublish} | Opts], Acc) ->
@@ -237,6 +272,10 @@ parse_cmd_opts([{topic, Topic} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{topic, list_to_binary(Topic)} | Acc]);
 parse_cmd_opts([{payload, Payload} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{payload, list_to_binary(Payload)} | Acc]);
+parse_cmd_opts([{repeat, Repeat} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{repeat, Repeat} | Acc]);
+parse_cmd_opts([{repeat_delay, RepeatDelay} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{repeat_delay, RepeatDelay} | Acc]);
 parse_cmd_opts([_ | Opts], Acc) ->
     parse_cmd_opts(Opts, Acc).
 
@@ -249,21 +288,42 @@ maybe_append(Key, Value, TupleList) ->
     end.
 
 enrich_opts(Opts) ->
+    pipeline([fun enrich_clientid_opt/1,
+              fun enrich_port_opt/1], Opts).
+
+enrich_clientid_opt(Opts) ->
     case lists:keyfind(clientid, 1, Opts) of
         false -> [{clientid, emqtt:random_client_id()} | Opts];
         _ -> Opts
     end.
 
-main_loop(Client) ->
+enrich_port_opt(Opts) ->
+    case proplists:get_value(port, Opts) of
+        undefined ->
+            Port = case proplists:get_value(ssl, Opts) of
+                        true -> 8883;
+                        false -> 1883
+                    end,
+            [{port, Port} | Opts];
+        _ -> Opts
+    end.
+
+pipeline([], Input) ->
+    Input;
+
+pipeline([Fun|More], Input) ->
+    pipeline(More, erlang:apply(Fun, [Input])).
+
+receive_loop(Client) ->
     receive
         {publish, #{payload := Payload}} ->
             io:format("~s~n", [Payload]),
-            main_loop(Client);
+            receive_loop(Client);
         ping ->
             emqtt:ping(Client),
-            main_loop(Client);
+            receive_loop(Client);
         _Other ->
-            main_loop(Client)
+            receive_loop(Client)
     end.
 
 i(true)  -> 1;
