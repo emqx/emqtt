@@ -77,8 +77,8 @@ jobs:
             mkdir -p _packages
             version=$(git describe --tags --always)
             pkg=emqtt-macos-$version.zip
-            cd _build/emqtt/rel && zip -rq $pkg emqtt
-            mv $pkg _packages/
+            cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
+            mv _build/emqtt/rel/$pkg _packages/
             openssl dgst -sha256 ./_packages/$pkg | awk '{print $2}' > ./_packages/$pkg.sha256
             aws2 s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
 
