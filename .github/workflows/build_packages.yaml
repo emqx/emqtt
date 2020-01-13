@@ -101,7 +101,7 @@ jobs:
           run: |
             mkdir -p _packages
             version=$(git describe --tags --always)
-            aws2 s3 cp s3://packages.emqx.io/emqtt/$version ./_packages
+            aws2 s3 cp --recursive s3://packages.emqx.io/emqtt/$version ./_packages
             for var in $(ls ./_packages/emqtt-* |grep -v sha256); do 
                 echo "$(cat $var.sha256) $var" | sha256sum -c
             done
