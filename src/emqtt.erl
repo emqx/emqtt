@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -138,7 +138,7 @@
 -type(maybe(T) :: undefined | T).
 -type(topic() :: binary()).
 -type(payload() :: iodata()).
--type(packet_id() :: 0..16#FF).
+-type(packet_id() :: 0..16#FFFF).
 -type(reason_code() :: 0..16#FF).
 -type(properties() :: #{atom() => term()}).
 -type(version() :: ?MQTT_PROTO_V3
@@ -149,8 +149,7 @@
                     qos1 | at_least_once |
                     qos2 | exactly_once).
 -type(pubopt() :: {retain, boolean()}
-      		| {qos, qos() | qos_name()}
-		| {timeout, timeout()}).
+                | {qos, qos() | qos_name()}).
 -type(subopt() :: {rh, 0 | 1 | 2}
                 | {rap, boolean()}
                 | {nl,  boolean()}
@@ -209,6 +208,7 @@
 
 %% Default timeout
 -define(DEFAULT_KEEPALIVE, 60).
+-define(DEFAULT_RETRY_INTERVAL, 30000).
 -define(DEFAULT_ACK_TIMEOUT, 30000).
 -define(DEFAULT_CONNECT_TIMEOUT, 60000).
 
@@ -478,7 +478,7 @@ init([Options]) ->
                                  properties      = #{},
                                  auto_ack        = true,
                                  ack_timeout     = ?DEFAULT_ACK_TIMEOUT,
-                                 retry_interval  = 0,
+                                 retry_interval  = ?DEFAULT_RETRY_INTERVAL,
                                  connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
                                  last_packet_id  = 1
                                 }),

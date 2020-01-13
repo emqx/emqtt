@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@ ssl_upgrade(Sock, SslOpts, Timeout) ->
     TlsVersions = proplists:get_value(versions, SslOpts, []),
     Ciphers = proplists:get_value(ciphers, SslOpts, default_ciphers(TlsVersions)),
     SslOpts2 = merge_opts(SslOpts, [{ciphers, Ciphers}]),
-    io:format("!!!SslOpts2: ~p~n", [SslOpts2]),
     case ssl:connect(Sock, SslOpts2, Timeout) of
         {ok, SslSock} ->
             ok = ssl:controlling_process(SslSock, self()),
