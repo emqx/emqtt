@@ -1,5 +1,5 @@
 %%--------------------------------------------------------------------
-%% Copyright (c) 2019 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -209,7 +209,7 @@
 
 -record(mqtt_packet_connect, {
           proto_name   = <<"MQTT">>,
-          proto_ver    = ?MQTT_PROTO_V4,
+          proto_ver    = ?MQTT_PROTO_V5,
           is_bridge    = false,
           clean_start  = true,
           will_flag    = false,
