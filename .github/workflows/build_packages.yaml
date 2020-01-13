@@ -43,7 +43,7 @@ jobs:
           run: |
             version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "make -C /emqtt pkg"
-            cd _packages && for var in $(ls); do sudo sh -c "sha256sum $var | awk '{print $1}' > $var.sha256"; done && cd -
+            cd _packages && for var in $(ls); do sudo bash -c "echo $(sha256sum $var | awk '{print $1}') > $var.sha256"; done && cd -
             aws2 s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
         - name: upload
           if: github.event_name == 'release'
