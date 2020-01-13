@@ -41,7 +41,7 @@ jobs:
             ERL_OTP: erl22.1
             SYSTEM: ${{ matrix.os }}
           run: |
-            version=$(git describe --tags --always)
+            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "make -C /emqtt pkg"
             cd _packages && for var in $(ls); do sudo sh -c "sha256sum $var | awk '{print $1}' > $var.sha256"; done && cd -
             aws2 s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
@@ -75,7 +75,7 @@ jobs:
           run: |
             make emqtt
             mkdir -p _packages
-            version=$(git describe --tags --always)
+            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             pkg=emqtt-macos-$version.zip
             cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
             mv _build/emqtt/rel/$pkg _packages/
@@ -100,14 +100,13 @@ jobs:
         - name: get packages
           run: |
             mkdir -p _packages
-            version=$(git describe --tags --always)
+            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             aws2 s3 cp --recursive s3://packages.emqx.io/emqtt/$version ./_packages
-            for var in $(ls ./_packages/emqtt-* |grep -v sha256); do 
-                echo "$(cat $var.sha256) $var" | sha256sum -c
-            done
+            cd _packages && for var in $( ls |grep emqtt |grep -v sha256); do echo "$(cat $var.sha256) $var" | sha256sum -c || echo "$var check sha256 error" && exit 1 ;done
         - name: upload github
           if: github.event_name == 'release'
           run: |
+            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             for var in $(ls packages) ; do
                 .github/workflows/script/upload_github_release_asset.sh owner=emqx repo=emqtt tag=$version filename=packages/$var github_api_token=$(echo ${{ secrets.AccessToken }})
             done
