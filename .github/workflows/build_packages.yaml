@@ -75,7 +75,7 @@ jobs:
           run: |
             make emqtt
             mkdir -p _packages
-            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
+            version=$(echo ${{ github.ref }} | gsed -r  "s .*/.*/(.*) \1 g")
             pkg=emqtt-macos-$version.zip
             cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
             mv _build/emqtt/rel/$pkg _packages/
