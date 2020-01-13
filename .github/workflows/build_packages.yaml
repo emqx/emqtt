@@ -125,7 +125,7 @@ jobs:
         - name: get packages
           run: |
             cd _packages && for var in $( ls |grep emqtt |grep -v sha256); do 
-              echo "$(cat $var.sha256) $var" | sha256sum -c || echo "$var check sha256 error" && exit 1
+              echo "$(cat $var.sha256) $var" | sha256sum -c || exit 1
             done
         - name: upload aws
           run: |
