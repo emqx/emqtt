@@ -128,6 +128,7 @@ jobs:
               echo "$(cat $var.sha256) $var" | sha256sum -c || exit 1
             done
         - name: upload aws
+          if: github.event_name == 'release'
           run: |
             version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
             aws2 s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
