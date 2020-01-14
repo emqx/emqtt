@@ -69,8 +69,7 @@ jobs:
                     fi
                   ;;
                 esac
-              done
-            "
+              done"
             cd _packages && for var in $(ls); do sudo bash -c "echo $(sha256sum $var | awk '{print $1}') > $var.sha256"; done && cd -
         - uses: actions/upload-artifact@v1
           with:
@@ -99,7 +98,7 @@ jobs:
             cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
             mv _build/emqtt/rel/$pkg _packages/
             cd _packages
-            unzip $pkg
+            unzip -q $pkg
             ./emqtt/bin/emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
             rm -rf emqtt
             openssl dgst -sha256 $pkg | awk '{print $2}' > $pkg.sha256
