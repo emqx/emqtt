@@ -37,35 +37,35 @@ jobs:
               cd /emqtt/_packages
               for var in $(ls);do
                 case ${var##*.} in
-                  "zip")
+                  'zip')
                     unzip -q $var
-                    ./emqtt/bin/emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    ./emqtt/bin/emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
                     rm -rf emqtt
                   ;;
-                  "deb")
+                  'deb')
                     dpkg -i $var
                     if [ $(dpkg -l |grep emqx |awk '{print $1}') != "ii" ];then
-                        echo "package install error" && exit 1
+                        echo 'package install error' && exit 1
                     fi
-                    emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
                     dpkg -r emqtt
-                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != "rc" ];then
-                        echo "package remove error" && exit 1
+                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != 'rc' ];then
+                        echo 'package remove error' && exit 1
                     fi
                     dpkg -P emqtt
-                    if [ ! -z "$(dpkg -l |grep emqx)" ];then
-                        echo "package uninstall error" && exit 1
+                    if [ ! -z $(dpkg -l |grep emqx) ];then
+                        echo 'package uninstall error' && exit 1
                     fi
                   ;;
-                  "rpm")
+                  'rpm')
                     rpm -ivh $var
                     if [ $(rpm -q emqtt != emqtt ];then
-                        echo "package install error" && exit 1
+                        echo 'package install error' && exit 1
                     fi
-                    emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
                     rpm -e emqtt
                     if [ $(rpm -q emqtt) == emqtt ];then
-                        echo "package uninstall error" && exit 1
+                        echo 'package uninstall error' && exit 1
                     fi
                   ;;
                 esac
