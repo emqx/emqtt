@@ -322,11 +322,14 @@ basic_test_v4(_Config) ->
     basic_test([{proto_ver, v4}]).
 
 anonymous_test(_Config) ->
-     application:set_env(emqx, allow_anonymous, false),
+    application:set_env(emqx, allow_anonymous, false),
 
     process_flag(trap_exit, true),
     {ok, C1} = emqtt:start_link(),
     {_,{unauthorized_client,_}} = emqtt:connect(C1),
+    receive {'EXIT', _} -> ok
+    after 500 -> error("allow_anonymous")
+    end,
     process_flag(trap_exit, false),
 
     emqx_plugins:load(emqx_auth_username),
