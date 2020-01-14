@@ -134,6 +134,6 @@ jobs:
           if: github.event_name == 'release'
           run: |
             version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
-            for var in $(ls packages) ; do
-                .github/workflows/script/upload_github_release_asset.sh owner=emqx repo=emqtt tag=$version filename=packages/$var github_api_token=$(echo ${{ secrets.AccessToken }})
+            for var in $(ls _packages) ; do
+                .github/workflows/script/upload_github_release_asset.sh owner=emqx repo=emqtt tag=$version filename=_packages/$var github_api_token=$(echo ${{ secrets.AccessToken }})
             done
