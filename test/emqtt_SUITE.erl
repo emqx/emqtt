@@ -327,7 +327,7 @@ anonymous_test(_Config) ->
     process_flag(trap_exit, true),
     {ok, C1} = emqtt:start_link(),
     {_,{unauthorized_client,_}} = emqtt:connect(C1),
-    receive {'EXIT', _} -> ok
+    receive {'EXIT', _, _} -> ok
     after 500 -> error("allow_anonymous")
     end,
     process_flag(trap_exit, false),
