@@ -102,7 +102,6 @@ main(_Argv) ->
 main(PubSub, Opts) ->
     application:ensure_all_started(emqtt),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
-    io:format("Opts: ~p~nNOpts: ~p~n", [Opts, NOpts]),
     {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case proplists:get_bool(enable_websocket, NOpts) of
                   true  -> emqtt:ws_connect(Client);
