@@ -33,7 +33,7 @@ jobs:
             ERL_OTP: erl22.1
             SYSTEM: ${{ matrix.os }}
           run: |
-            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "/emqtt/.github/workflows/script/build.sh"
+            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"
             cd _packages && for var in $(ls); do sudo bash -c "echo $(sha256sum $var | awk '{print $1}') > $var.sha256"; done && cd -
         - uses: actions/upload-artifact@v1
           with:
