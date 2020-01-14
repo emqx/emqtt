@@ -1192,7 +1192,7 @@ deliver(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
 
 eval_msg_handler(#state{msg_handler = ?NO_MSG_HDLR,
                         owner = Owner},
-                 disconnected, {ReasonCode, Properties}) ->
+                 disconnected, {ReasonCode, Properties}) when is_integer(ReasonCode) ->
     %% Special handling for disconnected message when there is no handler callback
     Owner ! {disconnected, ReasonCode, Properties},
     ok;
