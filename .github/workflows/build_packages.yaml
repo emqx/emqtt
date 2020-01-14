@@ -44,22 +44,22 @@ jobs:
                   ;;
                   'deb')
                     dpkg -i $var
-                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != 'ii' ];then
+                    if [ $(dpkg -l |grep emqtt |awk '{print $1}') != 'ii' ];then
                         echo 'package install error' && exit 1
                     fi
                     emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
                     dpkg -r emqtt
-                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != 'rc' ];then
+                    if [ $(dpkg -l |grep emqtt |awk '{print $1}') != 'rc' ];then
                         echo 'package remove error' && exit 1
                     fi
                     dpkg -P emqtt
-                    if [ ! -z $(dpkg -l |grep emqx) ];then
+                    if [ ! -z $(dpkg -l |grep emqtt) ];then
                         echo 'package uninstall error' && exit 1
                     fi
                   ;;
                   'rpm')
                     rpm -ivh $var
-                    if [ $(rpm -q emqtt != emqtt ];then
+                    if [ $(rpm -q emqtt) != emqtt ];then
                         echo 'package install error' && exit 1
                     fi
                     emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
