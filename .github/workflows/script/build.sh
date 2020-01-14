@@ -41,12 +41,12 @@ test_pkg(){
             ;;
             "rpm")
             rpm -ivh $var
-            if [ $(rpm -q emqtt) != emqtt* ];then
+            if [ -z "$(rpm -q emqtt| grep 'not installed')" ]; then
                 echo 'package install error' && exit 1
             fi
             emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
             rpm -e emqtt
-            if [ $(rpm -q emqtt) == emqtt* ];then
+            if [ ! -z "$(rpm -q emqtt| grep 'not installed')" ]; then
                 echo 'package uninstall error' && exit 1
             fi
             ;;
