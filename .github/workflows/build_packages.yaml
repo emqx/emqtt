@@ -44,7 +44,7 @@ jobs:
                   ;;
                   'deb')
                     dpkg -i $var
-                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != "ii" ];then
+                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != 'ii' ];then
                         echo 'package install error' && exit 1
                     fi
                     emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
