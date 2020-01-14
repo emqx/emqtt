@@ -546,7 +546,7 @@ Password used by the server for authentication and authorization.
 
 `{proto_ver, ProtocolVersion}`
 
-MQTT protocol version. Defaults to `v5`.
+MQTT protocol version. Defaults to `v4`.
 
 `{keepalive, Keepalive}`
 

@@ -209,7 +209,7 @@
 
 -record(mqtt_packet_connect, {
           proto_name   = <<"MQTT">>,
-          proto_ver    = ?MQTT_PROTO_V5,
+          proto_ver    = ?MQTT_PROTO_V4,
           is_bridge    = false,
           clean_start  = true,
           will_flag    = false,
