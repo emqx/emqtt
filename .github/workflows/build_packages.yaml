@@ -33,7 +33,44 @@ jobs:
             ERL_OTP: erl22.1
             SYSTEM: ${{ matrix.os }}
           run: |
-            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "make -C /emqtt pkg"
+            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -ce "make -C /emqtt pkg
+              cd /emqtt/_packages
+              for var in $(ls);do
+                case ${var##*.} in
+                  "zip")
+                    unzip -q $var
+                    ./emqtt/bin/emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    rm -rf emqtt
+                  ;;
+                  "deb")
+                    dpkg -i $var
+                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != "ii" ];then
+                        echo "package install error" && exit 1
+                    fi
+                    emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    dpkg -r emqtt
+                    if [ $(dpkg -l |grep emqx |awk '{print $1}') != "rc" ];then
+                        echo "package remove error" && exit 1
+                    fi
+                    dpkg -P emqtt
+                    if [ ! -z "$(dpkg -l |grep emqx)" ];then
+                        echo "package uninstall error" && exit 1
+                    fi
+                  ;;
+                  "rpm")
+                    rpm -ivh $var
+                    if [ $(rpm -q emqtt != emqtt ];then
+                        echo "package install error" && exit 1
+                    fi
+                    emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+                    rpm -e emqtt
+                    if [ $(rpm -q emqtt) == emqtt ];then
+                        echo "package uninstall error" && exit 1
+                    fi
+                  ;;
+                esac
+              done
+            "
             cd _packages && for var in $(ls); do sudo bash -c "echo $(sha256sum $var | awk '{print $1}') > $var.sha256"; done && cd -
         - uses: actions/upload-artifact@v1
           with:
@@ -61,7 +98,11 @@ jobs:
             pkg=emqtt-macos-$(git describe --tags --always).zip
             cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
             mv _build/emqtt/rel/$pkg _packages/
-            openssl dgst -sha256 ./_packages/$pkg | awk '{print $2}' > ./_packages/$pkg.sha256
+            cd _packages
+            unzip $pkg
+            ./emqtt/bin/emqtt pub -t "hello" --payload "hello world" -h broker.emqx.io
+            rm -rf emqtt
+            openssl dgst -sha256 $pkg | awk '{print $2}' > $pkg.sha256
         - uses: actions/upload-artifact@v1
           with:
             name: packages-mac
