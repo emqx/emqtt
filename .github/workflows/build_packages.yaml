@@ -33,7 +33,7 @@ jobs:
             ERL_OTP: erl22.1
             SYSTEM: ${{ matrix.os }}
           run: |
-            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -ce "make -C /emqtt pkg
+            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -cex "make -C /emqtt pkg
               cd /emqtt/_packages
               for var in $(ls);do
                 case ${var##*.} in
