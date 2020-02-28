@@ -1310,7 +1310,7 @@ next_packet_id(Id) -> Id + 1.
 
 reason_code_name(I, Ver) when Ver >= ?MQTT_PROTO_V5 ->
     reason_code_name(I);
-reason_code_name(0, _Ver) -> connection_acceptd;
+reason_code_name(0, _Ver) -> connection_accepted;
 reason_code_name(1, _Ver) -> unacceptable_protocol_version;
 reason_code_name(2, _Ver) -> client_identifier_not_valid;
 reason_code_name(3, _Ver) -> server_unavaliable;
