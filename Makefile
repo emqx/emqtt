@@ -6,7 +6,14 @@ REBAR := $(CURDIR)/rebar3
 
 REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
 
-all: compile
+all: emqtt
+
+emqtt: compile
+	$(REBAR) as emqtt release
+
+pkg: compile
+	$(REBAR) as emqtt_pkg release
+	make -C packages
 
 compile: escript
 	$(REBAR) compile
@@ -17,7 +24,7 @@ unlock:
 clean: distclean
 
 distclean:
-	@rm -rf _build erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
+	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
 
 xref:
 	$(REBAR) xref

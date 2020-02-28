@@ -12,14 +12,14 @@ MQTT client library and command line tools implemented in Erlang that supports M
 $ make
 ```
 
-Once you've compiled successfully you'll get a script named `emqtt_cli`. We can see what `emqtt_cli` can do with `--help` option:
+Once you've compiled successfully you will get a script called `emqtt` in `_buile/emqtt/rel/emqtt/bin`. We can see what `emqtt` can do with `--help` option:
 
 ```
-$ ./emqtt_cli --help
-Usage: emqtt_cli pub | sub [--help]
+$ ./emqtt --help
+Usage: emqtt pub | sub [--help]
 ```
 
-`emqtt_cli pub` is used to publish a single message on a topic and exit. `emqtt_cli sub` is used to subscribe to a topic and print the messages that it receives.
+`emqtt pub` is used to publish a single message on a topic and exit. `emqtt sub` is used to subscribe to a topic and print the messages that it receives.
 
 ### Command-line Syntax
 
@@ -43,21 +43,21 @@ A long option can have the following syntax:
 #### Synopsis
 
 ```
-emqtt_cli pub [-h [<host>]] [-p <port>] [-I <iface>]
-              [-V [<protocol_version>]] [-u <username>]
-              [-P <password>] [-C <clientid>] [-k [<keepalive>]]
-              [-t <topic>] [-q [<qos>]] [-r [<retain>]]
-              [--help <help>] [--will-topic <will_topic>]
-              [--will-payload <will_payload>]
-              [--will-qos [<will_qos>]]
-              [--will-retain [<will_retain>]]
-              [--enable-websocket [<enable_websocket>]]
-              [--enable-ssl [<enable_ssl>]]
-              [--tls-version [<tls_version>]]
-              [--CAfile <cafile>] [--cert <cert>]
-              [--key <key>] [--payload <payload>]
-              [--repeat [<repeat>]]
-              [--repeat-delay [<repeat_delay>]]
+./emqtt pub [-h [<host>]] [-p <port>] [-I <iface>]
+            [-V [<protocol_version>]] [-u <username>]
+            [-P <password>] [-C <clientid>] [-k [<keepalive>]]
+            [-t <topic>] [-q [<qos>]] [-r [<retain>]]
+            [--help <help>] [--will-topic <will_topic>]
+            [--will-payload <will_payload>]
+            [--will-qos [<will_qos>]]
+            [--will-retain [<will_retain>]]
+            [--enable-websocket [<enable_websocket>]]
+            [--enable-ssl [<enable_ssl>]]
+            [--tls-version [<tls_version>]]
+            [--CAfile <cafile>] [--cert <cert>]
+            [--key <key>] [--payload <payload>]
+            [--repeat [<repeat>]]
+            [--repeat-delay [<repeat_delay>]]
 ```
 
 #### Options
@@ -163,7 +163,7 @@ emqtt_cli pub [-h [<host>]] [-p <port>] [-I <iface>]
 **Publish a simple message over a TCP connection**
 
 ```
-$ ./emqtt_cli pub -t "hello" --payload "hello world"
+$ ./emqtt pub -t "hello" --payload "hello world"
 Client emqtt-zhouzibodeMacBook-Pro-4623faa14d8256e9cb95 sent CONNECT
 Client emqtt-zhouzibodeMacBook-Pro-4623faa14d8256e9cb95 sent PUBLISH (Q0, R0, D0, Topic=hello, Payload=...(11 bytes))
 Client emqtt-zhouzibodeMacBook-Pro-4623faa14d8256e9cb95 sent DISCONNECT
@@ -172,7 +172,7 @@ Client emqtt-zhouzibodeMacBook-Pro-4623faa14d8256e9cb95 sent DISCONNECT
 **Publish a simple message over a TLS connection**
 
 ```
-$ ./emqtt_cli pub --enable-ssl=true -t "hello" --payload "hello world" --CAfile=certs/cacert.pem --cert=certs/client-cert.pem --key=certs/client-key.pem
+$ ./emqtt pub --enable-ssl=true -t "hello" --payload "hello world" --CAfile=certs/cacert.pem --cert=certs/client-cert.pem --key=certs/client-key.pem
 Client emqtt-zhouzibodeMacBook-Pro-cec9489c26e3ed7a38eb sent CONNECT
 Client emqtt-zhouzibodeMacBook-Pro-cec9489c26e3ed7a38eb sent PUBLISH (Q0, R0, D0, Topic=hello, Payload=...(11 bytes))
 Client emqtt-zhouzibodeMacBook-Pro-cec9489c26e3ed7a38eb sent DISCONNECT
@@ -181,7 +181,7 @@ Client emqtt-zhouzibodeMacBook-Pro-cec9489c26e3ed7a38eb sent DISCONNECT
 **Publish a message repeatedly over a WebSocket connection**
 
 ```
-$ ./emqtt_cli pub --enable-websocket=true -p 8083 -t "hello" --payload "hello world"
+$ ./emqtt pub --enable-websocket=true -p 8083 -t "hello" --payload "hello world"
 Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent CONNECT
 Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent PUBLISH (Q0, R0, D0, Topic=hello, Payload=...(11 bytes))
 Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent DISCONNECT
@@ -192,21 +192,21 @@ Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent DISCONNECT
 #### Synopsis
 
 ```
-emqtt_cli sub [-h [<host>]] [-p <port>] [-I <iface>]
-              [-V [<protocol_version>]] [-u <username>]
-              [-P <password>] [-C <clientid>] [-k [<keepalive>]]
-              [-t <topic>] [-q [<qos>]] [--help <help>]
-              [--will-topic <will_topic>]
-              [--will-payload <will_payload>]
-              [--will-qos [<will_qos>]]
-              [--will-retain [<will_retain>]]
-              [--enable-websocket [<enable_websocket>]]
-              [--enable-ssl [<enable_ssl>]]
-              [--tls-version [<tls_version>]]
-              [--CAfile <cafile>] [--cert <cert>]
-              [--key <key>]
-              [--retain-as-publish [<retain_as_publish>]]
-              [--retain-handling [<retain_handling>]]
+./emqtt sub [-h [<host>]] [-p <port>] [-I <iface>]
+            [-V [<protocol_version>]] [-u <username>]
+            [-P <password>] [-C <clientid>] [-k [<keepalive>]]
+            [-t <topic>] [-q [<qos>]] [--help <help>]
+            [--will-topic <will_topic>]
+            [--will-payload <will_payload>]
+            [--will-qos [<will_qos>]]
+            [--will-retain [<will_retain>]]
+            [--enable-websocket [<enable_websocket>]]
+            [--enable-ssl [<enable_ssl>]]
+            [--tls-version [<tls_version>]]
+            [--CAfile <cafile>] [--cert <cert>]
+            [--key <key>]
+            [--retain-as-publish [<retain_as_publish>]]
+            [--retain-handling [<retain_handling>]]
 ```
 
 #### Options
@@ -304,7 +304,7 @@ emqtt_cli sub [-h [<host>]] [-p <port>] [-I <iface>]
 **Build Non-shared Subscription and Recv "hello world"**
 
 ```
-$ ./emqtt_cli sub -t "hello"
+$ ./emqtt sub -t "hello"
 Client emqtt-zhouzibodeMacBook-Pro-1686fee6fdb99f674f2c sent CONNECT
 Client emqtt-zhouzibodeMacBook-Pro-1686fee6fdb99f674f2c subscribed to hello
 hello world
@@ -313,7 +313,7 @@ hello world
 **Build Shared Subscription and Recv "hello world"**
 
 ```
-$ ./emqtt_cli sub -t '$share/group/hello'
+$ ./emqtt sub -t '$share/group/hello'
 Client emqtt-zhouzibodeMacBook-Pro-288e65bb3f4013d30249 sent CONNECT
 Client emqtt-zhouzibodeMacBook-Pro-288e65bb3f4013d30249 subscribed to $share/group/hello
 hello world
@@ -546,7 +546,7 @@ Password used by the server for authentication and authorization.
 
 `{proto_ver, ProtocolVersion}`
 
-MQTT protocol version. Defaults to `v5`.
+MQTT protocol version. Defaults to `v4`.
 
 `{keepalive, Keepalive}`
 
