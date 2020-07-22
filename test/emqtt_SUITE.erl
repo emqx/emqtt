@@ -71,7 +71,7 @@ groups() ->
        retain_as_publish_test]}].
 
 init_per_suite(Config) ->
-    emqx_ct_helpers:start_apps([emqx_auth_username]),
+    emqx_ct_helpers:start_apps([]),
     Config.
 
 end_per_suite(_Config) ->
@@ -332,13 +332,10 @@ anonymous_test(_Config) ->
     end,
     process_flag(trap_exit, false),
 
-    emqx_plugins:load(emqx_auth_username),
-    emqx_auth_username:add_user(<<"test">>, <<"password">>),
-
+    application:set_env(emqx, allow_anonymous, true),
     {ok, C2} = emqtt:start_link([{username, <<"test">>}, {password, <<"password">>}]),
     {ok, _} = emqtt:connect(C2),
-    ok = emqtt:disconnect(C2),
-    application:set_env(emqx, allow_anonymous, true).
+    ok = emqtt:disconnect(C2).
 
 retry_interval_test(_Config) ->
     {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}]),
