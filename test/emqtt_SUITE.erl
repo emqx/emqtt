@@ -68,10 +68,11 @@ groups() ->
        dollar_topics_test]},
     {mqttv5, [non_parallel_tests],
       [basic_test_v5,
-       retain_as_publish_test]}].
+       retain_as_publish_test,
+       enhanced_auth]}].
 
 init_per_suite(Config) ->
-    emqx_ct_helpers:start_apps([]),
+    emqx_ct_helpers:start_apps([emqx_sasl]),
     Config.
 
 end_per_suite(_Config) ->
@@ -327,7 +328,7 @@ anonymous_test(_Config) ->
     process_flag(trap_exit, true),
     {ok, C1} = emqtt:start_link(),
     {_,{unauthorized_client,_}} = emqtt:connect(C1),
-    receive {'EXIT', _, _} -> ok
+    receive {'EXIT',_, _} -> ok
     after 500 -> error("allow_anonymous")
     end,
     process_flag(trap_exit, false),
@@ -335,7 +336,10 @@ anonymous_test(_Config) ->
     application:set_env(emqx, allow_anonymous, true),
     {ok, C2} = emqtt:start_link([{username, <<"test">>}, {password, <<"password">>}]),
     {ok, _} = emqtt:connect(C2),
-    ok = emqtt:disconnect(C2).
+    ok = emqtt:disconnect(C2),
+
+    [{_, #{clientinfo := #{username := Username}}, _}] = ets:tab2list(emqx_channel_info),
+    ?assertEqual(<<"test">>, Username).
 
 retry_interval_test(_Config) ->
     {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}]),
@@ -514,3 +518,41 @@ retain_as_publish_test(_) ->
 
     ok = emqtt:disconnect(Pub),
     clean_retained(Topic).
+
+enhanced_auth(_) ->
+    process_flag(trap_exit, true),
+
+    Username = <<"username">>,
+    Password = <<"password">>,
+    Salt = <<"emqx">>,
+    AuthMethod = <<"SCRAM-SHA-1">>,
+    ok = emqx_sasl_scram:add(Username, Password, Salt),
+
+    {error, _} = emqtt:start_link([{clean_start, true},
+                                   {proto_ver, v5},
+                                   {enhanced_auth, #{method => AuthMethod,
+                                                     params => #{},
+                                                     function => fun (_State) -> {error, authentication_failed} end}},
+                                   {connect_timeout, 6000}]),
+
+
+    {ok, Client1} = emqtt:start_link([{clean_start, true},
+                                     {proto_ver, v5},
+                                     {enhanced_auth, #{method => AuthMethod,
+                                                       params => #{username => Username,
+                                                                   password => Password,
+                                                                   salt => Salt}}},
+                                     {connect_timeout, 6000}]),
+    {ok, _} = emqtt:connect(Client1),
+
+    timer:sleep(200),
+    ok = emqtt:reauthentication(Client1),
+
+    timer:sleep(200),
+    ErrorFun = fun (_State) -> {error, authentication_failed} end,
+    {error,authentication_failed} = emqtt:reauthentication(Client1, #{params => #{username => Username,
+                                                                                  password => Password,
+                                                                                  salt => Salt},
+                                                                      function => ErrorFun}),
+
+    process_flag(trap_exit, false).
