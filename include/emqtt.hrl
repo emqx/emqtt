@@ -21,8 +21,9 @@
 %% MQTT SockOpts
 %%--------------------------------------------------------------------
 
--define(MQTT_SOCKOPTS, [binary, {packet, raw}, {reuseaddr, true},
-                        {backlog, 512}, {nodelay, true}]).
+-define(MQTT_SOCKOPTS, [binary, {packet, raw},
+                                {backlog, 512},
+                                {nodelay, true}]).
 
 %%--------------------------------------------------------------------
 %% MQTT Protocol Version and Names
