@@ -43,6 +43,8 @@
         , publish/5
         , unsubscribe/2
         , unsubscribe/3
+        , reauthentication/1
+        , reauthentication/2
         ]).
 
 %% Puback...
@@ -162,6 +164,22 @@
 
 -type(client() :: pid() | atom()).
 
+-type(method() :: binary()).
+
+-type(params() :: any()).
+
+-type(enhanced_auth_state() :: #{method => method(),
+                        params => params(),
+                        stage => initialized | atom(),
+                        latest_server_data => undefined | binary(),
+                        any() => any()}).
+
+-type(enhanced_auth_function() :: fun((EnhancedAuthState :: enhanced_auth_state()) -> {ok, NEnhancedAuthState :: enhanced_auth_state()} 
+                                                          | {ok, NAuthData :: binary(), NEnhancedAuthState :: enhanced_auth_state()})).
+
+-type(enhanced_auth() :: #{method => method(), params => params()} 
+                       | #{method => method(), params => params(), function => enhanced_auth_function()}).
+
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
 -record(state, {
@@ -189,6 +207,8 @@
           will_flag       :: boolean(),
           will_msg        :: mqtt_msg(),
           properties      :: properties(),
+          enhanced_auth   :: enhanced_auth(),
+          enhanced_auth_state      :: enhanced_auth_state(),
           pending_calls   :: list(),
           subscriptions   :: map(),
           max_inflight    :: infinity | pos_integer(),
@@ -388,6 +408,12 @@ disconnect(Client, ReasonCode) ->
 disconnect(Client, ReasonCode, Properties) ->
     gen_statem:call(Client, {disconnect, ReasonCode, Properties}).
 
+reauthentication(Client) ->
+    reauthentication(Client, #{}).
+
+reauthentication(Client, EnhancedAuth) when is_map(EnhancedAuth) ->
+    gen_statem:call(Client, {reauthentication, EnhancedAuth}).
+
 %%--------------------------------------------------------------------
 %% For test cases
 %%--------------------------------------------------------------------
@@ -476,13 +502,16 @@ init([Options]) ->
                                  inflight        = #{},
                                  awaiting_rel    = #{},
                                  properties      = #{},
+                                 enhanced_auth   = #{},
+                                 enhanced_auth_state      = #{},
                                  auto_ack        = true,
                                  ack_timeout     = ?DEFAULT_ACK_TIMEOUT,
                                  retry_interval  = ?DEFAULT_RETRY_INTERVAL,
                                  connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
                                  last_packet_id  = 1
                                 }),
-    {ok, initialized, init_parse_state(State)}.
+    NState = init_enhanced_auth(State),
+    {ok, initialized, init_parse_state(NState)}.
 
 random_client_id() ->
     rand:seed(exsplus, erlang:timestamp()),
@@ -575,6 +604,8 @@ init([{force_ping, ForcePing} | Opts], State) when is_boolean(ForcePing) ->
     init(Opts, State#state{force_ping = ForcePing});
 init([{properties, Properties} | Opts], State = #state{properties = InitProps}) ->
     init(Opts, State#state{properties = maps:merge(InitProps, Properties)});
+init([{enhanced_auth, EnhancedAuth} | Opts], State = #state{enhanced_auth = InitEnhancedAuth}) ->
+    init(Opts, State#state{enhanced_auth = maps:merge(InitEnhancedAuth, EnhancedAuth)});
 init([{max_inflight, infinity} | Opts], State) ->
     init(Opts, State#state{max_inflight = infinity,
                            inflight     = #{}});
@@ -603,7 +634,27 @@ init_will_msg({retain, Retain}, WillMsg) when is_boolean(Retain) ->
 init_will_msg({qos, QoS}, WillMsg) ->
     WillMsg#mqtt_msg{qos = ?QOS_I(QoS)}.
 
-init_parse_state(State = #state{proto_ver = Ver, properties = Properties}) ->
+init_enhanced_auth(State = #state{proto_ver = ?MQTT_PROTO_V5,
+                                properties = Properties,
+                                enhanced_auth =#{
+                                    method := AuthMethod,
+                                    params := Parms
+                                    } = EnhancedAuth,
+                                enhanced_auth_state = EnhancedAuthState}) ->
+    AuthFun = maps:get(function, EnhancedAuth, fun emqtt_sasl:check/1),
+    {ok, AuthData, NEnhancedAuthState} = erlang:apply(AuthFun, [maps:merge(EnhancedAuthState,
+                                                        #{method => AuthMethod,
+                                                          params => Parms,
+                                                          stage => initialized,
+                                                          latest_server_data => undefined})]),
+    State#state{properties = maps:merge(Properties, #{'Authentication-Method' => AuthMethod,'Authentication-Data' => AuthData}),
+                enhanced_auth = maps:merge(EnhancedAuth, #{function => AuthFun}),
+                enhanced_auth_state = NEnhancedAuthState};
+
+init_enhanced_auth(State) -> State.
+
+init_parse_state(State = #state{proto_ver = Ver,
+                                properties = Properties}) ->
     MaxSize = maps:get('Maximum-Packet-Size', Properties, ?MAX_PACKET_SIZE),
     ParseState = emqtt_frame:initial_parse_state(
 		   #{max_size => MaxSize, version => Ver}),
@@ -626,7 +677,7 @@ initialized({call, From}, {connect, ConnMod}, State = #state{sock_opts = SockOpt
             case mqtt_connect(run_sock(State#state{conn_mod = ConnMod, socket = Sock})) of
                 {ok, NewState} ->
                     {next_state, waiting_for_connack,
-                     add_call(new_call(connect, From), NewState), [Timeout]};
+                    add_call(new_call(connect, From), NewState), [Timeout]};
                 Error = {error, Reason} ->
                     {stop_and_reply, Reason, [{reply, From, Error}]}
             end;
@@ -666,6 +717,54 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  will_payload = WillPayload,
                                  username     = Username,
                                  password     = Password}), State).
+
+waiting_for_connack(cast, _Packet = ?AUTH_PACKET(?RC_CONTINUE_AUTHENTICATION, 
+                                                 Properties = #{'Authentication-Method' := AuthMethod,
+                                                                'Authentication-Data' := AuthData}),
+                    State = #state{proto_ver = ?MQTT_PROTO_V5,
+                                   properties = AllProps,
+                                   enhanced_auth = #{function := AuthFun},
+                                   enhanced_auth_state = EnhancedAuthState}) ->
+    case erlang:apply(AuthFun, [maps:merge(EnhancedAuthState, #{latest_server_data => AuthData})]) of
+        {ok, NAuthData, NEnhancedAuthState} ->
+            NPacket = ?AUTH_PACKET(?RC_CONTINUE_AUTHENTICATION, #{'Authentication-Method' => AuthMethod,
+                                                                  'Authentication-Data' => NAuthData}),
+            
+            case send(NPacket, State) of
+                {ok, NState} ->
+                    {keep_state, NState#state{properties = maps:merge(AllProps, maps:merge(Properties, #{'Authentication-Data' => NAuthData})),
+                                              enhanced_auth_state = NEnhancedAuthState}};
+                {error, Reason} ->
+                    {stop, Reason}
+            end;
+        Reason -> {stop, Reason}
+    end;
+
+waiting_for_connack(cast, _Packet = ?CONNACK_PACKET(?RC_SUCCESS,
+                                                   SessPresent,
+                                                   Properties = #{'Authentication-Method' := _AuthMethod,
+                                                                  'Authentication-Data' := AuthData}),
+                    State = #state{properties = AllProps,
+                                   clientid   = ClientId,
+                                   enhanced_auth = #{function := AuthFun},
+                                   enhanced_auth_state = EnhancedAuthState}) ->
+    case take_call(connect, State) of
+        {value, #call{from = From}, State1} ->
+            case erlang:apply(AuthFun, [maps:merge(EnhancedAuthState, #{latest_server_data => AuthData})]) of
+                {ok, NEnhancedAuthState} ->
+                    AllProps1 = maps:merge(AllProps, Properties),
+                    Reply = {ok, Properties},
+                    State2 = State1#state{clientid = assign_id(ClientId, AllProps1),
+                                          properties = AllProps1,
+                                          session_present = SessPresent,
+                                          enhanced_auth_state = NEnhancedAuthState},
+                    {next_state, connected, ensure_keepalive_timer(State2),
+                        [{reply, From, Reply}]};
+                _ -> {stop, bad_connack}
+            end;
+        false ->
+            {stop, bad_connack}
+    end;
 
 waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
@@ -803,6 +902,25 @@ connected({call, From}, {disconnect, ReasonCode, Properties}, State) ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
 
+connected({call, From}, {reauthentication, EnhancedAuth}, State = #state{proto_ver = ?MQTT_PROTO_V5,
+                                                                         properties = #{'Authentication-Method' := AuthMethod},
+                                                                         enhanced_auth = OldEnhancedAuth,
+                                                                         enhanced_auth_state = EnhancedAuthState}) ->
+    NEnhancedAuth = #{method := AuthMethod, params := Parms, function := AuthFun} = maps:merge(OldEnhancedAuth, EnhancedAuth),
+
+    case  erlang:apply(AuthFun, [maps:merge(EnhancedAuthState, #{params => Parms})]) of
+        {ok, AuthData, NEnhancedAuthState} ->
+            case send(?AUTH_PACKET(?RC_RE_AUTHENTICATE, #{'Authentication-Method' => AuthMethod,
+                                                            'Authentication-Data' => AuthData}), State) of
+                {ok, NewState} ->
+                    {keep_state, NewState#state{enhanced_auth = NEnhancedAuth, enhanced_auth_state = NEnhancedAuthState},[{reply, From, ok}]};
+                Error = {error, Reason} ->
+                    {stop_and_reply, Reason, [{reply, From, Error}]}                                        
+            end;
+        Error = {error, Reason} ->
+            {stop_and_reply, Reason, [{reply, From, Error}]}
+    end;
+
 connected(cast, {puback, PacketId, ReasonCode, Properties}, State) ->
     send_puback(?PUBACK_PACKET(PacketId, ReasonCode, Properties), State);
 
@@ -899,6 +1017,41 @@ connected(cast, ?PACKET(?PINGRESP), State) ->
 
 connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
+
+connected(cast, ?AUTH_PACKET(?RC_CONTINUE_AUTHENTICATION, 
+                             Properties = #{'Authentication-Method' := AuthMethod,
+                                            'Authentication-Data' := AuthData}),
+                    State = #state{proto_ver = ?MQTT_PROTO_V5,
+                                   properties = AllProps,
+                                   enhanced_auth = #{function := AuthFun},
+                                   enhanced_auth_state = EnhancedAuthState}) ->
+    case erlang:apply(AuthFun, [maps:merge(EnhancedAuthState, #{latest_server_data => AuthData})]) of
+        {ok, NAuthData, NEnhancedAuthState} ->
+            NPacket = ?AUTH_PACKET(?RC_CONTINUE_AUTHENTICATION, #{'Authentication-Method' => AuthMethod,
+                                                                  'Authentication-Data' => NAuthData}),
+            case send(NPacket, State) of
+                {ok, NState} ->
+                    {keep_state, NState#state{properties = maps:merge(AllProps, maps:merge(Properties, #{'Authentication-Method' => NAuthData})),
+                                              enhanced_auth_state = NEnhancedAuthState}};
+                {error, Reason} ->
+                    {stop, Reason}
+            end;
+        Reason -> {stop, Reason}
+    end;
+
+connected(cast, ?AUTH_PACKET(?RC_SUCCESS, 
+                             Properties = #{'Authentication-Method' := _AuthMethod,
+                                            'Authentication-Data' := AuthData}),
+                    State = #state{proto_ver = ?MQTT_PROTO_V5,
+                                   properties = AllProps,
+                                   enhanced_auth = #{function := AuthFun},
+                                   enhanced_auth_state = EnhancedAuthState}) ->
+    case erlang:apply(AuthFun, [maps:merge(EnhancedAuthState, #{latest_server_data => AuthData})]) of
+        {ok, NEnhancedAuthState} ->
+            {keep_state, State#state{properties = maps:merge(AllProps, Properties),
+                                     enhanced_auth_state = NEnhancedAuthState}};
+        Reason -> {stop, Reason}
+    end;
 
 connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) ->
     case send(?PACKET(?PINGREQ), State) of

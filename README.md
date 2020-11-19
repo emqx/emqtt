@@ -369,7 +369,8 @@ option() = {name, atom()} |
            {auto_ack, boolean()} |
            {ack_timeout, pos_integer()} |
            {force_ping, boolean()} |
-           {properties, properties()}
+           {properties, properties()} |
+           {enhanced_auth, enhanced_auth()}
 ```
 
 <span id="client">**client()**</span>
@@ -468,6 +469,33 @@ pubopt() = {retain, boolean()} |
 
 ```
 reason_code() = 0..16#FF
+```
+
+<span id="method">**method()**</span>
+
+```
+method() = binary()
+```
+
+<span id="params">**params()**</span>
+
+```
+params() = any()
+```
+
+<span id="enhanced_auth_state">**enhanced_auth_state()**</span>
+
+```
+enhanced_auth_state() = #{method => method(), params => params(), stage => initialized | atom(), latest_server_data => undefined | binary(), any() => any()}).
+```
+
+<span id="enhanced_auth">**enhanced_auth()**</span>
+
+```
+enhanced_auth() = #{method => method(), params => params()} |
+                  #{method => method(), params => params(),
+                  function => fun((EnhancedAuthState :: enhanced_auth_state()) ->
+                       {ok, NEnhancedAuthState :: enhanced_auth_state()} | {ok, NAuthData :: binary(), NEnhancedAuthState :: enhanced_auth_state()})}
 ```
 
 ### Exports
@@ -595,6 +623,10 @@ If false (the default), if any other packet is sent during keep alive interval, 
 `{properties, Properties}`
 
 Properties of CONNECT packet.
+
+`{enhanced_auth, EnhancedAuth}`
+
+The data required to enhance authentication
 
 **emqtt:connect(Client) -> {ok, Properties} | {error, Reason}**
 
@@ -765,6 +797,18 @@ Send a `PUBREL` packet to the MQTT server. `PacketId`, `ReasonCode` and `Propert
 &ensp;&ensp;&ensp;&ensp;Same as `emqtt:puback/2, 3, 4`.
 
 Send a `PUBCOMP` packet to the MQTT server. `PacketId`, `ReasonCode` and `Properties` specify packet identifier, reason code and properties for `PUBCOMP` packet.
+
+**emqtt:reauthentication(Client) -> ok**
+
+**emqtt:reauthentication(Client, EnhancedAuth) -> ok**
+
+&ensp;&ensp;**Types**
+
+&ensp;&ensp;&ensp;&ensp;**Client = [client()](#client)**
+
+&ensp;&ensp;&ensp;&ensp;**EnhancedAuth = [enhanced_auth](#enhanced_auth)**
+
+Send a `AUTH` packet to the MQTT server.
 
 **emqtt:subscriptions(Client) -> Subscriptions**
 
