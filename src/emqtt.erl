@@ -914,6 +914,8 @@ connected(info, {timeout, TRef, keepalive},
         true ->
             case send(?PACKET(?PINGREQ), State) of
                 {ok, NewState} ->
+                    {ok, [{send_oct, Val}]} = ConnMod:getstat(Sock, [send_oct]),
+                    put(send_oct, Val),
                     {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
                 Error -> {stop, Error}
             end;
