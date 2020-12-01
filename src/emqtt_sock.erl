@@ -38,7 +38,7 @@
 -export_type([socket/0, option/0]).
 
 -define(DEFAULT_TCP_OPTIONS, [binary, {packet, raw}, {active, false},
-                              {nodelay, true}, {reuseaddr, true}]).
+                              {nodelay, true}]).
 
 -spec(connect(inet:ip_address() | inet:hostname(),
               inet:port_number(), [option()], timeout())
