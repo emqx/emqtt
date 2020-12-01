@@ -100,9 +100,12 @@
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
 -define(NO_MSG_HDLR, undefined).
--type(msg_handler() :: #{puback := fun((_) -> any()),
-                         publish := fun((emqx_types:message()) -> any()),
-                         disconnected := fun(({reason_code(), _Properties :: term()}) -> any())
+
+-type(mfas() :: {module(), atom(), list()} | {function(), list()}).
+
+-type(msg_handler() :: #{puback := fun((_) -> any()) | mfas(),
+                         publish := fun((emqx_types:message()) -> any()) | mfas(),
+                         disconnected := fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
 
 -type(option() :: {name, atom()}
@@ -1208,8 +1211,21 @@ eval_msg_handler(#state{msg_handler = ?NO_MSG_HDLR,
     ok;
 eval_msg_handler(#state{msg_handler = Handler}, Kind, Msg) ->
     F = maps:get(Kind, Handler),
-    _ = F(Msg),
+    _ = apply_handler_function(F, Msg),
     ok.
+
+apply_handler_function(F, Msg)
+  when is_function(F) ->
+    erlang:apply(F, [Msg]);
+apply_handler_function({F, A}, Msg)
+  when is_function(F),
+       is_list(A) ->
+    erlang:apply(F, [Msg] ++ A);
+apply_handler_function({M, F, A}, Msg)
+  when is_atom(M),
+       is_atom(F),
+       is_list(A) ->
+    erlang:apply(M, F, [Msg] ++ A).
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
