@@ -175,7 +175,7 @@
           port            :: inet:port_number(),
           hosts           :: [{host(), inet:port_number()}],
           conn_mod        :: conn_mod(),
-          socket          :: inet:socket() | pid(),
+          socket          :: inet:socket() | pid() | undefined,
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
@@ -199,9 +199,9 @@
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
-          ack_timer       :: reference(),
+          ack_timer       :: reference() | undefined,
           retry_interval  :: pos_integer(),
-          retry_timer     :: reference(),
+          retry_timer     :: reference() | undefined,
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
           parse_state     :: emqtt_frame:parse_state()
@@ -273,15 +273,12 @@ call(Client, Req) ->
       -> subscribe_ret()).
 subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, {Topic, ?QOS_0});
-subscribe(Client, {Topic, QoS}) when is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, {Topic, ?QOS_I(QoS)});
-subscribe(Client, {Topic, QoS}) when is_binary(Topic), ?IS_QOS(QoS) ->
+subscribe(Client, {Topic, QoS}) when is_binary(Topic),
+                                     ?IS_QOS_OR_QOSNAME(QoS) ->
     subscribe(Client, [{Topic, ?QOS_I(QoS)}]);
 subscribe(Client, Topics) when is_list(Topics) ->
     subscribe(Client, #{}, lists:map(
-                             fun({Topic, QoS}) when is_binary(Topic), is_atom(QoS) ->
-                                 {Topic, [{qos, ?QOS_I(QoS)}]};
-                                ({Topic, QoS}) when is_binary(Topic), ?IS_QOS(QoS) ->
+                             fun({Topic, QoS}) when is_binary(Topic), ?IS_QOS_OR_QOSNAME(QoS) ->
                                  {Topic, [{qos, ?QOS_I(QoS)}]};
                                 ({Topic, Opts}) when is_binary(Topic), is_list(Opts) ->
                                  {Topic, Opts}
@@ -291,10 +288,8 @@ subscribe(Client, Topics) when is_list(Topics) ->
                 subscribe_ret();
                (client(), properties(), [{topic(), qos() | [subopt()]}]) ->
                 subscribe_ret()).
-subscribe(Client, Topic, QoS) when is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, Topic, ?QOS_I(QoS));
-subscribe(Client, Topic, QoS) when is_binary(Topic), ?IS_QOS(QoS) ->
-    subscribe(Client, Topic, [{qos, QoS}]);
+subscribe(Client, Topic, QoS) when is_binary(Topic), ?IS_QOS_OR_QOSNAME(QoS) ->
+    subscribe(Client, Topic, [{qos, ?QOS_I(QoS)}]);
 subscribe(Client, Topic, Opts) when is_binary(Topic), is_list(Opts) ->
     subscribe(Client, #{}, [{Topic, Opts}]);
 subscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics) ->
@@ -304,11 +299,8 @@ subscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics) -
 -spec(subscribe(client(), properties(), topic(), qos() | qos_name() | [subopt()])
       -> subscribe_ret()).
 subscribe(Client, Properties, Topic, QoS)
-    when is_map(Properties), is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, Properties, Topic, ?QOS_I(QoS));
-subscribe(Client, Properties, Topic, QoS)
-    when is_map(Properties), is_binary(Topic), ?IS_QOS(QoS) ->
-    subscribe(Client, Properties, Topic, [{qos, QoS}]);
+    when is_map(Properties), is_binary(Topic), ?IS_QOS_OR_QOSNAME(QoS) ->
+    subscribe(Client, Properties, Topic, [{qos, ?QOS_I(QoS)}]);
 subscribe(Client, Properties, Topic, Opts)
     when is_map(Properties), is_binary(Topic), is_list(Opts) ->
     subscribe(Client, Properties, [{Topic, Opts}]).
@@ -333,21 +325,20 @@ parse_subopt([{qos, QoS} | Opts], Result) ->
 parse_subopt([_ | Opts], Result) ->
     parse_subopt(Opts, Result).
 
--spec(publish(client(), topic(), payload()) -> ok | {error, term()}).
+-spec(publish(client(), topic(), payload())
+      -> ok | {error, term()}).
 publish(Client, Topic, Payload) when is_binary(Topic) ->
     publish(Client, #mqtt_msg{topic = Topic, qos = ?QOS_0, payload = iolist_to_binary(Payload)}).
 
 -spec(publish(client(), topic(), payload(), qos() | qos_name() | [pubopt()])
-        -> ok | {ok, packet_id()} | {error, term()}).
-publish(Client, Topic, Payload, QoS) when is_binary(Topic), is_atom(QoS) ->
+      -> ok | {ok, packet_id()} | {error, term()} | {error, {packet_id(), term()}}).
+publish(Client, Topic, Payload, QoS) when is_binary(Topic), ?IS_QOS_OR_QOSNAME(QoS) ->
     publish(Client, Topic, Payload, [{qos, ?QOS_I(QoS)}]);
-publish(Client, Topic, Payload, QoS) when is_binary(Topic), ?IS_QOS(QoS) ->
-    publish(Client, Topic, Payload, [{qos, QoS}]);
 publish(Client, Topic, Payload, Opts) when is_binary(Topic), is_list(Opts) ->
     publish(Client, Topic, #{}, Payload, Opts).
 
 -spec(publish(client(), topic(), properties(), payload(), [pubopt()])
-      -> ok | {ok, packet_id()} | {error, term()}).
+      -> ok | {ok, packet_id()} | {error, term()} | {error, {packet_id(), term()}}).
 publish(Client, Topic, Properties, Payload, Opts)
     when is_binary(Topic), is_map(Properties), is_list(Opts) ->
     ok = emqtt_props:validate(Properties),
@@ -359,7 +350,7 @@ publish(Client, Topic, Properties, Payload, Opts)
                               props   = Properties,
                               payload = iolist_to_binary(Payload)}).
 
--spec(publish(client(), #mqtt_msg{}) -> ok | {ok, packet_id()} | {error, term()}).
+-spec(publish(client(), #mqtt_msg{}) -> ok | {ok, packet_id()} | {error, term()} | {error, {packet_id(), term()}}).
 publish(Client, Msg) ->
     gen_statem:call(Client, {publish, Msg}).
 
@@ -379,15 +370,15 @@ unsubscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics)
 ping(Client) ->
     gen_statem:call(Client, ping).
 
--spec(disconnect(client()) -> ok).
+-spec(disconnect(client()) -> ok | {error, term()}).
 disconnect(Client) ->
     disconnect(Client, ?RC_SUCCESS).
 
--spec(disconnect(client(), reason_code()) -> ok).
+-spec(disconnect(client(), reason_code()) -> ok | {error, term()}).
 disconnect(Client, ReasonCode) ->
     disconnect(Client, ReasonCode, #{}).
 
--spec(disconnect(client(), reason_code(), properties()) -> ok).
+-spec(disconnect(client(), reason_code(), properties()) -> ok | {error, term()}).
 disconnect(Client, ReasonCode, Properties) ->
     gen_statem:call(Client, {disconnect, ReasonCode, Properties}).
 

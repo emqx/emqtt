@@ -44,9 +44,9 @@
                      max_size => 1..?MAX_PACKET_SIZE,
                      version  => version()}).
 
--opaque(parse_state() :: {none, options()} | cont_fun()).
+-type(parse_state() :: {none, options()} | cont_fun()).
 
--opaque(parse_result() :: {more, cont_fun()}
+-type(parse_result() :: {more, cont_fun()}
                         | {ok, #mqtt_packet{}, binary(), parse_state()}).
 
 -type(cont_fun() :: fun((binary()) -> parse_result())).
@@ -674,8 +674,6 @@ serialize_utf8_pair({Name, Value}) ->
 serialize_binary_data(Bin) ->
     [<<(byte_size(Bin)):16/big-unsigned-integer>>, Bin].
 
-serialize_utf8_string(undefined, false) ->
-    error(utf8_string_undefined);
 serialize_utf8_string(undefined, true) ->
     <<>>;
 serialize_utf8_string(String, _AllowNull) ->

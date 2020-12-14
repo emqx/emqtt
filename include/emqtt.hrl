@@ -40,6 +40,8 @@
 
 -define(IS_QOS(I), (I >= ?QOS_0 andalso I =< ?QOS_2)).
 
+-define(IS_QOS_OR_QOSNAME(I), (?IS_QOS(I) orelse ?IS_QOS_NAME(I))).
+
 -define(QOS_I(Name),
     begin
         (case Name of
@@ -278,9 +280,9 @@
           qos = ?QOS_0   :: emqtt:qos(),
           retain = false :: boolean(),
           dup = false    :: boolean(),
-          packet_id      :: emqtt:packet_id(),
+          packet_id      :: emqtt:packet_id() | undefined,
           topic          :: emqtt:topic(),
-          props          :: emqtt:properties(),
+          props          :: emqtt:properties() | undefined,
           payload        :: binary()
          }).
 
