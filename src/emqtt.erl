@@ -135,7 +135,6 @@
                 | {will_props, properties()}
                 | {auto_ack, boolean()}
                 | {ack_timeout, pos_integer()}
-                | {force_ping, boolean()}
                 | {properties, properties()}).
 
 -type(maybe(T) :: undefined | T).
@@ -187,7 +186,6 @@
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
           keepalive_timer :: maybe(reference()),
-          force_ping      :: boolean(),
           paused          :: boolean(),
           will_flag       :: boolean(),
           will_msg        :: mqtt_msg(),
@@ -469,7 +467,6 @@ init([Options]) ->
                                  proto_ver       = ?MQTT_PROTO_V4,
                                  proto_name      = <<"MQTT">>,
                                  keepalive       = ?DEFAULT_KEEPALIVE,
-                                 force_ping      = false,
                                  paused          = false,
                                  will_flag       = false,
                                  will_msg        = #mqtt_msg{},
@@ -572,10 +569,6 @@ init([{connect_timeout, Timeout}| Opts], State) ->
     init(Opts, State#state{connect_timeout = timer:seconds(Timeout)});
 init([{ack_timeout, Timeout}| Opts], State) ->
     init(Opts, State#state{ack_timeout = timer:seconds(Timeout)});
-init([force_ping | Opts], State) ->
-    init(Opts, State#state{force_ping = true});
-init([{force_ping, ForcePing} | Opts], State) when is_boolean(ForcePing) ->
-    init(Opts, State#state{force_ping = ForcePing});
 init([{properties, Properties} | Opts], State = #state{properties = InitProps}) ->
     init(Opts, State#state{properties = maps:merge(InitProps, Properties)});
 init([{max_inflight, infinity} | Opts], State) ->
@@ -903,29 +896,11 @@ connected(cast, ?PACKET(?PINGRESP), State) ->
 connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
-connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) ->
+connected(info, {timeout, _TRef, keepalive}, State) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
             {keep_state, ensure_keepalive_timer(NewState)};
         Error -> {stop, Error}
-    end;
-
-connected(info, {timeout, TRef, keepalive},
-          State = #state{conn_mod = ConnMod, socket = Sock,
-                         paused = Paused, keepalive_timer = TRef}) ->
-    case (not Paused) andalso should_ping(ConnMod, Sock) of
-        true ->
-            case send(?PACKET(?PINGREQ), State) of
-                {ok, NewState} ->
-                    {ok, [{send_oct, Val}]} = ConnMod:getstat(Sock, [send_oct]),
-                    put(send_oct, Val),
-                    {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
-                Error -> {stop, Error}
-            end;
-        false ->
-            {keep_state, ensure_keepalive_timer(State), [hibernate]};
-        {error, Reason} ->
-            {stop, Reason}
     end;
 
 connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
@@ -1026,15 +1001,6 @@ code_change(_Vsn, State, Data, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-
-should_ping(ConnMod, Sock) ->
-    case ConnMod:getstat(Sock, [send_oct]) of
-        {ok, [{send_oct, Val}]} ->
-            OldVal = get(send_oct), put(send_oct, Val),
-            OldVal == undefined orelse OldVal == Val;
-        Error = {error, _Reason} ->
-            Error
-    end.
 
 is_inflight_full(#state{max_inflight = infinity}) ->
     false;
