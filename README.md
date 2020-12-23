@@ -494,7 +494,7 @@ enhanced_auth_state() = #{method => method(), params => params(), stage => initi
 ```
 enhanced_auth() = #{method => method(), params => params()} |
                   #{method => method(), params => params(),
-                  function => fun((EnhancedAuthState :: enhanced_auth_state()) ->
+                    function => fun((EnhancedAuthState :: enhanced_auth_state()) ->
                        {ok, NEnhancedAuthState :: enhanced_auth_state()} | {ok, NAuthData :: binary(), NEnhancedAuthState :: enhanced_auth_state()})}
 ```
 
