@@ -101,6 +101,8 @@
 %% as well as the disconnect event.
 -define(NO_MSG_HDLR, undefined).
 
+-type(second_timeout() :: non_neg_integer()).
+
 -type(mfas() :: {module(), atom(), list()} | {function(), list()}).
 
 -type(msg_handler() :: #{puback := fun((_) -> any()) | mfas(),
@@ -118,23 +120,23 @@
                 | {ssl, boolean()}
                 | {ssl_opts, [ssl:ssl_option()]}
                 | {ws_path, string()}
-                | {connect_timeout, pos_integer()}
+                | {connect_timeout, second_timeout()}
                 | {bridge_mode, boolean()}
                 | {clientid, iodata()}
                 | {clean_start, boolean()}
                 | {username, iodata()}
                 | {password, iodata()}
                 | {proto_ver, v3 | v4 | v5}
-                | {keepalive, non_neg_integer()}
+                | {keepalive, non_neg_integer()}  %% in seconds
                 | {max_inflight, pos_integer()}
-                | {retry_interval, timeout()}
+                | {retry_interval, second_timeout()}
                 | {will_topic, iodata()}
                 | {will_payload, iodata()}
                 | {will_retain, boolean()}
                 | {will_qos, qos()}
                 | {will_props, properties()}
                 | {auto_ack, boolean()}
-                | {ack_timeout, pos_integer()}
+                | {ack_timeout, second_timeout()}
                 | {force_ping, boolean()}
                 | {properties, properties()}).
 
@@ -177,7 +179,7 @@
           conn_mod        :: conn_mod(),
           socket          :: inet:socket() | pid(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
-          connect_timeout :: pos_integer(),
+          connect_timeout :: timeout(),
           bridge_mode     :: boolean(),
           clientid        :: binary(),
           clean_start     :: boolean(),
@@ -198,9 +200,9 @@
           inflight        :: #{packet_id() => term()},
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
-          ack_timeout     :: pos_integer(),
+          ack_timeout     :: timeout(),
           ack_timer       :: reference(),
-          retry_interval  :: pos_integer(),
+          retry_interval  :: timeout(),
           retry_timer     :: reference(),
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
