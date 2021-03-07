@@ -76,39 +76,64 @@ send(Sock, Data) when is_port(Sock) ->
         error:badarg -> {error, einval}
     end;
 send(#ssl_socket{ssl = SslSock}, Data) ->
-    ssl:send(SslSock, Data).
+    ssl:send(SslSock, Data);
+send(QuicStream, Data) when is_reference(QuicStream) ->
+    case quicer:send(QuicStream, Data) of
+        {ok, _Len} ->
+            ok;
+        Other ->
+            Other
+    end.
 
 -spec(recv(socket(), non_neg_integer())
       -> {ok, iodata()} | {error, closed | inet:posix()}).
 recv(Sock, Length) when is_port(Sock) ->
     gen_tcp:recv(Sock, Length);
 recv(#ssl_socket{ssl = SslSock}, Length) ->
-    ssl:recv(SslSock, Length).
+    ssl:recv(SslSock, Length);
+recv(QuicStream, _Length) when is_reference(QuicStream) ->
+    %% @todo maybe remove to quicer
+    %% quicer api should support passive receive.
+    receive {quic, Bin, _, _, _, _} -> {ok, Bin} end.
+
 
 -spec(close(socket()) -> ok).
 close(Sock) when is_port(Sock) ->
     gen_tcp:close(Sock);
 close(#ssl_socket{ssl = SslSock}) ->
-    ssl:close(SslSock).
+    ssl:close(SslSock);
+close(QuicStream) when is_reference(QuicStream) ->
+    quicer:close_stream(QuicStream).
+
 
 -spec(setopts(socket(), [gen_tcp:option() | ssl:socketoption()]) -> ok).
 setopts(Sock, Opts) when is_port(Sock) ->
     inet:setopts(Sock, Opts);
 setopts(#ssl_socket{ssl = SslSock}, Opts) ->
-    ssl:setopts(SslSock, Opts).
+    ssl:setopts(SslSock, Opts);
+setopts(QuicStream, _Opts) when is_reference(QuicStream) ->
+    %% @todo currently unsupported
+    ok.
+
 
 -spec(getstat(socket(), [atom()])
       -> {ok, [{atom(), integer()}]} | {error, term()}).
 getstat(Sock, Options) when is_port(Sock) ->
     inet:getstat(Sock, Options);
 getstat(#ssl_socket{tcp = Sock}, Options) ->
-    inet:getstat(Sock, Options).
+    inet:getstat(Sock, Options);
+getstat(QuicStream, Options) when is_reference(QuicStream) ->
+    {ok, [ {Opt, todo} || Opt <-Options]}.
+
 
 -spec(sockname(socket()) -> {ok, sockname()} | {error, term()}).
 sockname(Sock) when is_port(Sock) ->
     inet:sockname(Sock);
 sockname(#ssl_socket{ssl = SslSock}) ->
-    ssl:sockname(SslSock).
+    ssl:sockname(SslSock);
+sockname(QuicStream) when is_reference(QuicStream) ->
+    {ok, {todo, todo}}.
+
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->
