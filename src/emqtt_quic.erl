@@ -40,11 +40,11 @@ send(Stream, Bin) ->
     end.
 
 %% @todo get_stat
-getstat(_WsPid, Options) ->
-    {ok, [{Opt, 0} || Opt <- Options]}.
+getstat(Stream, Options) ->
+    quicer:getstat(Stream, Options).
 
 %% @todo setopts
-setopts(_WsPid, _Opts) ->
+setopts(_Stream, _Opts) ->
     ok.
 
 close(Stream) ->

@@ -34,8 +34,7 @@ t_quic_sock(Config) ->
     quic_server:stop(Server).
 
 send_and_recv_with(Sock) ->
-    %% @todo, workaround?
-    %% {ok, {{127,0,0,1}, _}} = emqtt_sock:sockname(Sock),
+    {ok, {{127,0,0,1}, _}} = emqtt_sock:sockname(Sock),
     ok = emqtt_sock:send(Sock, <<"ping">>),
     {ok, <<"pong">>} = emqtt_sock:recv(Sock, 0),
     ok = emqtt_sock:setopts(Sock, [{active, 100}]),

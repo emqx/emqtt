@@ -132,8 +132,7 @@ sockname(Sock) when is_port(Sock) ->
 sockname(#ssl_socket{ssl = SslSock}) ->
     ssl:sockname(SslSock);
 sockname(QuicStream) when is_reference(QuicStream) ->
-    {ok, {todo, todo}}.
-
+    quicer:sockname(QuicStream).
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->
