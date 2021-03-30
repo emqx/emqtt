@@ -26,7 +26,12 @@
         ]).
 
 connect(Host, Port, Opts, Timeout) ->
-    {ok, Conn} = quicer:connect(Host, Port, Opts, Timeout),
+    ConnOpts = [ {alpn, ["mqtt"]}
+               , {idle_timeout_ms, 5000}
+               , {peer_unidi_stream_count, 1}
+               , {peer_bidi_stream_count, 10}
+               | Opts],
+    {ok, Conn} = quicer:connect(Host, Port, ConnOpts, Timeout),
     quicer:start_stream(Conn, []).
 
 send(Stream, IoData) when is_list(IoData) ->
@@ -39,7 +44,6 @@ send(Stream, Bin) ->
             Other
     end.
 
-%% @todo get_stat
 getstat(Stream, Options) ->
     quicer:getstat(Stream, Options).
 

@@ -34,11 +34,11 @@ t_quic_sock(Config) ->
     quic_server:stop(Server).
 
 send_and_recv_with(Sock) ->
-    {ok, {{127,0,0,1}, _}} = emqtt_sock:sockname(Sock),
-    ok = emqtt_sock:send(Sock, <<"ping">>),
-    {ok, <<"pong">>} = emqtt_sock:recv(Sock, 0),
-    ok = emqtt_sock:setopts(Sock, [{active, 100}]),
-    {ok, Stats} = emqtt_sock:getstat(Sock, [send_cnt, recv_cnt]),
+    {ok, {{127,0,0,1}, _}} = emqtt_quic:sockname(Sock),
+    ok = emqtt_quic:send(Sock, <<"ping">>),
+    {ok, <<"pong">>} = emqtt_quic:recv(Sock, 0),
+    ok = emqtt_quic:setopts(Sock, [{active, 100}]),
+    {ok, Stats} = emqtt_quic:getstat(Sock, [send_cnt, recv_cnt]),
     [{send_cnt, Cnt}, {recv_cnt, Cnt}] = Stats,
     %% @todo impl counting.
     ?assert((Cnt == 1) or (Cnt == 3) or (Cnt==todo)).

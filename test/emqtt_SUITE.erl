@@ -40,6 +40,8 @@ groups() ->
     [{general, [non_parallel_tests],
       [t_connect,
        t_ws_connect,
+       %% @todo
+       %% t_quic_connect,
        t_subscribe,
        t_publish,
        t_unsubscribe,

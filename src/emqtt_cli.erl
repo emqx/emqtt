@@ -44,6 +44,8 @@
           "retain in will message"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
           "enable websocket transport or not"},
+         {enable_quic, undefined, "enable-quic", {boolean, false},
+          "enable quic transport or not"},
          {enable_ssl, undefined, "enable-ssl", {boolean, false},
           "enable ssl/tls or not"},
          {tls_version, undefined, "tls-version", {atom, 'tlsv1.2'},
@@ -112,14 +114,17 @@ main(_Argv) ->
     io:format("Usage: ~s pub | sub [--help]~n", [?CMD_NAME]).
 
 main(PubSub, Opts0) ->
+    application:ensure_all_started(quicer),
     application:ensure_all_started(emqtt),
     Print = proplists:get_value(print, Opts0),
     Opts = proplists:delete(print, Opts0),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
     {ok, Client} = emqtt:start_link(NOpts),
-    ConnRet = case proplists:get_bool(enable_websocket, NOpts) of
-                  true  -> emqtt:ws_connect(Client);
-                  false -> emqtt:connect(Client)
+    ConnRet = case {proplists:get_bool(enable_websocket, NOpts),
+                    proplists:get_bool(enable_quic, NOpts)} of
+                  {false, false} -> emqtt:connect(Client);
+                  {true, false}  -> emqtt:ws_connect(Client);
+                  {false, true}  -> emqtt:quic_connect(Client)
               end,
     case ConnRet of
         {ok, Properties} ->
@@ -273,6 +278,8 @@ parse_cmd_opts([{keepalive, I} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{keepalive, I} | Acc]);
 parse_cmd_opts([{enable_websocket, Enable} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{enable_websocket, Enable} | Acc]);
+parse_cmd_opts([{enable_quic, Enable} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{enable_quic, Enable} | Acc]);
 parse_cmd_opts([{enable_ssl, Enable} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{ssl, Enable} | Acc]);
 parse_cmd_opts([{tls_version, Version} | Opts], Acc) 

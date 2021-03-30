@@ -52,6 +52,7 @@ A long option can have the following syntax:
             [--will-qos [<will_qos>]]
             [--will-retain [<will_retain>]]
             [--enable-websocket [<enable_websocket>]]
+            [--enable-quic [<enable_quic>]]
             [--enable-ssl [<enable_ssl>]]
             [--tls-version [<tls_version>]]
             [--CAfile <cafile>] [--cert <cert>] [--key <key>]
