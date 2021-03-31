@@ -8,4 +8,4 @@ ERTS_VSN="{{ erts_vsn }}"
 
 ERTS_PATH=$RUNNER_ROOT_DIR/erts-$ERTS_VSN/bin
 
-exec ${ERTS_PATH}/escript ${RUNNER_BIN_DIR}/emqtt_cli $@
+exec ${ERTS_PATH}/escript ${RUNNER_BIN_DIR}/emqtt_cli "$@"
