@@ -45,7 +45,7 @@ send(Stream, Bin) ->
     end.
 
 getstat(Stream, Options) ->
-    quicer:getstat(Stream, Options).
+    {ok, quicer:getstats(Stream, Options)}.
 
 %% @todo setopts
 setopts(_Stream, _Opts) ->
