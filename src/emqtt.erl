@@ -250,8 +250,10 @@ start_link(Options) when is_list(Options) ->
     StatmOpts = case proplists:get_bool(low_mem, Options) of
                     false -> [];
                     true ->
-                        [{spawn_opt, [{min_heap_size, 16}]},
-                         {hibernate_after, 10}
+                        [{spawn_opt, [{min_heap_size, 16},
+                                      {min_bin_vheap_size,16}
+                                     ]},
+                         {hibernate_after, 50}
                         ]
                 end,
 
@@ -916,10 +918,10 @@ connected(cast, ?PACKET(?PINGRESP), State) ->
 connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
-connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) ->
+connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
-            erlang:garbage_collect(self(), [{type, major}]),
+            IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
             {keep_state, ensure_keepalive_timer(NewState)};
         Error -> {stop, Error}
     end;
