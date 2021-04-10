@@ -919,6 +919,7 @@ connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
 connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
+            erlang:garbage_collect(self(), [{type, major}]),
             {keep_state, ensure_keepalive_timer(NewState)};
         Error -> {stop, Error}
     end;
