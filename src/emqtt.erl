@@ -136,6 +136,7 @@
                 | {auto_ack, boolean()}
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
+                | {low_mem, boolean()}
                 | {properties, properties()}).
 
 -type(maybe(T) :: undefined | T).
@@ -204,6 +205,7 @@
           retry_timer     :: reference(),
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
+          low_mem         :: boolean(),
           parse_state     :: emqtt_frame:parse_state()
          }).
 
@@ -245,11 +247,21 @@ start_link(Options) when is_map(Options) ->
 start_link(Options) when is_list(Options) ->
     ok = emqtt_props:validate(
             proplists:get_value(properties, Options, #{})),
+    StatmOpts = case proplists:get_bool(low_mem, Options) of
+                    false -> [];
+                    true ->
+                        [{spawn_opt, [{min_heap_size, 16},
+                                      {min_bin_vheap_size,16}
+                                     ]},
+                         {hibernate_after, 50}
+                        ]
+                end,
+
     case proplists:get_value(name, Options) of
         undefined ->
-            gen_statem:start_link(?MODULE, [with_owner(Options)], []);
+            gen_statem:start_link(?MODULE, [with_owner(Options)], StatmOpts);
         Name when is_atom(Name) ->
-            gen_statem:start_link({local, Name}, ?MODULE, [with_owner(Options)], [])
+            gen_statem:start_link({local, Name}, ?MODULE, [with_owner(Options)], StatmOpts)
     end.
 
 with_owner(Options) ->
@@ -483,6 +495,7 @@ init([Options]) ->
                                  ack_timeout     = ?DEFAULT_ACK_TIMEOUT,
                                  retry_interval  = ?DEFAULT_RETRY_INTERVAL,
                                  connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
+                                 low_mem         = false,
                                  last_packet_id  = 1
                                 }),
     {ok, initialized, init_parse_state(State)}.
@@ -592,6 +605,8 @@ init([{retry_interval, I} | Opts], State) ->
     init(Opts, State#state{retry_interval = timer:seconds(I)});
 init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
+init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
+    init(Opts, State#state{low_mem = IsLow});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -903,9 +918,10 @@ connected(cast, ?PACKET(?PINGRESP), State) ->
 connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
-connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true}) ->
+connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
+            IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
             {keep_state, ensure_keepalive_timer(NewState)};
         Error -> {stop, Error}
     end;
