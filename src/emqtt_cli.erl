@@ -66,6 +66,7 @@
         ] ++ ?HELP_OPT ++ ?CONN_LONG_OPTS ++
         [{payload, undefined, "payload", string,
           "application message that is being published"},
+         {file, undefined, "file", string, "file content to publish"},
          {repeat, undefined, "repeat", {integer, 1},
           "the number of times the message will be repeatedly published"},
          {repeat_delay, undefined, "repeat-delay", {integer, 0},
@@ -93,7 +94,16 @@ main(["sub" | Argv]) ->
 main(["pub" | Argv]) ->
     {ok, {Opts, _Args}} = getopt:parse(?PUB_OPTS, Argv),
     ok = maybe_help(pub, Opts),
-    ok = check_required_args(pub, [topic, payload], Opts),
+    ok = check_required_args(pub, [topic], Opts),
+    Payload = get_value(payload, Opts),
+    File = get_value(file, Opts),
+    case {Payload, File} of
+        {undefined, undefined} ->
+            io:format("Error: missing --payload or --file~n"),
+            halt(1);
+        _ ->
+            ok
+    end,
     main(pub, Opts);
 
 main(_Argv) ->
@@ -135,7 +145,21 @@ publish(Client, Opts, Repeat) ->
     publish(Client, Opts, Repeat - 1).
 
 do_publish(Client, Opts) ->
-    case emqtt:publish(Client, get_value(topic, Opts), get_value(payload, Opts), Opts) of
+    case get_value(payload, Opts) of
+        undefined ->
+            File = get_value(file, Opts),
+            case file:read_file(File) of
+                {ok, Bin} -> do_publish(Client, Opts, Bin);
+                {error, Reason} ->
+                    io:format("Error: failed_to_read ~s:~nreason=~p", [File, Reason]),
+                    halt(1)
+            end;
+        Bin ->
+            do_publish(Client, Opts, Bin)
+    end.
+
+do_publish(Client, Opts, Payload) ->
+    case emqtt:publish(Client, get_value(topic, Opts), Payload, Opts) of
         {error, Reason} ->
             io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
         {error, _PacketId, Reason} ->
@@ -146,7 +170,7 @@ do_publish(Client, Opts) ->
                        get_value(qos, Opts),
                        i(get_value(retain, Opts)),
                        get_value(topic, Opts),
-                       length(binary_to_list(get_value(payload, Opts)))])
+                       iolist_size(Payload)])
     end.
 
 subscribe(Client, Opts) ->
@@ -269,6 +293,8 @@ parse_cmd_opts([{topic, Topic} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{topic, list_to_binary(Topic)} | Acc]);
 parse_cmd_opts([{payload, Payload} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{payload, list_to_binary(Payload)} | Acc]);
+parse_cmd_opts([{file, File} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{file, File} | Acc]);
 parse_cmd_opts([{repeat, Repeat} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat, Repeat} | Acc]);
 parse_cmd_opts([{repeat_delay, RepeatDelay} | Opts], Acc) ->
