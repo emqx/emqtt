@@ -82,7 +82,9 @@
         [{retain_as_publish, undefined, "retain-as-publish", {boolean, false},
           "retain as publih option in subscription options"},
          {retain_handling, undefined, "retain-handling", {integer, 0},
-          "retain handling option in subscription options"}
+          "retain handling option in subscription options"},
+         {print, undefined, "print", string,
+          "'size' to print payload size, 'as-string' to print payload as string"}
         ]).
 
 main(["sub" | Argv]) ->
@@ -109,8 +111,10 @@ main(["pub" | Argv]) ->
 main(_Argv) ->
     io:format("Usage: ~s pub | sub [--help]~n", [?CMD_NAME]).
 
-main(PubSub, Opts) ->
+main(PubSub, Opts0) ->
     application:ensure_all_started(emqtt),
+    Print = proplists:get_value(print, Opts0),
+    Opts = proplists:delete(print, Opts0),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
     {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case proplists:get_bool(enable_websocket, NOpts) of
@@ -128,7 +132,7 @@ main(PubSub, Opts) ->
                     subscribe(Client, NOpts),
                     KeepAlive = maps:get('Server-Keep-Alive', Properties, get_value(keepalive, NOpts)) * 1000,
                     timer:send_interval(KeepAlive, ping),
-                    receive_loop(Client)
+                    receive_loop(Client, Print)
             end;
         {error, Reason} ->
             io:format("Client ~s failed to sent CONNECT due to ~p~n", [get_value(clientid, NOpts), Reason])
@@ -299,6 +303,9 @@ parse_cmd_opts([{repeat, Repeat} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat, Repeat} | Acc]);
 parse_cmd_opts([{repeat_delay, RepeatDelay} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat_delay, RepeatDelay} | Acc]);
+parse_cmd_opts([{print, WhatToPrint} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{print, WhatToPrint} | Acc]);
+
 parse_cmd_opts([_ | Opts], Acc) ->
     parse_cmd_opts(Opts, Acc).
 
@@ -337,16 +344,19 @@ pipeline([], Input) ->
 pipeline([Fun|More], Input) ->
     pipeline(More, erlang:apply(Fun, [Input])).
 
-receive_loop(Client) ->
+receive_loop(Client, Print) ->
     receive
         {publish, #{payload := Payload}} ->
-            io:format("~s~n", [Payload]),
-            receive_loop(Client);
+            case Print of
+                "size" -> io:format("received ~p bytes~n", [size(Payload)]);
+                _ -> io:format("~s~n", [Payload])
+            end,
+            receive_loop(Client, Print);
         ping ->
             emqtt:ping(Client),
-            receive_loop(Client);
+            receive_loop(Client, Print);
         _Other ->
-            receive_loop(Client)
+            receive_loop(Client, Print)
     end.
 
 i(true)  -> 1;

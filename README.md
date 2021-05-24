@@ -208,6 +208,7 @@ Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent DISCONNECT
             [--key <key>]
             [--retain-as-publish [<retain_as_publish>]]
             [--retain-handling [<retain_handling>]]
+            [--print [size]]
 ```
 
 #### Options
@@ -259,6 +260,11 @@ Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent DISCONNECT
 **`--retain-handling`**
 
 &ensp;&ensp;Specify the Retain Handling option in subscription options. Defaults to 0.
+
+**`--print`**
+
+&ensp;&ensp;Use `size` to pinrt just the number of received payload bytes. Payload is printed as string if this option is not sepcified.
+
 
 **`--will-topic`**
 
