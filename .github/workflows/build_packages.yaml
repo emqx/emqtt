@@ -16,13 +16,12 @@ jobs:
         strategy:
             matrix:
               os:
+                - ubuntu20.04
                 - ubuntu18.04
                 - ubuntu16.04
-                - ubuntu14.04
                 - debian10
                 - debian9
-                - debian8
-                - opensuse
+                - centos8
                 - centos7
                 - centos6
 
@@ -30,7 +29,7 @@ jobs:
         - uses: actions/checkout@v1
         - name: build emqx packages
           env:
-            ERL_OTP: erl22.1
+            ERL_OTP: erl23.2.7.2-emqx-2
             SYSTEM: ${{ matrix.os }}
           run: |
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"
@@ -48,7 +47,7 @@ jobs:
         - name: prepare
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-            brew install curl zip unzip gnu-sed erlang
+            brew install curl zip unzip gnu-sed erlang@23
             echo "/usr/local/bin:$PATH" >> ~/.bashrc
         - name: install rebar3
           run: |
