@@ -48,9 +48,12 @@ jobs:
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
             brew install curl zip unzip gnu-sed erlang@23
-            echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> /Users/runner/.bash_profile
+            echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
+            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
+            echo "$PATH"
+            erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
