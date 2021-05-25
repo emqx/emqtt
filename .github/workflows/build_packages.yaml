@@ -48,11 +48,7 @@ jobs:
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
             brew install curl zip unzip gnu-sed erlang@23
-            echo "/usr/local/bin:$PATH" >> ~/.bashrc
-        - name: install rebar3
-          run: |
-            curl -Lo /usr/local/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
-            chmod +x /usr/local/bin/rebar3
+            echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> /Users/runner/.bash_profile
         - name: build
           run: |
             .github/workflows/script/build.sh
