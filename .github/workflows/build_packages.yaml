@@ -16,13 +16,12 @@ jobs:
         strategy:
             matrix:
               os:
+                - ubuntu20.04
                 - ubuntu18.04
                 - ubuntu16.04
-                - ubuntu14.04
                 - debian10
                 - debian9
-                - debian8
-                - opensuse
+                - centos8
                 - centos7
                 - centos6
 
@@ -30,7 +29,7 @@ jobs:
         - uses: actions/checkout@v1
         - name: build emqx packages
           env:
-            ERL_OTP: erl22.1
+            ERL_OTP: erl23.2.7.2-emqx-2
             SYSTEM: ${{ matrix.os }}
           run: |
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"
@@ -48,14 +47,13 @@ jobs:
         - name: prepare
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-            brew install curl zip unzip gnu-sed erlang
-            echo "/usr/local/bin:$PATH" >> ~/.bashrc
-        - name: install rebar3
-          run: |
-            curl -Lo /usr/local/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
-            chmod +x /usr/local/bin/rebar3
+            brew install curl zip unzip gnu-sed erlang@23
+            echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
+            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
+            echo "$PATH"
+            erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
