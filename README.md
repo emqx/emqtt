@@ -54,8 +54,9 @@ A long option can have the following syntax:
             [--enable-websocket [<enable_websocket>]]
             [--enable-ssl [<enable_ssl>]]
             [--tls-version [<tls_version>]]
-            [--CAfile <cafile>] [--cert <cert>]
-            [--key <key>] [--payload <payload>]
+            [--CAfile <cafile>] [--cert <cert>] [--key <key>]
+            [--payload <payload>]
+            [--file <path/to/file>]
             [--repeat [<repeat>]]
             [--repeat-delay [<repeat_delay>]]
 ```

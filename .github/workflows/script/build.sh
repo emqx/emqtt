@@ -10,7 +10,7 @@ build_pkg(){
         pkg=emqtt-macos-$(git describe --tags --always).zip
         make emqtt
         mkdir -p $PACKAGE_PATH
-        
+
         cd _build/emqtt/rel && zip -rq $pkg emqtt && cd -
         mv _build/emqtt/rel/$pkg $PACKAGE_PATH
     fi

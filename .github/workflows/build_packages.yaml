@@ -48,13 +48,12 @@ jobs:
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
             brew install curl zip unzip gnu-sed erlang@23
-            echo "/usr/local/bin:$PATH" >> ~/.bashrc
-        - name: install rebar3
-          run: |
-            curl -Lo /usr/local/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
-            chmod +x /usr/local/bin/rebar3
+            echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
+            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
+            echo "$PATH"
+            erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
@@ -67,6 +66,7 @@ jobs:
         runs-on: ubuntu-latest
 
         needs: [build, build-on-mac]
+        if: ${{ github.event_name == 'release' }}
 
         steps:
         - uses: actions/checkout@v2
@@ -114,7 +114,7 @@ jobs:
           run: |
             curl "https://d1vvhvl2y92vvt.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip awscliv2.zip
-            sudo ./aws/install
+            sudo ./aws/install --update
             aws configure set aws_access_key_id ${{ secrets.AwsAccessKeyId }}
             aws configure set aws_secret_access_key ${{ secrets.AwsSecretAccessKey }}
             aws configure set default.region us-west-2
