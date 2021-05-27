@@ -1036,6 +1036,20 @@ terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket
         _ -> ConnMod:close(Socket)
     end.
 
+code_change({down, OldVsn}, State, Data, _Extra) when OldVsn == "1.2.3",
+                                                      OldVsn == "1.2.2",
+                                                      OldVsn == "1.2.1",
+                                                      OldVsn == "1.2.0" ->
+    [ H1, _IsLowMem | T ] = lists:reverse(tuple_to_list(State)),
+    NewState = list_to_tuple(lists:reverse([H1 | T])),
+    {ok, NewState, Data};
+code_change(OldVsn, State, Data, _Extra) when OldVsn == "1.2.3",
+                                              OldVsn == "1.2.2",
+                                              OldVsn == "1.2.1",
+                                              OldVsn == "1.2.0" ->
+    [ H | T] = lists:reverse(tuple_to_list(State)),
+    NewState = list_to_tuple(lists:reverse([H, _IsLowMem = false| T])),
+    {ok, NewState, Data};
 code_change(_Vsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
