@@ -1319,7 +1319,7 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState}) ->
         {more, NParseState} ->
             {keep_state, State#state{parse_state = NParseState}, next_events(Packets)}
     catch
-        error:Error -> {stop, Error}
+        error:Error:Stacktrace -> {stop, {Error, Stacktrace}}
     end.
 
 -compile({inline, [next_events/1]}).

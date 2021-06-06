@@ -61,6 +61,7 @@
           version     => ?MQTT_PROTO_V4
          }).
 
+-define(Q(BYTES, ACC), {BYTES, ACC}).
 %%--------------------------------------------------------------------
 %% Init Parse State
 %%--------------------------------------------------------------------
@@ -135,12 +136,27 @@ parse_remaining_len(<<0:1, Len:7, Rest/binary>>, Header, Multiplier, Value,
         true -> parse_frame(Rest, Header, FrameLen, Options)
     end.
 
-parse_frame(Bin, Header, 0, Options) ->
-    {ok, packet(Header), Bin, ?none(Options)};
+body_bytes(B) when is_binary(B) -> size(B);
+body_bytes(?Q(Bytes, _)) -> Bytes.
 
-parse_frame(Bin, Header, Length, Options) ->
-    case Bin of
-        <<FrameBin:Length/binary, Rest/binary>> ->
+append_body(H, T) when is_binary(H) andalso size(H) < 1024 ->
+    <<H/binary, T/binary>>;
+append_body(H, T) when is_binary(H) ->
+    Bytes = size(H) + size(T),
+    ?Q(Bytes, [T, H]);
+append_body(?Q(Bytes, H), T) ->
+    ?Q(Bytes + size(T), [T | H]).
+
+flatten_body(Body) when is_binary(Body) -> Body;
+flatten_body(?Q(_, Acc)) -> iolist_to_binary(lists:reverse(Acc)).
+
+parse_frame(Body, Header, 0, Options) ->
+    {ok, packet(Header), flatten_body(Body), ?none(Options)};
+
+parse_frame(Body, Header, Length, Options) ->
+    case body_bytes(Body) >= Length of
+        true ->
+            <<FrameBin:Length/binary, Rest/binary>> = flatten_body(Body),
             case parse_packet(Header, FrameBin, Options) of
                 {Variable, Payload} ->
                     {ok, packet(Header, Variable, Payload), Rest, ?none(Options)};
@@ -149,9 +165,9 @@ parse_frame(Bin, Header, Length, Options) ->
                 Variable ->
                     {ok, packet(Header, Variable), Rest, ?none(Options)}
             end;
-        TooShortBin ->
+        false ->
             {more, fun(BinMore) ->
-                           parse_frame(<<TooShortBin/binary, BinMore/binary>>, Header, Length, Options)
+                           parse_frame(append_body(Body, BinMore), Header, Length, Options)
                    end}
     end.
 
