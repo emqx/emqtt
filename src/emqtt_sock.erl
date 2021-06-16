@@ -91,11 +91,8 @@ recv(Sock, Length) when is_port(Sock) ->
     gen_tcp:recv(Sock, Length);
 recv(#ssl_socket{ssl = SslSock}, Length) ->
     ssl:recv(SslSock, Length);
-recv(QuicStream, _Length) when is_reference(QuicStream) ->
-    %% @todo maybe remove to quicer
-    %% quicer api should support passive receive.
-    receive {quic, Bin, _, _, _, _} -> {ok, Bin} end.
-
+recv(QuicStream, Length) when is_reference(QuicStream) ->
+    quicer:recv(QuicStream, Length).
 
 -spec(close(socket()) -> ok).
 close(Sock) when is_port(Sock) ->
