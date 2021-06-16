@@ -1,6 +1,6 @@
 CT_NODE_NAME = ct@127.0.0.1
 
-REBAR := rebar3
+REBAR := $(CURDIR)/rebar3
 
 .PHONY: all compile unlock clean distclean xref eunit ct dialyzer
 
