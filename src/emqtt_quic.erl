@@ -27,7 +27,7 @@
 
 connect(Host, Port, Opts, Timeout) ->
     ConnOpts = [ {alpn, ["mqtt"]}
-               , {idle_timeout_ms, 5000}
+               , {idle_timeout_ms, 60000}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 10}
                | Opts],
@@ -38,7 +38,7 @@ send(Stream, IoData) when is_list(IoData) ->
     send(Stream, iolist_to_binary(IoData));
 send(Stream, Bin) ->
     case quicer:send(Stream, Bin) of
-    {ok, _Len} ->
+        {ok, _Len} ->
             ok;
         Other ->
             Other
