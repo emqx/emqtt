@@ -9,15 +9,16 @@ on:
             - prereleased
 
 jobs:
-    strategy:
-        matrix:
-            container:
-                - erlang:23.3
-                - erlang:24.0
 
     run_test_case:
 
         runs-on: ubuntu-latest
+
+        strategy:
+            matrix:
+                container:
+                    - erlang:23.3
+                    - erlang:24.0
 
         container:
             image: ${{ matrix.container }}
