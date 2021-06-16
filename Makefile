@@ -4,20 +4,20 @@ REBAR := $(CURDIR)/rebar3
 
 .PHONY: all compile unlock clean distclean xref eunit ct dialyzer
 
-all: $(REBAR) emqtt
+all: emqtt
 
 $(REBAR):
-	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-6/rebar3" -o $(REBAR)
-	@chmod +x $(REBAR)
+	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3" -o ./rebar3
+	@chmod +x ./rebar3
 
 emqtt: compile
 	$(REBAR) as emqtt release
 
-pkg: $(REBAR) compile
+pkg: compile
 	$(REBAR) as emqtt_pkg release
 	make -C packages
 
-compile: escript
+compile: $(REBAR) escript
 	$(REBAR) compile
 
 unlock:
