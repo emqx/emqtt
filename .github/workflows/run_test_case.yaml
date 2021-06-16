@@ -9,13 +9,18 @@ on:
             - prereleased
 
 jobs:
+    strategy:
+        matrix:
+            container:
+                - erlang:23.3
+                - erlang:24.0
 
     run_test_case:
 
         runs-on: ubuntu-latest
 
         container:
-            image: erlang:23.2.7
+            image: ${{ matrix.container }}
 
         steps:
         - uses: actions/checkout@v1

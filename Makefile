@@ -1,12 +1,14 @@
-.PHONY: all compile unlock clean distclean xref eunit ct dialyzer
-
 CT_NODE_NAME = ct@127.0.0.1
 
-REBAR := $(CURDIR)/rebar3
+REBAR := rebar3
 
-REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
+.PHONY: all compile unlock clean distclean xref eunit ct dialyzer
 
-all: emqtt
+all: $(REBAR) emqtt
+
+$(REBAR):
+	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-6/rebar3" -o ./rebar3
+	@chmod +x ./rebar3
 
 emqtt: compile
 	$(REBAR) as emqtt release
@@ -43,4 +45,3 @@ dialyzer:
 
 escript:
 	$(REBAR) as escript escriptize
-
