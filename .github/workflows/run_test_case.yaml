@@ -17,13 +17,19 @@ jobs:
           matrix:
             otp: [23.2]
         steps:
-        - uses: actions/checkout@v1
+        - name: Checkout
+          uses: actions/checkout@v2
+          with:
+            submodules: recursive
         - uses: gleam-lang/setup-erlang@v1.1.2
           with:
             otp-version: ${{ matrix.otp }}
+        - name: Setup cmake
+          uses: jwlawson/actions-setup-cmake@v1.8
+          with:
+            cmake-version: '3.16.9'
         - name: Run tests
           run: |
-            apt install cmake
             make eunit
             make ct
             make cover
