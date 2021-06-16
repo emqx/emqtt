@@ -1019,9 +1019,20 @@ handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
 handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     ?LOG(error, "Got tcp error: ~p", [Reason], State),
     {stop, {shutdown, Reason}, State};
-handle_event(info, {quic, close, _Stream, Flag}, _, State) ->
-    ?LOG(error, "QUIC: steam closed: ~p", [Flag], State),
-    {stop, {shutdown, Flag}, State};
+
+handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
+    %% This is just a notify, we can wait for close complete
+    ?LOG(error, "QUIC: transport shutdown: ~p", [Reason], State),
+    keep_state_and_data;
+
+handle_event(info, {quic, closed, _Stream, Reason}, _, State) ->
+    ?LOG(error, "QUIC: transport closed: ~p", [Reason], State),
+    {stop, {shutdown, {closed, Reason}}, State};
+
+handle_event(info, {quic, closed, _Stream}, _, State) ->
+    ?LOG(error, "QUIC: stream closed", [], State),
+    {stop, {shutdown, closed}, State};
+
 handle_event(info, EventContent = {'EXIT', _Pid, normal}, StateName, State) ->
     ?LOG(info, "State: ~s, Unexpected Event: (info, ~p)",
          [StateName, EventContent], State),

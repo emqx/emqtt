@@ -108,8 +108,6 @@ setopts(Sock, Opts) when is_port(Sock) ->
     inet:setopts(Sock, Opts);
 setopts(#ssl_socket{ssl = SslSock}, Opts) ->
     ssl:setopts(SslSock, Opts).
-%% setopts(QuicStream, Opts) when is_reference(QuicStream) ->
-%%     emqtt_quic:setopts(QuicStream, Opts).
 
 -spec(getstat(socket(), [atom()])
       -> {ok, [{atom(), integer()}]} | {error, term()}).
@@ -117,17 +115,12 @@ getstat(Sock, Options) when is_port(Sock) ->
     inet:getstat(Sock, Options);
 getstat(#ssl_socket{tcp = Sock}, Options) ->
     inet:getstat(Sock, Options).
-%% getstat(QuicStream, Options) when is_reference(QuicStream) ->
-%%     {ok, [ {Opt, todo} || Opt <-Options]}.
-
 
 -spec(sockname(socket()) -> {ok, sockname()} | {error, term()}).
 sockname(Sock) when is_port(Sock) ->
     inet:sockname(Sock);
 sockname(#ssl_socket{ssl = SslSock}) ->
     ssl:sockname(SslSock).
-%% sockname(QuicStream) when is_reference(QuicStream) ->
-%%     quicer:sockname(QuicStream).
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->
