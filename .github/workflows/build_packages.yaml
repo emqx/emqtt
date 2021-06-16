@@ -24,12 +24,14 @@ jobs:
                 - centos8
                 - centos7
                 - centos6
-
+              otp:
+                - erl23.2.7.2-emqx-2
+                - erl24.0.1-emqx-1
         steps:
         - uses: actions/checkout@v1
         - name: build emqx packages
           env:
-            ERL_OTP: erl23.2.7.2-emqx-2
+            ERL_OTP: ${{ matrix.otp }}
             SYSTEM: ${{ matrix.os }}
           run: |
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"

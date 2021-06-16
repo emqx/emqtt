@@ -13,7 +13,7 @@ $(REBAR):
 emqtt: compile
 	$(REBAR) as emqtt release
 
-pkg: compile
+pkg: $(REBAR) compile
 	$(REBAR) as emqtt_pkg release
 	make -C packages
 
