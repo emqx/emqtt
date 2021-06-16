@@ -13,12 +13,14 @@ jobs:
     run_test_case:
 
         runs-on: ubuntu-latest
-
-        container:
-            image: erlang:23.2.7
-
+        strategy:
+          matrix:
+            otp: [23.2]
         steps:
         - uses: actions/checkout@v1
+        - uses: gleam-lang/setup-erlang@v1.1.2
+          with:
+            otp-version: ${{ matrix.otp }}
         - name: Run tests
           run: |
             apt install cmake
