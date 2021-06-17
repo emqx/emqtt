@@ -4,18 +4,22 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
 
-REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
+#REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
 
 all: emqtt
 
-emqtt: compile
+$(REBAR):
+	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3" -o ./rebar3
+	@chmod +x ./rebar3
+
+emqtt: $(REBAR) compile
 	$(REBAR) as emqtt release
 
-pkg: compile
+pkg: escript
 	$(REBAR) as emqtt_pkg release
 	make -C packages
 
-compile: escript
+compile: $(REBAR)
 	$(REBAR) compile
 
 unlock:
@@ -41,6 +45,6 @@ cover:
 dialyzer:
 	$(REBAR) dialyzer
 
-escript:
+escript: $(REBAR) compile
 	$(REBAR) as escript escriptize
 
