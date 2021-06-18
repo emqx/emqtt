@@ -22,26 +22,40 @@
 
 all() -> emqx_ct:all(?MODULE).
 
+init_per_suite(Config) ->
+    application:ensure_all_started(quicer),
+    Config.
+
+end_per_suite(_) ->
+    ok.
+
 t_quic_sock(Config) ->
     Port = 4567,
-    SslOpts = [{cert, certfile(Config)},
-               {key,  keyfile(Config)}
+    SslOpts = [ {cert, certfile(Config)}
+              , {key,  keyfile(Config)}
+              , {idle_timeout_ms, 10000}
+              , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
+              , {peer_bidi_stream_count, 10}
+              , {alpn, ["mqtt"]}
               ],
     Server = quic_server:start_link(Port, SslOpts),
-    {ok, Sock} = emqtt_quic:connect("127.0.0.1", Port, [], 3000),
+    timer:sleep(500),
+    {ok, Sock} = emqtt_quic:connect("localhost",
+                                    Port,
+                                    [{alpn, ["mqtt"]}, {active, false}],
+                                    3000),
     send_and_recv_with(Sock),
     ok = emqtt_quic:close(Sock),
     quic_server:stop(Server).
 
 send_and_recv_with(Sock) ->
-    {ok, {{127,0,0,1}, _}} = emqtt_quic:sockname(Sock),
+    {ok, {{_,_,_,_}, _}} = emqtt_quic:sockname(Sock),
     ok = emqtt_quic:send(Sock, <<"ping">>),
     {ok, <<"pong">>} = emqtt_quic:recv(Sock, 0),
     ok = emqtt_quic:setopts(Sock, [{active, 100}]),
     {ok, Stats} = emqtt_quic:getstat(Sock, [send_cnt, recv_cnt]),
-    [{send_cnt, Cnt}, {recv_cnt, Cnt}] = Stats,
-    %% @todo impl counting.
-    ?assert((Cnt == 1) or (Cnt == 3) or (Cnt==todo)).
+    %% connection level counters, not stream level
+    [{send_cnt, _}, {recv_cnt, _}] = Stats.
 
 %%--------------------------------------------------------------------
 %% Helper functions

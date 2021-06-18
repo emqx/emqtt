@@ -27,13 +27,30 @@ quic_server(Port, Opts) ->
     server_loop(L).
 
 server_loop(L) ->
-    {ok, Conn} = quicer:accept(L, [], 10000),
-    {ok, Stm} = quicer:accept_stream(Conn, 10000),
     receive
-        {quic, <<"ping">>, _, _, _, _} ->
-            quicer:send(Stm, <<"pong">>),
-            server_loop(L);
-        stop -> ok
+        stop ->
+            ok;
+        Other ->
+            ct:pal("unexp msg ~p", [Other]),
+            server_loop(L)
+    after 0 ->
+            case quicer:accept(L, [], 30000) of
+                {ok, Conn} ->
+                    {ok, Stm} = quicer:accept_stream(Conn, []),
+                    receive
+                        {quic, <<"ping">>, _, _, _, _} ->
+                            quicer:send(Stm, <<"pong">>)
+                    end,
+                    receive
+                        {quic, peer_send_shutdown, Stm0} ->
+                            quicer:close_stream(Stm0);
+                        {quic, peer_send_aborted, Stm0, _ReasonCode} ->
+                            quicer:close_stream(Stm0)
+                    end;
+                {error, timeout} ->
+                    ok
+            end,
+            server_loop(L)
     end.
 
 stop(Server) ->

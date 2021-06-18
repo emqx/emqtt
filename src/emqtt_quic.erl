@@ -18,11 +18,13 @@
 
 -export([ connect/4
         , send/2
+        , recv/2
         , close/1
         ]).
 
 -export([ setopts/2
         , getstat/2
+        , sockname/1
         ]).
 
 connect(Host, Port, Opts, Timeout) ->
@@ -32,7 +34,7 @@ connect(Host, Port, Opts, Timeout) ->
                , {peer_bidi_stream_count, 10}
                | Opts],
     {ok, Conn} = quicer:connect(Host, Port, ConnOpts, Timeout),
-    quicer:start_stream(Conn, []).
+    quicer:start_stream(Conn, [{active, false}]).
 
 send(Stream, IoData) when is_list(IoData) ->
     send(Stream, iolist_to_binary(IoData));
@@ -44,8 +46,11 @@ send(Stream, Bin) ->
             Other
     end.
 
+recv(Stream, Count) ->
+    quicer:recv(Stream, Count).
+
 getstat(Stream, Options) ->
-    {ok, quicer:getstats(Stream, Options)}.
+    quicer:getstat(Stream, Options).
 
 %% @todo setopts
 setopts(_Stream, _Opts) ->
@@ -53,3 +58,6 @@ setopts(_Stream, _Opts) ->
 
 close(Stream) ->
     quicer:close_stream(Stream).
+
+sockname(H) ->
+    quicer:sockname(H).

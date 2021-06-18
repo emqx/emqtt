@@ -117,7 +117,9 @@ getstat(#ssl_socket{tcp = Sock}, Options) ->
 sockname(Sock) when is_port(Sock) ->
     inet:sockname(Sock);
 sockname(#ssl_socket{ssl = SslSock}) ->
-    ssl:sockname(SslSock).
+    ssl:sockname(SslSock);
+sockname(Sock) when is_reference(Sock)->
+    quicer:sockname(Sock).
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->
