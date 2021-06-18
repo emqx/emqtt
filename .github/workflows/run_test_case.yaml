@@ -30,6 +30,7 @@ jobs:
             cmake-version: '3.16.9'
         - name: Run tests
           run: |
+            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
             make eunit
             make ct
             make cover
