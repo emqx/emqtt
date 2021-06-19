@@ -13,24 +13,16 @@ jobs:
     run_test_case:
 
         runs-on: ubuntu-latest
-        strategy:
-          matrix:
-            otp: [23.2]
+        container:
+            image: emqx/build-env:erl23.2.7.2-emqx-2-ubuntu20.04
+
         steps:
         - name: Checkout
           uses: actions/checkout@v2
           with:
             submodules: recursive
-        - uses: gleam-lang/setup-erlang@v1.1.2
-          with:
-            otp-version: ${{ matrix.otp }}
-        - name: Setup cmake
-          uses: jwlawson/actions-setup-cmake@v1.8
-          with:
-            cmake-version: '3.16.9'
         - name: Run tests
           run: |
-            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
             make eunit
             make ct
             make cover
