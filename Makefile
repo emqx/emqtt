@@ -12,7 +12,7 @@ $(REBAR):
 	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3" -o ./rebar3
 	@chmod +x ./rebar3
 
-emqtt: $(REBAR) compile
+emqtt: $(REBAR) escript
 	$(REBAR) as emqtt release
 
 pkg: escript
