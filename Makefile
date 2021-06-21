@@ -4,12 +4,12 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
 
-#REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
+REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3
 
 all: emqtt
 
 $(REBAR):
-	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3" -o ./rebar3
+	@curl -k -f -L "$(REBAR_URL)" -o ./rebar3
 	@chmod +x ./rebar3
 
 emqtt: $(REBAR) escript
@@ -28,7 +28,7 @@ unlock:
 clean: distclean
 
 distclean:
-	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
+	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli rebar3
 
 xref:
 	$(REBAR) xref
