@@ -14,16 +14,15 @@ jobs:
         runs-on: ubuntu-latest
 
         strategy:
+            fail-fast: false
             matrix:
               os:
                 - ubuntu20.04
                 - ubuntu18.04
-                - ubuntu16.04
                 - debian10
                 - debian9
                 - centos8
                 - centos7
-                - centos6
 
         steps:
         - uses: actions/checkout@v1

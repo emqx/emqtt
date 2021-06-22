@@ -13,12 +13,14 @@ jobs:
     run_test_case:
 
         runs-on: ubuntu-latest
-
         container:
-            image: erlang:23.2.7
+            image: emqx/build-env:erl23.2.7.2-emqx-2-ubuntu20.04
 
         steps:
-        - uses: actions/checkout@v1
+        - name: Checkout
+          uses: actions/checkout@v2
+          with:
+            submodules: recursive
         - name: Run tests
           run: |
             make eunit
