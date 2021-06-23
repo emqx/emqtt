@@ -49,7 +49,10 @@ t_quic_sock(Config) ->
     quic_server:stop(Server).
 
 send_and_recv_with(Sock) ->
-    {ok, {{_,_,_,_}, _}} = emqtt_quic:sockname(Sock),
+    case emqtt_quic:sockname(Sock) of
+        {ok, {{_,_,_,_}, _}} -> ok;
+        {ok, {{_,_,_,_,_,_,_,_}, _}} -> ok
+    end,
     ok = emqtt_quic:send(Sock, <<"ping">>),
     {ok, <<"pong">>} = emqtt_quic:recv(Sock, 0),
     ok = emqtt_quic:setopts(Sock, [{active, 100}]),

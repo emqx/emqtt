@@ -23,7 +23,6 @@ jobs:
                 - debian9
                 - centos8
                 - centos7
-                - centos6
               otp:
                 - erl23.2.7.2-emqx-2
                 - erl24.0.1-emqx-1
