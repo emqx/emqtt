@@ -13,18 +13,18 @@ jobs:
     run_test_case:
 
         runs-on: ubuntu-latest
-
         strategy:
             matrix:
                 container:
-                    - erlang:23.3
-                    - erlang:24.0
+                    - "emqx/build-env:erl23.2.7.2-emqx-2-ubuntu20.04"
+                    - "emqx/build-env:erl24.0.1-emqx-1-ubuntu20.04"
 
-        container:
-            image: ${{ matrix.container }}
-
+        container: ${{ matrix.container }}
         steps:
-        - uses: actions/checkout@v1
+        - name: Checkout
+          uses: actions/checkout@v2
+          with:
+            submodules: recursive
         - name: Run tests
           run: |
             make eunit

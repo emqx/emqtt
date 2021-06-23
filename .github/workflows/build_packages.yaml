@@ -14,11 +14,11 @@ jobs:
         runs-on: ubuntu-latest
 
         strategy:
+            fail-fast: false
             matrix:
               os:
                 - ubuntu20.04
                 - ubuntu18.04
-                - ubuntu16.04
                 - debian10
                 - debian9
                 - centos8
@@ -27,6 +27,7 @@ jobs:
               otp:
                 - erl23.2.7.2-emqx-2
                 - erl24.0.1-emqx-1
+
         steps:
         - uses: actions/checkout@v1
         - name: build emqx packages

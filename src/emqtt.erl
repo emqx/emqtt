@@ -26,6 +26,7 @@
 
 -export([ connect/1
         , ws_connect/1
+        , quic_connect/1
         , disconnect/1
         , disconnect/2
         , disconnect/3
@@ -162,7 +163,7 @@
 -type(subscribe_ret() ::
       {ok, properties(), [reason_code()]} | {error, term()}).
 
--type(conn_mod() :: emqtt_sock | emqtt_ws).
+-type(conn_mod() :: emqtt_sock | emqtt_ws | emqtt_quic).
 
 -type(client() :: pid() | atom()).
 
@@ -276,6 +277,9 @@ connect(Client) ->
 
 ws_connect(Client) ->
     call(Client, {connect, emqtt_ws}).
+
+quic_connect(Client) ->
+    call(Client, {connect, emqtt_quic}).
 
 %% @private
 call(Client, Req) ->
@@ -990,6 +994,10 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
     ?LOG(debug, "RECV Data: ~p", [Data], State),
     process_incoming(Data, [], run_sock(State));
 
+handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
+    ?LOG(debug, "RECV Data: ~p", [Data], State),
+    process_incoming(Data, [], run_sock(State));
+
 handle_event(info, {Error, _Sock, Reason}, _StateName, State)
     when Error =:= tcp_error; Error =:= ssl_error ->
     ?LOG(error, "The connection error occured ~p, reason:~p",
@@ -1011,6 +1019,19 @@ handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
 handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     ?LOG(error, "Got tcp error: ~p", [Reason], State),
     {stop, {shutdown, Reason}, State};
+
+handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
+    %% This is just a notify, we can wait for close complete
+    ?LOG(error, "QUIC: transport shutdown: ~p", [Reason], State),
+    keep_state_and_data;
+
+handle_event(info, {quic, closed, _Stream, Reason}, _, State) ->
+    ?LOG(error, "QUIC: transport closed: ~p", [Reason], State),
+    {stop, {shutdown, {closed, Reason}}, State};
+
+handle_event(info, {quic, closed, _Stream}, _, State) ->
+    ?LOG(error, "QUIC: stream closed", [], State),
+    {stop, {shutdown, closed}, State};
 
 handle_event(info, EventContent = {'EXIT', _Pid, normal}, StateName, State) ->
     ?LOG(info, "State: ~s, Unexpected Event: (info, ~p)",

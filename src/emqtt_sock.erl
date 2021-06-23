@@ -76,14 +76,23 @@ send(Sock, Data) when is_port(Sock) ->
         error:badarg -> {error, einval}
     end;
 send(#ssl_socket{ssl = SslSock}, Data) ->
-    ssl:send(SslSock, Data).
+    ssl:send(SslSock, Data);
+send(QuicStream, Data) when is_reference(QuicStream) ->
+    case quicer:send(QuicStream, Data) of
+        {ok, _Len} ->
+            ok;
+        Other ->
+            Other
+    end.
 
 -spec(recv(socket(), non_neg_integer())
       -> {ok, iodata()} | {error, closed | inet:posix()}).
 recv(Sock, Length) when is_port(Sock) ->
     gen_tcp:recv(Sock, Length);
 recv(#ssl_socket{ssl = SslSock}, Length) ->
-    ssl:recv(SslSock, Length).
+    ssl:recv(SslSock, Length);
+recv(QuicStream, Length) when is_reference(QuicStream) ->
+    quicer:recv(QuicStream, Length).
 
 -spec(close(socket()) -> ok).
 close(Sock) when is_port(Sock) ->
@@ -108,7 +117,9 @@ getstat(#ssl_socket{tcp = Sock}, Options) ->
 sockname(Sock) when is_port(Sock) ->
     inet:sockname(Sock);
 sockname(#ssl_socket{ssl = SslSock}) ->
-    ssl:sockname(SslSock).
+    ssl:sockname(SslSock);
+sockname(Sock) when is_reference(Sock)->
+    quicer:sockname(Sock).
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->

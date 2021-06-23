@@ -2,22 +2,22 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
 
-.PHONY: all compile unlock clean distclean xref eunit ct dialyzer
+REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3
 
 all: emqtt
 
 $(REBAR):
-	@curl -k -f -L "https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3" -o ./rebar3
+	@curl -k -f -L "$(REBAR_URL)" -o ./rebar3
 	@chmod +x ./rebar3
 
-emqtt: compile
+emqtt: $(REBAR) escript
 	$(REBAR) as emqtt release
 
-pkg: compile
+pkg: escript
 	$(REBAR) as emqtt_pkg release
 	make -C packages
 
-compile: $(REBAR) escript
+compile: $(REBAR)
 	$(REBAR) compile
 
 unlock:
@@ -26,7 +26,7 @@ unlock:
 clean: distclean
 
 distclean:
-	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli
+	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli rebar3
 
 xref:
 	$(REBAR) xref
@@ -43,5 +43,5 @@ cover:
 dialyzer:
 	$(REBAR) dialyzer
 
-escript:
+escript: $(REBAR) compile
 	$(REBAR) as escript escriptize
