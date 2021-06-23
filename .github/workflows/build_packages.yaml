@@ -42,7 +42,7 @@ jobs:
             name: packages-${{ matrix.os }}
             path: _packages/.
 
-    build-on-mac-erl-24:
+    build-on-mac-erlang-24:
         runs-on: macos-latest
 
         steps:
@@ -65,7 +65,7 @@ jobs:
             name: packages-mac
             path: _packages/.
 
-    build-on-mac-erl-23:
+    build-on-mac-erlang-23:
         runs-on: macos-latest
 
         steps:
@@ -91,7 +91,7 @@ jobs:
     release:
         runs-on: ubuntu-latest
 
-        needs: [build, build-on-mac-erl24, build-on-mac-erl23]
+        needs: [build, build-on-mac-erlang-24, build-on-mac-erlang-23]
         if: ${{ github.event_name == 'release' }}
 
         steps:
