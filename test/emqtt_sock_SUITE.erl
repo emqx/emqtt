@@ -45,13 +45,13 @@ t_ssl_sock(Config) ->
     ssl_server:stop(Server).
 
 send_and_recv_with(Sock) ->
+    {ok, [{send_cnt, SendCnt}, {recv_cnt, RecvCnt}]} = emqtt_sock:getstat(Sock, [send_cnt, recv_cnt]),
     {ok, {{127,0,0,1}, _}} = emqtt_sock:sockname(Sock),
     ok = emqtt_sock:send(Sock, <<"hi">>),
     {ok, <<"hi">>} = emqtt_sock:recv(Sock, 0),
     ok = emqtt_sock:setopts(Sock, [{active, 100}]),
     {ok, Stats} = emqtt_sock:getstat(Sock, [send_cnt, recv_cnt]),
-    [{send_cnt, Cnt}, {recv_cnt, Cnt}] = Stats,
-    ?assert((Cnt == 1) or (Cnt == 3)).
+    Stats = [{send_cnt, SendCnt + 1}, {recv_cnt, RecvCnt + 1}].
 
 %%--------------------------------------------------------------------
 %% Helper functions
@@ -65,4 +65,3 @@ keyfile(Config) ->
 
 test_dir(Config) ->
     filename:dirname(filename:dirname(proplists:get_value(data_dir, Config))).
-
