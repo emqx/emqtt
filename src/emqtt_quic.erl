@@ -52,8 +52,9 @@ recv(Stream, Count) ->
 getstat(Stream, Options) ->
     quicer:getstat(Stream, Options).
 
-%% @todo setopts
-setopts(_Stream, _Opts) ->
+setopts(Stream, Opts) ->
+    [ ok = quicer:setopt(Stream, Opt, OptV)
+      || {Opt, OptV} <- Opts ],
     ok.
 
 close(Stream) ->
