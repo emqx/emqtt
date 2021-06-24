@@ -1,5 +1,3 @@
-.PHONY: all compile unlock clean distclean xref eunit ct dialyzer
-
 CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
@@ -47,4 +45,3 @@ dialyzer:
 
 escript: $(REBAR) compile
 	$(REBAR) as escript escriptize
-

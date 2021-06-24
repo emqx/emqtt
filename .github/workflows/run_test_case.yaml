@@ -13,9 +13,13 @@ jobs:
     run_test_case:
 
         runs-on: ubuntu-latest
-        container:
-            image: emqx/build-env:erl23.2.7.2-emqx-2-ubuntu20.04
+        strategy:
+            matrix:
+                container:
+                    - "emqx/build-env:erl23.2.7.2-emqx-2-ubuntu20.04"
+                    - "emqx/build-env:erl24.0.1-emqx-1-ubuntu20.04"
 
+        container: ${{ matrix.container }}
         steps:
         - name: Checkout
           uses: actions/checkout@v2
