@@ -1033,6 +1033,10 @@ handle_event(info, {quic, closed, _Stream}, _, State) ->
     ?LOG(error, "QUIC: stream closed", [], State),
     {stop, {shutdown, closed}, State};
 
+handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
+    ?LOG(error, "QUIC: peer send shutdown", [], State),
+    {stop, {shutdown, closed}, State};
+
 handle_event(info, EventContent = {'EXIT', _Pid, normal}, StateName, State) ->
     ?LOG(info, "State: ~s, Unexpected Event: (info, ~p)",
          [StateName, EventContent], State),
