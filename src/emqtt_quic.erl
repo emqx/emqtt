@@ -58,7 +58,7 @@ setopts(Stream, Opts) ->
     ok.
 
 close(Stream) ->
-    quicer:close_stream(Stream).
+    quicer:async_close_stream(Stream).
 
 sockname(H) ->
     quicer:sockname(H).
