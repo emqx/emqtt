@@ -2,7 +2,7 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
 
-REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-7/rebar3
+REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-8/rebar3
 
 all: emqtt
 
