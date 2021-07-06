@@ -5,13 +5,33 @@
 %% ==============================================================================
 Keyfind = fun(K, L) -> {K, V} = lists:keyfind(K, 1, L), V end,
 
-NewRelx = 
+IsCentos6 = fun() ->
+                case file:read_file("/etc/centos-release") of
+                    {ok, <<"CentOS release 6", _/binary >>} ->
+                        true;
+                    _ ->
+                        false
+                end
+            end,
+
+IsWin32 = fun() ->
+                win32 =:= element(1, os:type())
+          end,
+
+IsQuicSupp = fun() ->
+                not (IsCentos6() orelse IsWin32() orelse
+                     false =/= os:getenv("BUILD_WITHOUT_QUIC")
+                    )
+             end,
+
+NewRelx =
     fun(Name, Profiles) ->
         EMQTT = Keyfind(Name, Profiles),
         Relx = Keyfind(relx, EMQTT),
         {release, {emqtt, Vsn}, Apps} = lists:keyfind(release, 1, Relx),
         GitDescribe = lists:last(string:tokens(os:cmd("git describe --tags --always"), "\n")),
-        Relx1 = lists:keystore(release, 1, Relx, {release, {emqtt, GitDescribe}, Apps}),
+        Relx1 = lists:keystore(release, 1, Relx, {release, {emqtt, GitDescribe},
+                                                  Apps ++ [ quicer || IsQuicSupp() ]}),
         [{relx, Relx1}]
     end,
 
@@ -19,4 +39,13 @@ Profiles = Keyfind(profiles, CONFIG),
 Profiles1 = lists:keystore(emqtt, 1, Profiles, {emqtt, NewRelx(emqtt, Profiles)}),
 Profiles2 = lists:keystore(emqtt_pkg, 1, Profiles1, {emqtt_pkg, NewRelx(emqtt_pkg, Profiles1)}),
 NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, Profiles2}),
-NewConfig.
+
+Quicer = {quicer, {git, "https://github.com/emqx/quic.git", {tag, "0.0.6"}}},
+ExtraDeps = fun(C) ->
+                {deps, Deps0} = lists:keyfind(deps, 1, C),
+                    Deps = Deps0 ++
+                        [ Quicer || IsQuicSupp() ],
+                lists:keystore(deps, 1, C, {deps, Deps})
+            end,
+
+ExtraDeps(NewConfig).
