@@ -28,8 +28,9 @@
         ]).
 
 connect(Host, Port, Opts, Timeout) ->
+    KeepAlive =  proplists:get_value(keepalive, Opts, 60),
     ConnOpts = [ {alpn, ["mqtt"]}
-               , {idle_timeout_ms, 60000}
+               , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 10}
                | Opts],
@@ -58,7 +59,7 @@ setopts(Stream, Opts) ->
     ok.
 
 close(Stream) ->
-    quicer:async_close_stream(Stream).
+    quicer:close_stream(Stream, 1000).
 
 sockname(H) ->
     quicer:sockname(H).

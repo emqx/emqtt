@@ -1067,11 +1067,18 @@ code_change(_Vsn, State, Data, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+should_ping(emqtt_quic, Sock) ->
+    case emqtt_quic:getstat(Sock, [send_cnt]) of
+        {ok, [{send_cnt, V}]} ->
+            V == put(quic_send_cnt, V) orelse V == undefined;
+        Err ->
+            Err
+    end;
 
 should_ping(ConnMod, Sock) ->
     case ConnMod:getstat(Sock, [send_oct]) of
         {ok, [{send_oct, Val}]} ->
-            OldVal = get(send_oct), put(send_oct, Val),
+            OldVal = put(send_oct, Val),
             OldVal == undefined orelse OldVal == Val;
         Error = {error, _Reason} ->
             Error

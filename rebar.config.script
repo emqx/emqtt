@@ -40,7 +40,7 @@ Profiles1 = lists:keystore(emqtt, 1, Profiles, {emqtt, NewRelx(emqtt, Profiles)}
 Profiles2 = lists:keystore(emqtt_pkg, 1, Profiles1, {emqtt_pkg, NewRelx(emqtt_pkg, Profiles1)}),
 NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, Profiles2}),
 
-Quicer = {quicer, {git, "https://github.com/emqx/quic.git", {tag, "0.0.6"}}},
+Quicer = {quicer, {git, "https://github.com/emqx/quic.git", {tag, "0.0.8"}}},
 ExtraDeps = fun(C) ->
                 {deps, Deps0} = lists:keyfind(deps, 1, C),
                     Deps = Deps0 ++
