@@ -36,6 +36,7 @@ server_loop(L) ->
     after 0 ->
             case quicer:accept(L, [], 30000) of
                 {ok, Conn} ->
+                    {ok, Conn} = quicer:handshake(Conn, 1000),
                     {ok, Stm} = quicer:accept_stream(Conn, []),
                     receive
                         {quic, <<"ping">>, _, _, _, _} ->

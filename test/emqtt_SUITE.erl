@@ -58,7 +58,7 @@ groups() ->
       [basic_test_v3]},
     {mqttv4, [non_parallel_tests],
       [basic_test_v4,
-       anonymous_test,
+       %% anonymous_test,
        retry_interval_test,
        will_message_test,
        will_retain_message_test,
@@ -321,21 +321,24 @@ basic_test_v3(_Config) ->
 basic_test_v4(_Config) ->
     basic_test([{proto_ver, v4}]).
 
-anonymous_test(_Config) ->
-    application:set_env(emqx, allow_anonymous, false),
 
-    process_flag(trap_exit, true),
-    {ok, C1} = emqtt:start_link(),
-    {_,{unauthorized_client,_}} = emqtt:connect(C1),
-    receive {'EXIT', _, _} -> ok
-    after 500 -> error("allow_anonymous")
-    end,
-    process_flag(trap_exit, false),
+%%$ NOTE,  Mask the test anonymous_test for emqx 5.0 since `auth' is moved out of emqx core app
 
-    application:set_env(emqx, allow_anonymous, true),
-    {ok, C2} = emqtt:start_link([{username, <<"test">>}, {password, <<"password">>}]),
-    {ok, _} = emqtt:connect(C2),
-    ok = emqtt:disconnect(C2).
+%% anonymous_test(_Config) ->
+%%     application:set_env(emqx, allow_anonymous, false),
+
+%%     process_flag(trap_exit, true),
+%%     {ok, C1} = emqtt:start_link(),
+%%     {_,{unauthorized_client,_}} = emqtt:connect(C1),
+%%     receive {'EXIT', _, _} -> ok
+%%     after 500 -> error("allow_anonymous")
+%%     end,
+%%     process_flag(trap_exit, false),
+
+%%     application:set_env(emqx, allow_anonymous, true),
+%%     {ok, C2} = emqtt:start_link([{username, <<"test">>}, {password, <<"password">>}]),
+%%     {ok, _} = emqtt:connect(C2),
+%%     ok = emqtt:disconnect(C2).
 
 retry_interval_test(_Config) ->
     {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}]),
