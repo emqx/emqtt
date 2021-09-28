@@ -21,7 +21,6 @@ jobs:
                 - ubuntu16.04
                 - debian10
                 - debian9
-                - opensuse
                 - centos8
                 - centos7
                 - centos6
@@ -30,7 +29,7 @@ jobs:
         - uses: actions/checkout@v1
         - name: build emqx packages
           env:
-            ERL_OTP: erl22.3
+            ERL_OTP: erl23.2.7.2-emqx-2
             SYSTEM: ${{ matrix.os }}
           run: |
             docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"
@@ -47,8 +46,8 @@ jobs:
         - uses: actions/checkout@v1
         - name: prepare
           run: |
-            brew install curl zip unzip gnu-sed erlang@22
-            echo "/usr/local/opt/erlang@22/bin" >> $GITHUB_PATH
+            brew install curl zip unzip gnu-sed erlang@23
+            echo "/usr/local/opt/erlang@23/bin" >> $GITHUB_PATH
             echo "/usr/local/bin" >> $GITHUB_PATH
         - name: install rebar3
           run: |
