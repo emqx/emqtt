@@ -21,15 +21,21 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> emqx_ct:all(?MODULE).
+all() -> emqx_common_test_helpers:all(?MODULE).
 
+init_per_suite(Config) ->
+    emqtt_test_lib:ensure_test_module(emqx_common_test_helpers),
+    Config.
+
+end_per_suite(_Config) ->
+    ok.
 %%--------------------------------------------------------------------
 %% Test cases
 %%--------------------------------------------------------------------
 
 t_tcp_sock(_) ->
-    Server = tcp_server:start_link(4000),
-    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4000, [], 3000),
+    Server = tcp_server:start_link(4001),
+    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4001, [], 3000),
     send_and_recv_with(Sock),
     ok = emqtt_sock:close(Sock),
     ok = tcp_server:stop(Server).

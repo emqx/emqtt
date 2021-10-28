@@ -20,13 +20,15 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> emqx_ct:all(?MODULE).
+all() -> emqx_common_test_helpers:all(?MODULE).
 
 init_per_suite(Config) ->
+    emqtt_test_lib:start_emqx(),
     application:ensure_all_started(quicer),
     Config.
 
 end_per_suite(_) ->
+    emqtt_test_lib:stop_emqx(),
     ok.
 
 t_quic_sock(Config) ->
