@@ -21,9 +21,15 @@
 
 -include("emqtt.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("emqx_ct_helpers/include/emqx_ct.hrl").
 
-all() -> emqx_ct:all(?MODULE).
+all() -> emqx_common_test_helpers:all(?MODULE).
+
+init_per_suite(Config) ->
+    emqtt_test_lib:ensure_test_module(emqx_common_test_helpers),
+    Config.
+
+end_per_suite(_Config) ->
+    ok.
 
 t_id(_) ->
     foreach_prop(

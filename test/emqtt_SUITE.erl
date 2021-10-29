@@ -71,11 +71,11 @@ groups() ->
        retain_as_publish_test]}].
 
 init_per_suite(Config) ->
-    emqx_ct_helpers:start_apps([]),
+    ok = emqtt_test_lib:start_emqx(),
     Config.
 
 end_per_suite(_Config) ->
-    emqx_ct_helpers:stop_apps([]).
+    emqtt_test_lib:stop_emqx().
 
 receive_messages(Count) ->
     receive_messages(Count, []).

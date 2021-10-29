@@ -23,7 +23,6 @@
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include_lib("emqx_ct_helpers/include/emqx_ct.hrl").
 
 %%-define(PROPTEST(F), ?assert(proper:quickcheck(F()))).
 -define(PROPTEST(F), ?assert(proper:quickcheck(F(), [{to_file, user}]))).

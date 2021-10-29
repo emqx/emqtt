@@ -532,4 +532,7 @@
 
 -define(PACKET(Type), #mqtt_packet{header = #mqtt_packet_header{type = Type}}).
 
+-define(catch_error(Error, Exp),
+        try (Exp) catch error:Error -> ok end).
+
 -endif.
