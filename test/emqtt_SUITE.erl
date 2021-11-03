@@ -353,7 +353,7 @@ retry_interval_test(_Config) ->
 
     timer:sleep(timer:seconds(2)),
     ?assertEqual(2, counters:get(CRef, 1)),
-    
+
     meck:unload(emqtt_sock),
     ok = emqtt:disconnect(Pub).
 
@@ -522,20 +522,20 @@ retain_as_publish_test(_) ->
 enhanced_auth(_) ->
     process_flag(trap_exit, true),
 
+    AuthMethod = <<"SCRAM-SHA-1">>,
+    {ok, Client0} =  emqtt:start_link([{clean_start, true},
+                                       {proto_ver, v5},
+                                       {enhanced_auth, #{method => AuthMethod,
+                                                         params => #{},
+                                                         function => fun (_State) -> {error, authentication_failed} end}},
+                                       {connect_timeout, 6000}]),
+    ?assertEqual({error,{badmatch,{error,authentication_failed}}}, emqtt:connect(Client0)),
+
     Username = <<"username">>,
     Password = <<"password">>,
     Salt = <<"emqx">>,
-    AuthMethod = <<"SCRAM-SHA-1">>,
+
     ok = emqx_sasl_scram:add(Username, Password, Salt),
-
-    {error, _} = emqtt:start_link([{clean_start, true},
-                                   {proto_ver, v5},
-                                   {enhanced_auth, #{method => AuthMethod,
-                                                     params => #{},
-                                                     function => fun (_State) -> {error, authentication_failed} end}},
-                                   {connect_timeout, 6000}]),
-
-
     {ok, Client1} = emqtt:start_link([{clean_start, true},
                                      {proto_ver, v5},
                                      {enhanced_auth, #{method => AuthMethod,
@@ -550,9 +550,11 @@ enhanced_auth(_) ->
 
     timer:sleep(200),
     ErrorFun = fun (_State) -> {error, authentication_failed} end,
-    {error,authentication_failed} = emqtt:reauthentication(Client1, #{params => #{username => Username,
-                                                                                  password => Password,
-                                                                                  salt => Salt},
-                                                                      function => ErrorFun}),
+    ?assertEqual({error,authentication_failed},
+                 emqtt:reauthentication(Client1,
+                                        #{params => #{username => Username,
+                                                      password => Password,
+                                                      salt => Salt},
+                                          function => ErrorFun})),
 
     process_flag(trap_exit, false).
