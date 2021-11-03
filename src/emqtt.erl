@@ -232,7 +232,7 @@
 
 -define(LOG(Level, Format, Args, State),
         begin
-          (logger:log(Level, #{}, #{report_cb => fun(_) -> {"emqtt(~s): "++(Format), ([State#state.clientid|Args])} end}))
+          (logger:log(Level, #{}, #{mfa => {?MODULE, ?FUNCTION_NAME, ?FUNCTION_ARITY}, report_cb => fun(_) -> {"emqtt(~s): "++(Format), ([State#state.clientid|Args])} end}))
         end).
 
 %%--------------------------------------------------------------------
