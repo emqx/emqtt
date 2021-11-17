@@ -821,6 +821,15 @@ connected(cast, {pubcomp, PacketId, ReasonCode, Properties}, State) ->
 connected(cast, ?PUBLISH_PACKET(_QoS, _PacketId), #state{paused = true}) ->
     keep_state_and_data;
 
+connected(cast, Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId, _Properties, _Payload), State = #state{proto_ver = ?MQTT_PROTO_V5}) ->
+     {keep_state, deliver(packet_to_msg(Packet), State)};
+
+connected(cast, Packet = ?PUBLISH_PACKET(?QOS_1, _PacketId, _Properties, _Payload), State = #state{proto_ver = ?MQTT_PROTO_V5}) ->
+    publish_process(?QOS_1, Packet, State);
+
+connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId, _Properties, _Payload), State = #state{proto_ver = ?MQTT_PROTO_V5}) ->
+    publish_process(?QOS_2, Packet, State);
+
 connected(cast, Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), State) ->
      {keep_state, deliver(packet_to_msg(Packet), State)};
 
