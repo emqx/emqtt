@@ -24,6 +24,7 @@
 -spec start_emqx() -> ok.
 start_emqx() ->
     ensure_test_module(emqx_common_test_helpers),
+    ensure_test_module(emqx_ratelimiter_SUITE),
     emqx_common_test_helpers:start_apps([]),
     ok.
 
