@@ -387,7 +387,7 @@ t_init(Config) ->
     ConnFun = ?config(conn_fun, Config),
     Port = ?config(port, Config),
     {ok, C1} = emqtt:start_link([{name, test},
-                                 %{owner, self()},
+                                 {owner, self()},
                                  {host, {127,0,0,1}},
                                  {port, Port},
                                  {ssl, false},
