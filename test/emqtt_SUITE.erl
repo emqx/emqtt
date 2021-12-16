@@ -34,7 +34,12 @@
                       <<"+/+">>, <<"TopicA/#">>]).
 
 all() ->
-    [{group, general}, {group, mqttv3}, {group, mqttv4}, {group, mqttv5}].
+    [ {group, general}
+    , {group, mqttv3}
+    , {group, mqttv4}
+    , {group, mqttv5}
+    , {group, quic}
+    ].
 
 groups() ->
     [{general, [non_parallel_tests],
@@ -71,7 +76,14 @@ groups() ->
        dollar_topics_test]},
     {mqttv5, [non_parallel_tests],
       [basic_test_v5,
-       retain_as_publish_test]}].
+       retain_as_publish_test]},
+     {quic, [], [ {group, general}
+                , {group, mqttv3}
+                , {group, mqttv4}
+                , {group, mqttv5}
+                ]
+     }
+    ].
 
 init_per_suite(Config) ->
     ok = emqtt_test_lib:start_emqx(),
@@ -89,6 +101,19 @@ end_per_testcase(TC, _Config)
     ok;
 end_per_testcase(_TC, _Config) ->
     ok.
+
+init_per_group(quic, Config) ->
+    merge_config(Config, [{port, 14567}, {conn_fun, quic_connect}]);
+init_per_group(_, Config) ->
+    case lists:keyfind(conn_fun, 1, Config) of
+        false ->
+            merge_config(Config, [{port, 1883}, {conn_fun, connect}]);
+        _ ->
+            Config
+    end.
+
+end_per_group(_, Config) ->
+    Config.
 
 receive_messages(Count) ->
     receive_messages(Count, []).
@@ -114,17 +139,26 @@ clean_retained(Topic) ->
 t_props(_) ->
     ok = emqtt_props:validate(#{'Payload-Format-Indicator' => 0}).
 
-t_connect(_) ->
-    {ok, C} = emqtt:start_link(),
-    {ok, _} = emqtt:connect(C),
+t_connect(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok= emqtt:disconnect(C),
-
-    {ok, C1} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C1),
+    ct:pal("C is connected ~p", [C]),
+    {ok, C1} = emqtt:start_link([ {clean_start, true}
+                                , {port, Port}
+                                ]),
+    {ok, _} = emqtt:ConnFun(C1),
+    ct:pal("C1 is connected ~p", [C1]),
     ok= emqtt:disconnect(C1),
 
-    {ok, C2} = emqtt:start_link(#{clean_start => true}),
-    {ok, _} = emqtt:connect(C2),
+    {ok, C2} = emqtt:start_link(#{ clean_start => true
+                                 , port => Port
+                                 }
+                               ),
+    {ok, _} = emqtt:ConnFun(C2),
+    ct:pal("C2 is connected ~p", [C2]),
     ok= emqtt:disconnect(C2).
 
 t_reconnect_disabled(_) ->
@@ -202,10 +236,13 @@ t_ws_connect(_) ->
     {ok, _} = emqtt:ws_connect(C),
     ok = emqtt:disconnect(C).
 
-t_subscribe(_) ->
+t_subscribe(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
     Topic = nth(1, ?TOPICS),
-    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}]),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
 
     {ok, _, [0]} = emqtt:subscribe(C, Topic),
     {ok, _, [0]} = emqtt:subscribe(C, Topic, at_most_once),
@@ -222,10 +259,13 @@ t_subscribe(_) ->
     {ok, _, [0,1,2]} = emqtt:subscribe(C, [{Topic, at_most_once},{Topic, 1}, {Topic, [{qos, ?QOS_2}]}]),
     ok = emqtt:disconnect(C).
 
-t_publish(_) ->
+t_publish(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
     Topic = nth(1, ?TOPICS),
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
 
     ok = emqtt:publish(C, Topic, <<"t_publish">>),
     ok = emqtt:publish(C, Topic, <<"t_publish">>, 0),
@@ -235,13 +275,16 @@ t_publish(_) ->
 
     ok = emqtt:disconnect(C).
 
-t_unsubscribe(_) ->
+t_unsubscribe(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
     Topic1 = nth(1, ?TOPICS),
     Topic2 = nth(2, ?TOPICS),
     Topic3 = nth(3, ?TOPICS),
     Topic4 = nth(4, ?TOPICS),
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     {ok, _, [0,0,0,0]} = emqtt:subscribe(C, [{Topic1, 0}, {Topic2, 0}, {Topic3, 0}, {Topic4, 0}]),
 
     {ok, _, _} = emqtt:unsubscribe(C, Topic1),
@@ -251,41 +294,53 @@ t_unsubscribe(_) ->
 
     ok = emqtt:disconnect(C).
 
-t_ping(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_ping(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     pong = emqtt:ping(C),
     ok = emqtt:disconnect(C).
 
-t_puback(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_puback(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:puback(C, 0),
     ok = emqtt:disconnect(C).
 
-t_pubrec(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_pubrec(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:pubrec(C, 0),
     ok = emqtt:disconnect(C).
 
-t_pubrel(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_pubrel(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:pubrel(C, 0),
     ok = emqtt:disconnect(C).
 
-t_pubcomp(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_pubcomp(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:pubcomp(C, 0),
     ok = emqtt:disconnect(C).
 
-t_subscriptions(_) ->
+t_subscriptions(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     Topic = nth(1, ?TOPICS),
 
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
 
     [] = emqtt:subscriptions(C),
     {ok, _, [0]} = emqtt:subscribe(C, Topic, 0),
@@ -294,68 +349,77 @@ t_subscriptions(_) ->
 
     ok = emqtt:disconnect(C).
 
-t_info(_) ->
-    {ok, C} = emqtt:start_link([{name, test_info}, {clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_info(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{name, test_info}, {clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     [ ?assertEqual(test_info, Value) || {Key, Value} <- emqtt:info(C), Key =:= name],
     ok = emqtt:disconnect(C).
 
-t_stop(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_stop(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:stop(C).
 
-t_pause_resume(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_pause_resume(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     ok = emqtt:pause(C),
     ok = emqtt:resume(C),
     ok = emqtt:disconnect(C).
 
-t_init(_) ->
+t_init(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     {ok, C1} = emqtt:start_link([{name, test},
-                                {owner, self()},
-                                {host, {127,0,0,1}},
-                                {port, 1883},
-                                {ssl, false},
-                                {ssl_opts, #{}},
-                                {clientid, <<"test">>},
-                                {clean_start, true},
-                                {username, <<"username">>},
-                                {password, <<"password">>},
-                                {keepalive, 2},
-                                {connect_timeout, 2},
-                                {ack_timeout, 2},
-                                {force_ping, true},
-                                {properties, #{}},
-                                {max_inflight, 1},
-                                {auto_ack, true},
-                                {bridge_mode, true},
-                                {retry_interval, 10},
-                                {other, ignore},
-                                {proto_ver, v3}]),
+                                 %{owner, self()},
+                                 {host, {127,0,0,1}},
+                                 {port, Port},
+                                 {ssl, false},
+                                 {ssl_opts, #{}},
+                                 {clientid, <<"test">>},
+                                 {clean_start, true},
+                                 {username, <<"username">>},
+                                 {password, <<"password">>},
+                                 {keepalive, 2},
+                                 {connect_timeout, 2},
+                                 {ack_timeout, 2},
+                                 {force_ping, true},
+                                 {properties, #{}},
+                                 {max_inflight, 1},
+                                 {auto_ack, true},
+                                 {bridge_mode, true},
+                                 {retry_interval, 10},
+                                 {other, ignore},
+                                 {proto_ver, v3}]),
 
-    {ok, _} = emqtt:connect(C1),
+    {ok, _} = emqtt:ConnFun(C1),
     ok = emqtt:disconnect(C1),
 
     {ok, C2} = emqtt:start_link([{proto_ver, v4},
-                                {msg_handler,undefined},
-                                {hosts, [{{127,0,0,1}, 1883}]},
-                                % {ws_path, "abcd"},
-                                {max_inflight, infinity},
-                                force_ping,
-                                auto_ack]),
-    {ok, _} = emqtt:connect(C2),
+                                 {msg_handler,undefined},
+                                 {hosts, [{{127,0,0,1}, Port}]},
+                                                % {ws_path, "abcd"},
+                                 {max_inflight, infinity},
+                                 force_ping,
+                                 auto_ack]),
+    {ok, _} = emqtt:ConnFun(C2),
     ok = emqtt:disconnect(C2),
 
     {ok, C3} = emqtt:start_link([{proto_ver, v5},
-                                {hosts, [{127,0,0,1}]},
-                                {will_topic, nth(3, ?TOPICS)},
-                                {will_payload, <<"will_retain_message_test">>},
-                                {will_qos, ?QOS_1},
-                                {will_retain, true},
-                                {will_props, #{}}]),
-    {ok, _} = emqtt:connect(C3),
+                                 {port, Port},
+                                 {hosts, [{{127,0,0,1}, Port}]},
+                                 {will_topic, nth(3, ?TOPICS)},
+                                 {will_payload, <<"will_retain_message_test">>},
+                                 {will_qos, ?QOS_1},
+                                 {will_retain, true},
+                                 {will_props, #{}}]),
+    {ok, _} = emqtt:ConnFun(C3),
     ok = emqtt:disconnect(C3).
 
 t_initialized(_) ->
@@ -364,9 +428,11 @@ t_initialized(_) ->
 t_waiting_for_connack(_) ->
     error('TODO').
 
-t_connected(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}]),
-    {ok, _} = emqtt:connect(C),
+t_connected(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     Clientid = gen_statem:call(C, clientid),
     [ ?assertMatch(Clientid, Value) || {Key, Value} <- emqtt:info(C), Key =:= clientid].
 
@@ -386,10 +452,12 @@ t_reason_code_name(_) ->
     error('TODO').
 
 basic_test(Opts) ->
+    ConnFun = ?config(conn_fun, Opts),
+    Port = ?config(port, Opts),
     Topic = nth(1, ?TOPICS),
     ct:print("Basic test starting"),
-    {ok, C} = emqtt:start_link(Opts),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{port, Port}| Opts]),
+    {ok, _} = emqtt:ConnFun(C),
     {ok, _, [1]} = emqtt:subscribe(C, Topic, qos1),
     {ok, _, [2]} = emqtt:subscribe(C, Topic, qos2),
     {ok, _} = emqtt:publish(C, Topic, <<"qos 2">>, 2),
@@ -398,11 +466,11 @@ basic_test(Opts) ->
     ?assertEqual(3, length(receive_messages(3))),
     ok = emqtt:disconnect(C).
 
-basic_test_v3(_Config) ->
-    basic_test([{proto_ver, v3}]).
+basic_test_v3(Config) ->
+    basic_test([{proto_ver, v3} | Config]).
 
-basic_test_v4(_Config) ->
-    basic_test([{proto_ver, v4}]).
+basic_test_v4(Config) ->
+    basic_test([{proto_ver, v4} | Config]).
 
 
 %%$ NOTE,  Mask the test anonymous_test for emqx 5.0 since `auth' is moved out of emqx core app
@@ -423,31 +491,41 @@ basic_test_v4(_Config) ->
 %%     {ok, _} = emqtt:connect(C2),
 %%     ok = emqtt:disconnect(C2).
 
-retry_interval_test(_Config) ->
-    {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}]),
-    {ok, _} = emqtt:connect(Pub),
+retry_interval_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Pub),
 
     CRef = counters:new(1, [atomics]),
 
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
+
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    meck:expect(emqtt_quic, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
+
     {ok, _} = emqtt:publish(Pub, nth(1, ?TOPICS), <<"qos 1">>, 1),
 
     timer:sleep(timer:seconds(2)),
     ?assertEqual(2, counters:get(CRef, 1)),
     
     meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic),
     ok = emqtt:disconnect(Pub).
 
-will_message_test(_Config) ->
-    {ok, C1} = emqtt:start_link([{clean_start, true},
-                                          {will_topic, nth(3, ?TOPICS)},
-                                          {will_payload, <<"client disconnected">>},
-                                          {keepalive, 2}]),
-    {ok, _} = emqtt:connect(C1),
+will_message_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C1} = emqtt:start_link([{clean_start, true}, {port, Port},
+                                 {will_topic, nth(3, ?TOPICS)},
+                                 {will_payload, <<"client disconnected">>},
+                                 {keepalive, 2}]),
+    {ok, _} = emqtt:ConnFun(C1),
 
-    {ok, C2} = emqtt:start_link(),
-    {ok, _} = emqtt:connect(C2),
+    {ok, C2} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C2),
 
     {ok, _, [2]} = emqtt:subscribe(C2, nth(3, ?TOPICS), 2),
     timer:sleep(10),
@@ -457,28 +535,31 @@ will_message_test(_Config) ->
     ok = emqtt:disconnect(C2),
     ct:print("Will message test succeeded").
 
-will_retain_message_test(_Config) ->
+will_retain_message_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
     Topic = nth(3, ?TOPICS),
     clean_retained(Topic),
 
-    {ok, C1} = emqtt:start_link([{clean_start, true},
-                                          {will_topic, Topic},
-                                          {will_payload, <<"will_retain_message_test">>},
-                                          {will_qos, ?QOS_1},
-                                          {will_retain, true},
-                                          {will_props, #{}},
-                                          {keepalive, 2}]),
-    {ok, _} = emqtt:connect(C1),
+    {ok, C1} = emqtt:start_link([{clean_start, true}, {port, Port},
+                                 {will_topic, Topic},
+                                 {will_payload, <<"will_retain_message_test">>},
+                                 {will_qos, ?QOS_1},
+                                 {will_retain, true},
+                                 {will_props, #{}},
+                                 {keepalive, 2}]),
+    {ok, _} = emqtt:ConnFun(C1),
 
-    {ok, C2} = emqtt:start_link(),
-    {ok, _} = emqtt:connect(C2),
+    {ok, C2} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C2),
     {ok, _, [2]} = emqtt:subscribe(C2, Topic, 2),
     timer:sleep(5),
     [?assertMatch( #{qos := 1, retain := false, topic := Topic} ,Msg1) || Msg1 <- receive_messages(1)],
     ok = emqtt:disconnect(C2),
 
-    {ok, C3} = emqtt:start_link(),
-    {ok, _} = emqtt:connect(C3),
+    {ok, C3} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C3),
     {ok, _, [2]} = emqtt:subscribe(C3, Topic, 2),
     timer:sleep(5),
     [?assertMatch( #{qos := 1, retain := true, topic := Topic} ,Msg2) || Msg2 <- receive_messages(1)],
@@ -488,30 +569,36 @@ will_retain_message_test(_Config) ->
     clean_retained(Topic),
     ct:print("Will retain message test succeeded").
 
-offline_message_queueing_test(_) ->
-    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}]),
-    {ok, _} = emqtt:connect(C1),
+offline_message_queueing_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C1),
 
     {ok, _, [2]} = emqtt:subscribe(C1, nth(6, ?WILD_TOPICS), 2),
     ok = emqtt:disconnect(C1),
-    {ok, C2} = emqtt:start_link([{clean_start, true}, {clientid, <<"c2">>}]),
-    {ok, _} = emqtt:connect(C2),
+    {ok, C2} = emqtt:start_link([{clean_start, true}, {clientid, <<"c2">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C2),
 
     ok = emqtt:publish(C2, nth(2, ?TOPICS), <<"qos 0">>, 0),
     {ok, _} = emqtt:publish(C2, nth(3, ?TOPICS), <<"qos 1">>, 1),
     {ok, _} = emqtt:publish(C2, nth(4, ?TOPICS), <<"qos 2">>, 2),
     timer:sleep(10),
     emqtt:disconnect(C2),
-    {ok, C3} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}]),
-    {ok, _} = emqtt:connect(C3),
+    {ok, C3} = emqtt:start_link([{clean_start, false}, {clientid, <<"c1">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C3),
 
     timer:sleep(10),
     emqtt:disconnect(C3),
     ?assertEqual(3, length(receive_messages(3))).
 
-overlapping_subscriptions_test(_) ->
-    {ok, C} = emqtt:start_link([]),
-    {ok, _} = emqtt:connect(C),
+overlapping_subscriptions_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    {ok, C} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
 
     {ok, _, [2, 1]} = emqtt:subscribe(C, [{nth(7, ?WILD_TOPICS), 2},
                                                 {nth(1, ?WILD_TOPICS), 1}]),
@@ -532,10 +619,13 @@ overlapping_subscriptions_test(_) ->
     end,
     emqtt:disconnect(C).
 
-redelivery_on_reconnect_test(_) ->
+redelivery_on_reconnect_test(Config) ->
     ct:print("Redelivery on reconnect test starting"),
-    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}]),
-    {ok, _} = emqtt:connect(C1),
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    {ok, C1} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C1),
 
     {ok, _, [2]} = emqtt:subscribe(C1, nth(7, ?WILD_TOPICS), 2),
     timer:sleep(10),
@@ -547,18 +637,21 @@ redelivery_on_reconnect_test(_) ->
     timer:sleep(10),
     ok = emqtt:disconnect(C1),
     ?assertEqual(0, length(receive_messages(2))),
-    {ok, C2} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}]),
-    {ok, _} = emqtt:connect(C2),
+    {ok, C2} = emqtt:start_link([{clean_start, false}, {clientid, <<"c">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C2),
 
     timer:sleep(10),
     ok = emqtt:disconnect(C2),
     ?assertEqual(2, length(receive_messages(2))).
 
-dollar_topics_test(_) ->
+dollar_topics_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
     ct:print("$ topics test starting"),
-    {ok, C} = emqtt:start_link([{clean_start, true},
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port},
                                       {keepalive, 0}]),
-    {ok, _} = emqtt:connect(C),
+    {ok, _} = emqtt:ConnFun(C),
 
     {ok, _, [1]} = emqtt:subscribe(C, nth(6, ?WILD_TOPICS), 1),
     {ok, _} = emqtt:publish(C, << <<"$">>/binary, (nth(2, ?TOPICS))/binary>>,
@@ -568,21 +661,24 @@ dollar_topics_test(_) ->
     ok = emqtt:disconnect(C),
     ct:print("$ topics test succeeded").
 
-basic_test_v5(_Config) ->
-    basic_test([{proto_ver, v5}]).
+basic_test_v5(Config) ->
+    basic_test([{proto_ver, v5} | Config]).
 
-retain_as_publish_test(_) ->
+retain_as_publish_test(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     Topic = nth(3, ?TOPICS),
+
     clean_retained(Topic),
 
-    {ok, Pub} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}]),
-    {ok, _} = emqtt:connect(Pub),
+    {ok, Pub} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Pub),
 
-    {ok, Sub1} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}]),
-    {ok, _} = emqtt:connect(Sub1),
+    {ok, Sub1} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Sub1),
 
-    {ok, Sub2} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}]),
-    {ok, _} = emqtt:connect(Sub2),
+    {ok, Sub2} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Sub2),
 
     {ok, _} = emqtt:publish(Pub, Topic, #{}, <<"retain_as_publish_test">>, [{qos, ?QOS_1}, {retain, true}]),
     timer:sleep(10),
@@ -600,3 +696,9 @@ retain_as_publish_test(_) ->
 
     ok = emqtt:disconnect(Pub),
     clean_retained(Topic).
+
+merge_config(Config1, Config2) ->
+    lists:foldl(
+      fun({K,V}, Acc) ->
+              lists:keystore(K, 1, Acc, {K,V})
+      end, Config1, Config2).
