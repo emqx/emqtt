@@ -752,7 +752,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
         false -> {stop, connack_error}
     end;
 
-waiting_for_connack({call, From}, Event, State) when Event =/= stop ->
+waiting_for_connack({call, From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
 waiting_for_connack(timeout, _Timeout, State) ->
@@ -1073,13 +1073,20 @@ handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
     ?LOG(error, "QUIC: transport shutdown: ~p", [Reason], State),
     keep_state_and_data;
 
-handle_event(info, {quic, closed, _Stream, Reason}, _, State) ->
-    ?LOG(error, "QUIC: transport closed: ~p", [Reason], State),
+handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
+    ?LOG(error, "QUIC: stream closed: ~p", [Reason], State),
     {stop, {shutdown, {closed, Reason}}, State};
+
+handle_event(info, {quic, shutdown, _Stream}, _, #state{reconnect = true} = State) ->
+    next_reconnect(State);
+
+handle_event(info, {quic, shutdown, _Stream}, _, State) ->
+    ?LOG(error, "QUIC: peer conn shutdown", [], State),
+    {stop, {shutdown, closed}, State};
 
 handle_event(info, {quic, closed, _Stream}, _, State) ->
     ?LOG(error, "QUIC: stream closed", [], State),
-    {stop, {shutdown, closed}, State};
+    keep_state_and_data;
 
 handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
     ?LOG(error, "QUIC: peer send shutdown", [], State),

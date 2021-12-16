@@ -161,16 +161,20 @@ t_connect(Config) ->
     ct:pal("C2 is connected ~p", [C2]),
     ok= emqtt:disconnect(C2).
 
-t_reconnect_disabled(_) ->
+t_reconnect_disabled(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     process_flag(trap_exit, true),
-    {ok, C} = emqtt:start_link(),
-    {ok, _} = emqtt:connect(C),
+    {ok, C} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             receive
-                {'EXIT', C, {shutdown, tcp_closed}} ->
+                {'EXIT', C, {shutdown, tcp_closed}} when ConnFun =:= connect->
+                    ok;
+                {'EXIT', C, {shutdown, closed}} when ConnFun =:= quic_connect->
                     ok
             after 100 ->
                     ct:fail(no_shutdown)
@@ -179,12 +183,15 @@ t_reconnect_disabled(_) ->
             ct:fail(conn_still_alive)
     end.
 
-t_reconnect_enabled(_) ->
+t_reconnect_enabled(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     Topic = nth(1, ?TOPICS),
     process_flag(trap_exit, true),
-    {ok, C} = emqtt:start_link([{reconnect, true},
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {reconnect, true},
                                 {connect_timeout, 1}]), % 1 sec
-    {ok, _} = emqtt:connect(C),
+    {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
     receive
@@ -193,8 +200,8 @@ t_reconnect_enabled(_) ->
     after 100 ->
             timer:apply_after(5000, emqtt_test_lib, start_emqx, []),
             {ok, _, [0]} = emqtt:subscribe(C, Topic),
-            {ok, C2} = emqtt:start_link(),
-            {ok, _} = emqtt:connect(C2),
+            {ok, C2} = emqtt:start_link([{port, Port}]),
+            {ok, _} = emqtt:ConnFun(C2),
             [{Topic, #{qos := 0}}] = emqtt:subscriptions(C),
             {ok, _} = emqtt:publish(C2, Topic, <<"t_reconnect_enabled">>, [{qos, 1}]),
             ?assertEqual(
@@ -206,11 +213,14 @@ t_reconnect_enabled(_) ->
                  topic => <<"TopicA">>}], receive_messages(1))
     end.
 
-t_reconnect_stop(_) ->
+t_reconnect_stop(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
     process_flag(trap_exit, true),
-    {ok, C} = emqtt:start_link([{reconnect, true},
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {reconnect, true},
                                 {connect_timeout, 1}]), % 1 sec
-    {ok, _} = emqtt:connect(C),
+    {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
     receive
