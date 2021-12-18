@@ -31,14 +31,16 @@ NewRelx =
         {release, {emqtt, Vsn}, Apps} = lists:keyfind(release, 1, Relx),
         GitDescribe = lists:last(string:tokens(os:cmd("git describe --tags --always"), "\n")),
         Relx1 = lists:keystore(release, 1, Relx, {release, {emqtt, GitDescribe},
-                                                  Apps ++ [ quicer || IsQuicSupp() ]}),
+                                                  Apps ++ [ {quicer, load} || IsQuicSupp() ]}),
         [{relx, Relx1}]
     end,
 
 Profiles = Keyfind(profiles, CONFIG),
-Profiles1 = lists:keystore(emqtt, 1, Profiles, {emqtt, NewRelx(emqtt, Profiles)}),
-Profiles2 = lists:keystore(emqtt_pkg, 1, Profiles1, {emqtt_pkg, NewRelx(emqtt_pkg, Profiles1)}),
-NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, Profiles2}),
+NewProfiles = lists:foldl(fun(Key, Acc) ->
+                                  lists:keystore(Key, 1, Acc, {Key, NewRelx(Key, Acc)})
+                          end, Profiles, [emqtt, emqtt_pkg, emqtt_relup_test]),
+
+NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, NewProfiles}),
 
 Quicer = {quicer, {git, "https://github.com/emqx/quic.git", {tag, "0.0.9"}}},
 ExtraDeps = fun(C) ->
