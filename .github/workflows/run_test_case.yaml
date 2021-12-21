@@ -27,6 +27,7 @@ jobs:
             submodules: recursive
         - name: Run tests
           run: |
+            set -e
             make eunit
             make ct
             make cover
