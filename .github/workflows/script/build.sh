@@ -50,3 +50,5 @@ test_pkg(){
 
 build_pkg
 test_pkg
+
+make relup-test

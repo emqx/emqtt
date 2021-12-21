@@ -174,6 +174,7 @@
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
+
 -record(state, {
           name            :: atom(),
           owner           :: pid(),
@@ -212,9 +213,9 @@
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
-          reconnect       :: boolean(),
-          parse_state     :: emqtt_frame:parse_state()
-         }).
+          parse_state     :: emqtt_frame:parse_state(),
+          reconnect       :: boolean()
+         }). %% note, always add the new fields at the tail for code_change.
 
 -record(call, {id, from, req, ts}).
 
@@ -755,7 +756,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
         false -> {stop, connack_error}
     end;
 
-waiting_for_connack({call, From}, Event, _State) when Event =/= stop ->
+waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
 waiting_for_connack(timeout, _Timeout, State) ->
@@ -1142,8 +1143,17 @@ terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket
         _ -> ConnMod:close(Socket)
     end.
 
-code_change(_Vsn, State, Data, _Extra) ->
-    {ok, State, Data}.
+%% Downgrade
+code_change({down, _OldVsn}, OldState, OldData, _Extra) ->
+    Tmp = tuple_to_list(OldData),
+    NewData = list_to_tuple(lists:sublist(Tmp, length(Tmp) -1)),
+    {ok, OldState, NewData};
+
+code_change(_OldVsn, OldState, #state{} = OldData, _Extra) ->
+    {ok, OldState, OldData};
+code_change(_OldVsn, OldState, OldData, _Extra) ->
+    NewData = list_to_tuple(tuple_to_list(OldData) ++ [false]),
+    {ok, OldState, NewData}.
 
 -ifdef(UPGRADE_TEST_CHEAT).
 format_status(_, State) ->
