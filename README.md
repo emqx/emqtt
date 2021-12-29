@@ -839,7 +839,7 @@ receive
         io:format("Recv a PUBACK packet - PacketId: ~p, ReasonCode: ~p, Properties: ~p~n", [PacketId, ReasonCode, Properties])
 end.
 
-{ok, _Props, _ReasonCode} = emqtt:unsubscribe(ConnPid, #{}, <<"hello">]).
+{ok, _Props, _ReasonCode} = emqtt:unsubscribe(ConnPid, #{}, <<"hello">).
 
 ok = emqtt:disconnect(ConnPid).
 ok = emqtt:stop(ConnPid).
