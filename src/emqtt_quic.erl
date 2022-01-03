@@ -39,7 +39,9 @@ connect(Host, Port, Opts, Timeout) ->
         {ok, Conn} ->
             quicer:start_stream(Conn, [{active, false}]);
         {error, transport_down, Reason} ->
-            {error, {transport_down, Reason}}
+            {error, {transport_down, Reason}};
+        {error, _} = Error ->
+            Error
     end.
 
 send(Stream, IoData) when is_list(IoData) ->
