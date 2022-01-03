@@ -30,14 +30,15 @@ NewRelx =
         Relx = Keyfind(relx, EMQTT),
         {release, {emqtt, Vsn}, Apps} = lists:keyfind(release, 1, Relx),
         GitDescribe = lists:last(string:tokens(os:cmd("git describe --tags --always"), "\n")),
-        Relx1 = lists:keystore(release, 1, Relx, {release, {emqtt, GitDescribe},
-                                                  Apps ++ [ {quicer, load} || IsQuicSupp() ]}),
-        [{relx, Relx1}]
+        lists:keystore(release, 1, Relx, {release, {emqtt, GitDescribe},
+                                          Apps ++ [ {quicer, load} || IsQuicSupp() ]})
     end,
 
 Profiles = Keyfind(profiles, CONFIG),
 NewProfiles = lists:foldl(fun(Key, Acc) ->
-                                  lists:keystore(Key, 1, Acc, {Key, NewRelx(Key, Acc)})
+                                  {Key, Old} = lists:keyfind(Key, 1, Acc),
+                                  New = lists:keystore(relx, 1, Old, {relx, NewRelx(Key, Acc)}),
+                                  lists:keystore(Key, 1, Acc, {Key, New})
                           end, Profiles, [emqtt, emqtt_pkg, emqtt_relup_test]),
 
 NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, NewProfiles}),
