@@ -2,7 +2,7 @@ CT_NODE_NAME = ct@127.0.0.1
 
 REBAR := $(CURDIR)/rebar3
 
-REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.14.3-emqx-8/rebar3
+REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.16.1-emqx-1/rebar3
 
 all: emqtt
 
@@ -45,3 +45,6 @@ dialyzer:
 
 escript: $(REBAR) compile
 	$(REBAR) as escript escriptize
+
+relup-test: ${REBAR}
+	bin/appup_test.sh
