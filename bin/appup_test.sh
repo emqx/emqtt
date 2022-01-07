@@ -91,7 +91,7 @@ test_relup() {
         ##
         echo "starting $vsn"
         appscript="${appdir}/bin/emqtt"
-        trap "$appscript stop" EXIT
+        trap "timeout 3 $appscript stop || echo ok" EXIT
         $appscript daemon -- -mode interactive
         $appscript ping
         $appscript versions
