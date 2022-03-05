@@ -19,6 +19,7 @@
 -behaviour(gen_statem).
 
 -include("emqtt.hrl").
+-include("logger.hrl").
 
 -export([ start_link/0
         , start_link/1
@@ -237,10 +238,8 @@
 
 -define(NO_CLIENT_ID, <<>>).
 
--define(LOG(Level, Format, Args, State),
-        begin
-          (logger:log(Level, #{}, #{report_cb => fun(_) -> {"emqtt(~s): "++(Format), ([State#state.clientid|Args])} end}))
-        end).
+-define(LOG(Level, Msg, Meta, State),
+        ?SLOG(Level, Meta#{msg => Msg, clietntid => State#state.clientid}, #{})).
 
 %%--------------------------------------------------------------------
 %% API
@@ -895,10 +894,10 @@ connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight =
 					 Inflight1 = maps:put(PacketId, {pubrel, PacketId, os:timestamp()}, Inflight),
 					 State#state{inflight = Inflight1};
 				 {ok, {pubrel, _Ref, _Ts}} ->
-					 ?LOG(notice, "Duplicated PUBREC Packet: ~p", [PacketId], State),
+					 ?LOG(notice, "duplicated_PUBREC_packet", #{packet_id => PacketId}, State),
 					 State;
 				 error ->
-					 ?LOG(warning, "Unexpected PUBREC Packet: ~p", [PacketId], State),
+					 ?LOG(warning, "unexpected_PUBREC_packet", #{packet_id => PacketId}, State),
 					 State
 			 end,
     send_puback(?PUBREL_PACKET(PacketId), NState);
@@ -914,7 +913,7 @@ connected(cast, ?PUBREL_PACKET(PacketId),
                  false -> {keep_state, NewState}
              end;
          error ->
-             ?LOG(warning, "Unexpected PUBREL: ~p", [PacketId], State),
+             ?LOG(warning, "unexpected_PUBREL", #{packet_id => PacketId}, State),
              keep_state_and_data
      end;
 
@@ -1019,28 +1018,28 @@ handle_event({call, From}, stop, _StateName, _State) ->
 
 handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
              _StateName, State = #state{socket = ConnPid}) ->
-    ?LOG(debug, "RECV Data: ~p", [Data], State),
+    ?LOG(debug, "RECV_Data", #{data => Data}, State),
     process_incoming(iolist_to_binary(Data), [], State);
 
 handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
              _StateName, State = #state{socket = ConnPid}) ->
-    ?LOG(debug, "WebSocket down! Reason: ~p", [Reason], State),
+    ?LOG(debug, "webSocket_down", #{reason => Reason}, State),
     {stop, Reason, State};
 
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
     when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
-    ?LOG(debug, "RECV Data: ~p", [Data], State),
+    ?LOG(debug, "RECV_Data", #{data => Data}, State),
     process_incoming(Data, [], run_sock(State));
 
 handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
-    ?LOG(debug, "RECV Data: ~p", [Data], State),
+    ?LOG(debug, "RECV_Data", #{data => Data}, State),
     process_incoming(Data, [], run_sock(State));
 
 handle_event(info, {Error, Sock, Reason}, connected,
              #state{ reconnect = true } = State)
     when Error =:= tcp_error; Error =:= ssl_error ->
-    ?LOG(error, "Reconnect due to connection error occured ~p, reason:~p",
-         [Error, Reason], State),
+    ?LOG(error, "reconnect_due_to_connection_error",
+         #{error => Error, reason => Reason}, State),
     case Error of
         tcp_error -> gen_tcp:close(Sock);
         ssl_error -> ssl:close(Sock)
@@ -1049,8 +1048,8 @@ handle_event(info, {Error, Sock, Reason}, connected,
 
 handle_event(info, {Error, _Sock, Reason}, _StateName, State)
     when Error =:= tcp_error; Error =:= ssl_error ->
-    ?LOG(error, "The connection error occured ~p, reason:~p",
-	 [Error, Reason], State),
+    ?LOG(error, "connection_error",
+         #{error => Error, reason =>Reason}, State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = true } = State)
@@ -1059,54 +1058,55 @@ handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = true } = Stat
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
-    ?LOG(debug, "~p", [Closed], State),
+    ?LOG(debug, "socket_closed", #{event => Closed}, State),
     {stop, {shutdown, Closed}, State};
 
 handle_event(info, {'EXIT', Owner, Reason}, _, State = #state{owner = Owner}) ->
-    ?LOG(debug, "Got EXIT from owner, Reason: ~p", [Reason], State),
+    ?LOG(debug, "EXIT_from_owner", #{reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
     keep_state_and_data;
 
 handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
-    ?LOG(error, "Got tcp error: ~p", [Reason], State),
+    ?LOG(error, "tcp_error", #{ reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
     %% This is just a notify, we can wait for close complete
-    ?LOG(error, "QUIC: transport shutdown: ~p", [Reason], State),
+    ?LOG(error, "QUIC_transport_shutdown", #{rason => Reason}, State),
     keep_state_and_data;
 
 handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
-    ?LOG(error, "QUIC: stream closed: ~p", [Reason], State),
+    ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
     {stop, {shutdown, {closed, Reason}}, State};
 
 handle_event(info, {quic, shutdown, _Stream}, _, #state{reconnect = true} = State) ->
     next_reconnect(State);
 
 handle_event(info, {quic, shutdown, _Stream}, _, State) ->
-    ?LOG(error, "QUIC: peer conn shutdown", [], State),
+    ?LOG(error, "QUIC_peer_conn_shutdown", #{}, State),
     {stop, {shutdown, closed}, State};
 
 handle_event(info, {quic, closed, _Stream}, _, State) ->
-    ?LOG(error, "QUIC: stream closed", [], State),
+    ?LOG(error, "QUIC_stream_closed", #{}, State),
     keep_state_and_data;
 
 handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
-    ?LOG(error, "QUIC: peer send shutdown", [], State),
+    ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
     {stop, {shutdown, closed}, State};
 
-handle_event(info, EventContent = {'EXIT', _Pid, normal}, StateName, State) ->
-    ?LOG(info, "State: ~s, Unexpected Event: (info, ~p)",
-         [StateName, EventContent], State),
+handle_event(info, EventContent = {'EXIT', Pid, normal}, StateName, State) ->
+    ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
     keep_state_and_data;
 
 handle_event(EventType, EventContent, StateName, State) ->
     case maybe_upgrade_test_cheat(EventType, EventContent, StateName, State) of
         skip ->
-            ?LOG(error, "State: ~s, Unexpected Event: (~p, ~p)",
-                 [StateName, EventType, EventContent], State),
+            ?LOG(error, "unexpected_event",
+                 #{state => StateName,
+                   event_type => EventType,
+                   event => EventContent}, State),
             keep_state_and_data;
         Other ->
             Other
@@ -1195,7 +1195,7 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
                                                    properties  => Properties}),
             State#state{inflight = maps:remove(PacketId, Inflight)};
         error ->
-            ?LOG(warning, "Unexpected PUBACK: ~p", [PacketId], State),
+            ?LOG(warning, "unexpected_PUBACK", #{packet_id => PacketId}, State),
             State
     end;
 delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
@@ -1207,7 +1207,7 @@ delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
                                                    properties  => Properties}),
             State#state{inflight = maps:remove(PacketId, Inflight)};
         error ->
-            ?LOG(warning, "Unexpected PUBCOMP Packet: ~p", [PacketId], State),
+            ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
             State
      end.
 
@@ -1426,7 +1426,7 @@ send(Msg, State) when is_record(Msg, mqtt_msg) ->
 send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
-    ?LOG(debug, "SEND Data: ~1000p", [Packet], State),
+    ?LOG(debug, "SEND_Data", #{packet => Packet}, State),
     case ConnMod:send(Sock, Data) of
         ok  -> {ok, bump_last_packet_id(State)};
         Error -> Error
