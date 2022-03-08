@@ -12,7 +12,7 @@ MQTT client library and command line tools implemented in Erlang that supports M
 $ make
 ```
 
-Once you've compiled successfully you will get a script called `emqtt` in `_buile/emqtt/rel/emqtt/bin`. We can see what `emqtt` can do with `--help` option:
+Once you've compiled successfully you will get a script called `emqtt` in `_build/emqtt/rel/emqtt/bin`. We can see what `emqtt` can do with `--help` option:
 
 ```
 $ ./emqtt --help
