@@ -258,7 +258,8 @@ start_link(Options) when is_list(Options) ->
                     false -> [];
                     true ->
                         [{spawn_opt, [{min_heap_size, 16},
-                                      {min_bin_vheap_size,16}
+                                      {min_bin_vheap_size,16},
+                                      {fullsweep_after, 1_000}
                                      ]},
                          {hibernate_after, 50}
                         ]
