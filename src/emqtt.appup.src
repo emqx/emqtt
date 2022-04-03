@@ -1,6 +1,10 @@
 %% -*- mode: erlang -*-
-{VSN,
+{"1.5.0",
   [
+   {"1.4.8", [
+     {load_module,emqtt_cli,brutal_purge,soft_purge,[]},
+     {load_module,emqtt_sock,brutal_purge,soft_purge,[]}
+   ]},
    {"1.4.7", [
      {load_module,emqtt,brutal_purge,soft_purge,[]},
      {load_module,emqtt_cli,brutal_purge,soft_purge,[]},
@@ -22,6 +26,10 @@
    {<<"1\\.4\\.[0-3]">>, []} %% No appup maintained for these versions
   ],
   [
+   {"1.4.8", [
+     {load_module,emqtt_cli,brutal_purge,soft_purge,[]},
+     {load_module,emqtt_sock,brutal_purge,soft_purge,[]}
+   ]},
    {"1.4.7", [
      {load_module,emqtt,brutal_purge,soft_purge,[]},
      {load_module,emqtt_cli,brutal_purge,soft_purge,[]},
