@@ -27,7 +27,7 @@
 
 -define(HELP_OPT,
         [{help, undefined, "help", boolean,
-          "help information"}
+          "Help information"}
         ]).
 
 -define(CONN_SHORT_OPTS,
@@ -51,27 +51,32 @@
 
 -define(CONN_LONG_OPTS,
         [{will_topic, undefined, "will-topic", string,
-          "topic in will message"},
+          "Topic for will message"},
          {will_payload, undefined, "will-payload", string,
-          "payload in will message"},
+          "Payload in will message"},
          {will_qos, undefined, "will-qos", {integer, 0},
-          "qos in will message"},
+          "QoS for will message"},
          {will_retain, undefined, "will-retain", {boolean, false},
-          "retain in will message"},
+          "Eetain in will message"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
-          "enable websocket transport or not"},
+          "Enable websocket transport or not"},
          {enable_quic, undefined, "enable-quic", {boolean, false},
-          "enable quic transport or not"},
+          "Enable quic transport or not"},
          {enable_ssl, undefined, "enable-ssl", {boolean, false},
-          "enable ssl/tls or not"},
+          "Enable ssl/tls or not"},
          {tls_version, undefined, "tls-version", {atom, 'tlsv1.2'},
           "TLS protocol version used when the client connects to the broker"},
          {cafile, undefined, "CAfile", string,
-          "path to a file containing pem-encoded ca certificates"},
+          "Path to a file containing pem-encoded ca certificates"},
          {cert, undefined, "cert", string,
-          "path to a file containing the user certificate on pem format"},
+          "Path to a file containing the user certificate on pem format"},
          {key, undefined, "key", string,
-          "path to the file containing the user's private pem-encoded key"}
+          "Path to the file containing the user's private pem-encoded key"},
+         {sni, undefined, "sni", string,
+          "Applicable when '--enable_ssl' is in use. "
+          "Use '--sni true' to apply the host name from '-h|--host' option "
+          "as SNI, therwise use the host name to which the server's SSL "
+          "certificate is issued"}
         ]).
 
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
@@ -298,7 +303,7 @@ parse_cmd_opts([{enable_quic, Enable} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{enable_quic, Enable} | Acc]);
 parse_cmd_opts([{enable_ssl, Enable} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{ssl, Enable} | Acc]);
-parse_cmd_opts([{tls_version, Version} | Opts], Acc) 
+parse_cmd_opts([{tls_version, Version} | Opts], Acc)
   when Version =:= 'tlsv1' orelse Version =:= 'tlsv1.1'orelse
        Version =:= 'tlsv1.2' orelse Version =:= 'tlsv1.3' ->
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {versions, [Version]}, Acc));
@@ -308,6 +313,8 @@ parse_cmd_opts([{cert, Cert} | Opts], Acc) ->
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {certfile, Cert}, Acc));
 parse_cmd_opts([{key, Key} | Opts], Acc) ->
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {keyfile, Key}, Acc));
+parse_cmd_opts([{sni, SNI} | Opts], Acc) ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {server_name_indication, SNI}, Acc));
 parse_cmd_opts([{qos, QoS} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{qos, QoS} | Acc]);
 parse_cmd_opts([{retain_as_publish, RetainAsPublish} | Opts], Acc) ->
