@@ -1092,6 +1092,10 @@ handle_event(info, {quic, closed, _Stream}, _, State) ->
     ?LOG(error, "QUIC_stream_closed", #{}, State),
     keep_state_and_data;
 
+%% Peer abort sending means the transport should be closed abruptly.
+handle_event(info, {quic, peer_send_aborted, _Stream, _ErrorCode}, _, State) ->
+    ?LOG(error, "QUIC_peer_send_aborted", #{}, State),
+    {stop, {shutdown, closed}, State};
 handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
     ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
     {stop, {shutdown, closed}, State};
