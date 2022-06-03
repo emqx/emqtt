@@ -144,6 +144,7 @@
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
                 | {reconnect, boolean()}
+                | {with_qoe_metrics, boolean()}
                 | {properties, properties()}).
 
 -type(maybe(T) :: undefined | T).
@@ -215,8 +216,11 @@
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
           parse_state     :: emqtt_frame:parse_state(),
-          reconnect       :: boolean()
+          reconnect       :: boolean(),
+          qoe             :: boolean() | map()
          }). %% note, always add the new fields at the tail for code_change.
+
+-type(state() ::  #state{}).
 
 -record(call, {id, from, req, ts}).
 
@@ -507,6 +511,7 @@ init([Options]) ->
                                  connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
                                  low_mem         = false,
                                  reconnect       = false,
+                                 qoe             = false,
                                  last_packet_id  = 1
                                 }),
     {ok, initialized, init_parse_state(State)}.
@@ -620,6 +625,8 @@ init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
     init(Opts, State#state{reconnect = IsReconnect});
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
     init(Opts, State#state{low_mem = IsLow});
+init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
+    init(Opts, State#state{qoe = IsReportQoE});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -651,7 +658,7 @@ merge_opts(Defaults, Options) ->
 callback_mode() -> state_functions.
 
 initialized({call, From}, {connect, ConnMod}, State) ->
-    case do_connect(ConnMod, State) of
+    case do_connect(ConnMod, qoe_inject(?FUNCTION_NAME, State)) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack,
              add_call(new_call(connect, From), NewState), [Timeout]};
@@ -669,7 +676,8 @@ do_connect(ConnMod, #state{sock_opts = SockOpts,
                            connect_timeout = Timeout} = State) ->
     case sock_connect(ConnMod, hosts(State), SockOpts, Timeout) of
         {ok, Sock} ->
-            mqtt_connect(run_sock(State#state{conn_mod = ConnMod, socket = Sock}));
+            State1 = qoe_inject(handshaked, State),
+            mqtt_connect(run_sock(State1#state{conn_mod = ConnMod, socket = Sock}));
         {error, Reason} ->
             {sock_error, Reason}
     end.
@@ -732,11 +740,13 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
             State2 = State1#state{clientid = assign_id(ClientId, AllProps1),
                                   properties = AllProps1,
                                   session_present = SessPresent},
+            NextState = connected,
+            State3 = qoe_inject(connected, State2),
             case self() == From of
                 true -> %% from reconnect
-                    {next_state, connected, ensure_keepalive_timer(State2)};
+                    {next_state, NextState, ensure_keepalive_timer(State3)};
                 _ ->
-                    {next_state, connected, ensure_keepalive_timer(State2),
+                    {next_state, NextState, ensure_keepalive_timer(State3),
                      [{reply, From, Reply}]}
             end;
         false ->
@@ -926,7 +936,7 @@ connected(cast, ?SUBACK_PACKET(PacketId, Properties, ReasonCodes),
         {value, #call{from = From}, NewState} ->
             %%TODO: Merge reason codes to subscriptions?
             Reply = {ok, Properties, ReasonCodes},
-            {keep_state, NewState, [{reply, From, Reply}]};
+            {keep_state, qoe_inject(subscribed, NewState), [{reply, From, Reply}]};
         false ->
             keep_state_and_data
     end;
@@ -1100,7 +1110,7 @@ handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
     ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
     {stop, {shutdown, closed}, State};
 
-handle_event(info, EventContent = {'EXIT', Pid, normal}, StateName, State) ->
+handle_event(info, {'EXIT', Pid, normal}, StateName, State) ->
     ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
     keep_state_and_data;
 
@@ -1534,3 +1544,13 @@ reason_code_name(_Code) -> unknown_error.
 next_reconnect(#state{connect_timeout = Timeout} = State) ->
     {next_state, reconnect, State#state{connect_timeout = Timeout, clean_start = false},
      {'state_timeout', Timeout, Timeout*2}}.
+
+-spec qoe_inject(atom(), state()) -> state().
+qoe_inject(_Tag, #state{qoe = false} = S) ->
+    S;
+qoe_inject(Tag, #state{qoe = true} = S) ->
+    TS = erlang:monotonic_time(millisecond),
+    S#state{qoe = #{Tag => TS}};
+qoe_inject(Tag, #state{qoe = QoE} = S) when is_map(QoE) ->
+    TS = erlang:monotonic_time(millisecond),
+    S#state{qoe = QoE#{ Tag => TS}}.
