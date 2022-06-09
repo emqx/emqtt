@@ -25,6 +25,7 @@
 all() -> emqx_common_test_helpers:all(?MODULE).
 
 init_per_suite(Config) ->
+    code:add_patha(filename:join(code:lib_dir(emqx), "ebin/")),
     emqtt_test_lib:ensure_test_module(emqx_common_test_helpers),
     Config.
 

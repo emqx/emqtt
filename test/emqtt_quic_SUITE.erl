@@ -20,7 +20,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> emqx_common_test_helpers:all(?MODULE).
+all() ->
+    code:add_patha(filename:join(code:lib_dir(emqx), "ebin/")),
+    emqx_common_test_helpers:all(?MODULE).
 
 init_per_suite(Config) ->
     emqtt_test_lib:start_emqx(),
