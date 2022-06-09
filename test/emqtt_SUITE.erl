@@ -87,11 +87,14 @@ groups() ->
 
 init_per_suite(Config) ->
     ok = emqtt_test_lib:start_emqx(),
-    emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
     Config.
 
 end_per_suite(_Config) ->
     emqtt_test_lib:stop_emqx().
+
+init_per_testcase(_TC, Config) ->
+    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
+    Config.
 
 end_per_testcase(TC, _Config)
   when TC =:= t_reconnect_enabled orelse
@@ -237,7 +240,7 @@ t_reconnect_stop(Config) ->
                     after 100 ->
                             ct:fail(no_exit)
                     end
-            after 100 ->
+            after 6000 ->
                     ct:fail(conn_still_alive)
             end
     end.
