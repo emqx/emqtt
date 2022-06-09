@@ -87,6 +87,7 @@ groups() ->
 
 init_per_suite(Config) ->
     ok = emqtt_test_lib:start_emqx(),
+    emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
     Config.
 
 end_per_suite(_Config) ->
