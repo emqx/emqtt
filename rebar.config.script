@@ -18,9 +18,13 @@ IsWin32 = fun() ->
                 win32 =:= element(1, os:type())
           end,
 
+IsMacOS = fun() ->
+               {unix, darwin} =:= os:type()
+          end,
+
 IsQuicSupp = fun() ->
-                not (IsCentos6() orelse IsWin32() orelse
-                     false =/= os:getenv("BUILD_WITHOUT_QUIC")
+                not (IsCentos6() orelse IsWin32() orelse IsMacOS()
+                     orelse false =/= os:getenv("BUILD_WITHOUT_QUIC")
                     )
              end,
 

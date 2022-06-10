@@ -49,11 +49,11 @@ jobs:
         - name: prepare
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-            brew install curl zip unzip gnu-sed erlang
+            brew install curl zip unzip gnu-sed erlang@24
             echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
-            export PATH="/usr/local/opt/erlang/bin:$PATH"
+            export PATH="/usr/local/opt/erlang@24/bin:$PATH"
             echo "$PATH"
             erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh

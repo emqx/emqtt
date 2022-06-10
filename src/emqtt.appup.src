@@ -1,6 +1,8 @@
 %% -*- mode: erlang -*-
-{"1.5.0",
+{"1.5.1",
   [
+   {"1.5.0", [
+   ]},
    {"1.4.8", [
      {load_module,emqtt_cli,brutal_purge,soft_purge,[]},
      {load_module,emqtt_sock,brutal_purge,soft_purge,[]}
