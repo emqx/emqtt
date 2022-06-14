@@ -35,6 +35,9 @@ connect(Host, Port, Opts, Timeout) ->
                , {handshake_idle_timeout_ms, 3000}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 1}
+               , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
+               %% uncomment for decrypt wireshark trace
+               %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
         {ok, Conn} ->

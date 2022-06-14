@@ -145,7 +145,8 @@
                 | {low_mem, boolean()}
                 | {reconnect, boolean()}
                 | {with_qoe_metrics, boolean()}
-                | {properties, properties()}).
+                | {properties, properties()}
+                | {nst,  binary()}).
 
 -type(maybe(T) :: undefined | T).
 -type(topic() :: binary()).
@@ -217,7 +218,8 @@
           low_mem         :: boolean(),
           parse_state     :: emqtt_frame:parse_state(),
           reconnect       :: boolean(),
-          qoe             :: boolean() | map()
+          qoe             :: boolean() | map(),
+          nst             :: binary() %% quic new session ticket
          }). %% note, always add the new fields at the tail for code_change.
 
 -type(state() ::  #state{}).
@@ -625,6 +627,8 @@ init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
     init(Opts, State#state{reconnect = IsReconnect});
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
     init(Opts, State#state{low_mem = IsLow});
+init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binary(Ticket) ->
+    init(Opts, State#state{sock_opts = [{nst, Ticket} | SockOpts]});
 init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
     init(Opts, State#state{qoe = IsReportQoE});
 init([_Opt | Opts], State) ->
@@ -1083,6 +1087,9 @@ handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     {stop, {shutdown, Reason}, State};
 
 %% QUIC messages
+handle_event(info, {quic, nst_received, _Conn, Ticket}, _, #state{clientid = Cid} = State) ->
+    catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
+    {keep_state, State#state{nst = Ticket}};
 handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
     %% This is just a notify, we can wait for close complete
     ?LOG(error, "QUIC_transport_shutdown", #{rason => Reason}, State),
@@ -1092,7 +1099,7 @@ handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
 handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
     keep_state_and_data;
-handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true} = State) ->
+handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
     keep_state_and_data;
 handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
     keep_state_and_data;
