@@ -48,11 +48,15 @@ NewProfiles = lists:foldl(fun(Key, Acc) ->
 NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, NewProfiles}),
 
 Quicer = {quicer, {git, "https://github.com/qzhuyan/quic.git", {branch, "dev/william/add-appup-src"}}},
-ExtraDeps = fun(C) ->
+KillQuicer = fun(C) ->
                 {deps, Deps0} = lists:keyfind(deps, 1, C),
-                    Deps = Deps0 ++
-                        [ Quicer || IsQuicSupp() ],
-                lists:keystore(deps, 1, C, {deps, Deps})
+                {erl_opts, ErlOpts0} = lists:keyfind(erl_opts, 1, C),
+                IsQuic = IsQuicSupp(),
+                New = [ {deps, Deps0 ++ [ Quicer || IsQuic ]}
+                      , {erl_opts, ErlOpts0 ++ [ {d, 'BUILD_WITHOUT_QUIC'} || not IsQuic ]}
+                      ],
+                lists:foldl(fun({Key, _Val} = KV, Acc) ->
+                                    lists:keystore(Key, 1, Acc, KV)
+                            end, C, New)
             end,
-
-ExtraDeps(NewConfig).
+KillQuicer(NewConfig).

@@ -15,7 +15,14 @@
 %%-------------------------------------------------------------------------
 
 -module(emqtt_quic).
+
+-ifndef(BUILD_WITHOUT_QUIC).
 -include_lib("quicer/include/quicer.hrl").
+-else.
+-define(QUIC_STREAM_SHUTDOWN_FLAG_NONE          , 0).
+-define(QUICER_CONNECTION_EVENT_MASK_NST        , 1).
+-define(QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL      , 1).
+-endif.
 
 -export([ connect/4
         , send/2
