@@ -49,7 +49,7 @@ jobs:
         - name: prepare
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-            brew install curl zip unzip gnu-sed erlang@24
+            brew install curl zip unzip gnu-sed erlang@24 coreutils
             echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
@@ -72,7 +72,7 @@ jobs:
         - name: prepare
           run: |
             /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-            brew install curl zip unzip gnu-sed erlang@23
+            brew install curl zip unzip gnu-sed erlang@23 coreutils
             echo 'export PATH="/usr/local/opt/unzip/bin:$PATH"' >> ~/.bashrc
         - name: build
           run: |
