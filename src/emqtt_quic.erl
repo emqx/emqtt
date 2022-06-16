@@ -16,6 +16,14 @@
 
 -module(emqtt_quic).
 
+-ifndef(BUILD_WITHOUT_QUIC).
+-include_lib("quicer/include/quicer.hrl").
+-else.
+-define(QUIC_STREAM_SHUTDOWN_FLAG_NONE          , 0).
+-define(QUICER_CONNECTION_EVENT_MASK_NST        , 1).
+-define(QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL      , 1).
+-endif.
+
 -export([ connect/4
         , send/2
         , recv/2
@@ -34,19 +42,25 @@ connect(Host, Port, Opts, Timeout) ->
                , {handshake_idle_timeout_ms, 3000}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 1}
+               , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
+               %% uncomment for decrypt wireshark trace
+               %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
         {ok, Conn} ->
-            quicer:start_stream(Conn, [{active, false}]);
+            case quicer:start_stream(Conn, [{active, false}]) of
+                {ok, Stream} ->
+                    {ok, {quic, Conn, Stream}};
+                Error ->
+                    Error
+            end;
         {error, transport_down, Reason} ->
             {error, {transport_down, Reason}};
         {error, _} = Error ->
             Error
     end.
 
-send(Stream, IoData) when is_list(IoData) ->
-    send(Stream, iolist_to_binary(IoData));
-send(Stream, Bin) ->
+send({quic, _Conn, Stream}, Bin) ->
     case quicer:async_send(Stream, Bin) of
         {ok, _Len} ->
             ok;
@@ -54,22 +68,24 @@ send(Stream, Bin) ->
             Other
     end.
 
-recv(Stream, Count) ->
+recv({quic, _Conn, Stream}, Count) ->
     quicer:recv(Stream, Count).
 
-getstat(Stream, Options) ->
-    quicer:getstat(Stream, Options).
+getstat({quic, Conn, _Stream}, Options) ->
+    quicer:getstat(Conn, Options).
 
-setopts(Stream, Opts) ->
+setopts({quic, _Conn, Stream}, Opts) ->
     [ ok = quicer:setopt(Stream, Opt, OptV)
       || {Opt, OptV} <- Opts ],
     ok.
 
-close(Stream) ->
-    quicer:close_stream(Stream, 1000).
+close({quic, Conn, Stream}) ->
+    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0),
+    timer:sleep(100),
+    quicer:close_connection(Conn).
 
-sockname(H) ->
-    quicer:sockname(H).
+sockname({quic, Conn, _Stream}) ->
+    quicer:sockname(Conn).
 
 local_addr(SOpts) ->
     case { proplists:get_value(port, SOpts, 0),

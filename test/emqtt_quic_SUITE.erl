@@ -20,7 +20,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> emqx_common_test_helpers:all(?MODULE).
+all() ->
+    code:add_patha(filename:join(code:lib_dir(emqx), "ebin/")),
+    emqx_common_test_helpers:all(?MODULE).
 
 init_per_suite(Config) ->
     emqtt_test_lib:start_emqx(),
@@ -48,6 +50,39 @@ t_quic_sock(Config) ->
                                     3000),
     send_and_recv_with(Sock),
     ok = emqtt_quic:close(Sock),
+    quic_server:stop(Server).
+
+t_0_rtt(Config) ->
+    Port = 4568,
+    SslOpts = [ {cert, certfile(Config)}
+              , {key,  keyfile(Config)}
+              , {idle_timeout_ms, 10000}
+              , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
+              , {peer_bidi_stream_count, 10}
+              , {alpn, ["mqtt"]}
+              ],
+    Server = quic_server:start_link(Port, SslOpts),
+    timer:sleep(500),
+    {ok, {quic, Conn, _Stream}=Sock} = emqtt_quic:connect("localhost",
+                                                          Port,
+                                                          [ {alpn, ["mqtt"]}, {active, false}
+                                                          , {quic_event_mask, 1}
+                                                          ],
+                                                          3000),
+    send_and_recv_with(Sock),
+    ok = emqtt_quic:close(Sock),
+    NST = receive
+              {quic, nst_received, Conn, Ticket} ->
+                  Ticket
+          end,
+    {ok, Sock2} = emqtt_quic:connect("localhost",
+                                     Port,
+                                     [{alpn, ["mqtt"]}, {active, false},
+                                      {nst, NST}
+                                     ],
+                                     3000),
+    send_and_recv_with(Sock2),
+    ok = emqtt_quic:close(Sock2),
     quic_server:stop(Server).
 
 send_and_recv_with(Sock) ->

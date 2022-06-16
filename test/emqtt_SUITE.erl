@@ -46,6 +46,7 @@ groups() ->
       [t_connect,
        t_ws_connect,
        t_subscribe,
+       t_subscribe_qoe,
        t_publish,
        t_unsubscribe,
        t_ping,
@@ -91,6 +92,10 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     emqtt_test_lib:stop_emqx().
+
+init_per_testcase(_TC, Config) ->
+    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
+    Config.
 
 end_per_testcase(TC, _Config)
   when TC =:= t_reconnect_enabled orelse
@@ -236,7 +241,7 @@ t_reconnect_stop(Config) ->
                     after 100 ->
                             ct:fail(no_exit)
                     end
-            after 100 ->
+            after 6000 ->
                     ct:fail(conn_still_alive)
             end
     end.
@@ -251,7 +256,7 @@ t_subscribe(Config) ->
     Port = ?config(port, Config),
 
     Topic = nth(1, ?TOPICS),
-    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}, {with_qoe_metrics, false}]),
     {ok, _} = emqtt:ConnFun(C),
 
     {ok, _, [0]} = emqtt:subscribe(C, Topic),
@@ -267,6 +272,31 @@ t_subscribe(Config) ->
     {ok, _, [2]} = emqtt:subscribe(C, #{}, Topic, [{qos, ?QOS_2}, {nl, false}, {other, ignore}]),
 
     {ok, _, [0,1,2]} = emqtt:subscribe(C, [{Topic, at_most_once},{Topic, 1}, {Topic, [{qos, ?QOS_2}]}]),
+    ?assert(false == proplists:get_value(qoe, emqtt:info(C))),
+    ok = emqtt:disconnect(C).
+
+t_subscribe_qoe(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}, {with_qoe_metrics, true}]),
+    {ok, _} = emqtt:ConnFun(C),
+
+    {ok, _, [0]} = emqtt:subscribe(C, Topic),
+    {ok, _, [0]} = emqtt:subscribe(C, Topic, at_most_once),
+    {ok, _, [0]} = emqtt:subscribe(C, {Topic, at_most_once}),
+    {ok, _, [0]} = emqtt:subscribe(C, #{}, Topic, at_most_once),
+
+    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
+    {ok, _, [1]} = emqtt:subscribe(C, {Topic, 1}),
+    {ok, _, [1]} = emqtt:subscribe(C, #{}, Topic, 1),
+
+    {ok, _, [2]} = emqtt:subscribe(C, Topic, [{qos, ?QOS_2}]),
+    {ok, _, [2]} = emqtt:subscribe(C, #{}, Topic, [{qos, ?QOS_2}, {nl, false}, {other, ignore}]),
+
+    {ok, _, [0,1,2]} = emqtt:subscribe(C, [{Topic, at_most_once},{Topic, 1}, {Topic, [{qos, ?QOS_2}]}]),
+    ?assert(is_map(proplists:get_value(qoe, emqtt:info(C)))),
     ok = emqtt:disconnect(C).
 
 t_publish(Config) ->

@@ -31,7 +31,8 @@ jobs:
             make eunit
             make ct
             make cover
-            make relup-test
+            # @TODO rebar3 tar does not include appup of dep apps
+            # make relup-test
         - uses: actions/upload-artifact@v1
           if: always()
           with:
