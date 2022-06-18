@@ -46,6 +46,29 @@ connect(Host, Port, Opts, Timeout) ->
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),
+    case lists:keymember(nst, 1, ConnOpts) of
+        true -> do_0rtt_connect(Host, Port, ConnOpts);
+        false -> do_1rtt_connect(Host, Port, ConnOpts, Timeout)
+    end.
+
+do_0rtt_connect(Host, Port, ConnOpts) ->
+    DefOpts = #{ peer_bidi_stream_count => 1
+               , peer_unidi_stream_count => 1
+               },
+    NewOpts = maps:merge(DefOpts, maps:from_list(ConnOpts)),
+    case quicer_nif:async_connect(Host, Port, NewOpts) of
+        {ok, Conn} ->
+            case quicer_nif:start_stream(Conn, maps:from_list([{active, false}])) of
+                {ok, Stream} ->
+                    {ok, {quic, Conn, Stream}};
+                Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
         {ok, Conn} ->
             case quicer:start_stream(Conn, [{active, false}]) of
@@ -54,6 +77,9 @@ connect(Host, Port, Opts, Timeout) ->
                 Error ->
                     Error
             end;
+        {error, transport_down, connection_idle} ->
+            %% we need to reconnect on our own
+            do_1rtt_connect(Host, Port, ConnOpts, Timeout);
         {error, transport_down, Reason} ->
             {error, {transport_down, Reason}};
         {error, _} = Error ->

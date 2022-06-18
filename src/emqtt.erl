@@ -1092,10 +1092,12 @@ handle_event(info, {quic, nst_received, _Conn, Ticket}, _, #state{clientid = Cid
     {keep_state, State#state{nst = Ticket}};
 handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
     %% This is just a notify, we can wait for close complete
-    ?LOG(error, "QUIC_transport_shutdown", #{rason => Reason}, State),
+    ?LOG(error, "QUIC_transport_shutdown", #{reason => Reason}, State),
     keep_state_and_data;
 
 %% QUIC, waiting_for_connack
+handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
+    keep_state_and_data;
 handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
     keep_state_and_data;
