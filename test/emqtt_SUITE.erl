@@ -62,7 +62,8 @@ groups() ->
        t_stop,
        t_pause_resume,
        t_init,
-       t_connected]},
+       t_connected,
+       t_low_mem_opts]},
     {mqttv3,[non_parallel_tests],
       [basic_test_v3]},
     {mqttv4, [non_parallel_tests],
@@ -476,6 +477,12 @@ t_connected(Config) ->
     Clientid = gen_statem:call(C, clientid),
     [ ?assertMatch(Clientid, Value) || {Key, Value} <- emqtt:info(C), Key =:= clientid].
 
+t_low_mem_opts(Config) ->
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{port, Port}, {low_mem, true}]),
+    %% TODO: check min_heap_size, min_bin_vheap_size
+    ?assertEqual([{fullsweep_after, 1_000}], process_info(C, [fullsweep_after])).
+
 t_inflight_full(_) ->
     error('TODO').
 
@@ -550,7 +557,7 @@ retry_interval_test(Config) ->
 
     timer:sleep(timer:seconds(2)),
     ?assertEqual(2, counters:get(CRef, 1)),
-    
+
     meck:unload(emqtt_sock),
     meck:unload(emqtt_quic),
     ok = emqtt:disconnect(Pub).
