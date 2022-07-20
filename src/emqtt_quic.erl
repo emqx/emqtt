@@ -39,18 +39,40 @@ connect(Host, Port, Opts, Timeout) ->
     KeepAlive =  proplists:get_value(keepalive, Opts, 60),
     ConnOpts = [ {alpn, ["mqtt"]}
                , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
-               , {handshake_idle_timeout_ms, 3000}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 1}
                , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),
-    case quicer:connect(Host, Port, ConnOpts, Timeout) of
+    case lists:keymember(nst, 1, ConnOpts) of
+        true -> do_0rtt_connect(Host, Port, ConnOpts);
+        false -> do_1rtt_connect(Host, Port, ConnOpts, Timeout)
+    end.
+
+do_0rtt_connect(Host, Port, ConnOpts) ->
+    case quicer:async_connect(Host, Port, ConnOpts) of
         {ok, Conn} ->
-            case quicer:start_stream(Conn, [{active, false}]) of
+            case quicer:start_stream(Conn, #{active => false}) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
+                {error, Type, Info} ->
+                    {error, {Type, Info}};
+                Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
+    case quicer:connect(Host, Port, ConnOpts, Timeout) of
+        {ok, Conn} ->
+            case quicer:start_stream(Conn, #{active => false}) of
+                {ok, Stream} ->
+                    {ok, {quic, Conn, Stream}};
+                {error, Type, Info} ->
+                    {error, {Type, Info}};
                 Error ->
                     Error
             end;
