@@ -982,8 +982,9 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, l
 
 connected(info, {timeout, TRef, keepalive},
           State = #state{conn_mod = ConnMod, socket = Sock,
+                         last_packet_id = LastPktId,
                          paused = Paused, keepalive_timer = TRef}) ->
-    case (not Paused) andalso should_ping(ConnMod, Sock) of
+    case (not Paused) andalso should_ping(ConnMod, Sock, LastPktId) of
         true ->
             case send(?PACKET(?PINGREQ), State) of
                 {ok, NewState} ->
@@ -1198,15 +1199,14 @@ format_status(_, State) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-should_ping(emqtt_quic, Sock) ->
-    case emqtt_quic:getstat(Sock, [send_cnt]) of
-        {ok, [{send_cnt, V}]} ->
-            V == put(quic_send_cnt, V) orelse V == undefined;
-        Err ->
-            Err
-    end;
-
-should_ping(ConnMod, Sock) ->
+should_ping(emqtt_quic, _Sock, LastPktId) ->
+    %% Unlike TCP, we should not use socket counter since it is the counter of the connection
+    %% that the stream belongs to. Instead,  we use last_packet_id to keep track of last send msg.
+    Old = put(quic_send_cnt, LastPktId),
+    (IsPing = (LastPktId == Old orelse Old == undefined))
+        andalso put(quic_send_cnt, LastPktId+1), % count this ping
+    IsPing;
+should_ping(ConnMod, Sock, _LastPktId) ->
     case ConnMod:getstat(Sock, [send_oct]) of
         {ok, [{send_oct, Val}]} ->
             OldVal = put(send_oct, Val),
