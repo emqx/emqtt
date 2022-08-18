@@ -48,6 +48,7 @@ groups() ->
        t_subscribe,
        t_subscribe_qoe,
        t_publish,
+       t_publish_async,
        t_unsubscribe,
        t_ping,
        t_puback,
@@ -313,6 +314,40 @@ t_publish(Config) ->
     {ok, _} = emqtt:publish(C, Topic, <<"t_publish">>, [{qos, 1}]),
     {ok, _} = emqtt:publish(C, Topic, #{}, <<"t_publish">>, [{qos, 2}]),
 
+    ok = emqtt:disconnect(C).
+
+t_publish_async(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
+
+    Parent = self(),
+    Callback = {fun(Result, second_param) ->
+                    Parent ! {publish_async_result, Result}
+                end, [second_param]},
+
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_1">>, Callback),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_2">>, 0, Callback),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_3">>, at_most_once, Callback),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_4">>, [{qos, 1}], Callback),
+    ok = emqtt:publish_async(C, Topic, #{}, <<"t_publish_async_5">>, [{qos, 2}], 5000, Callback),
+
+    AssertFun =
+        fun _AssertFun(6, 5) -> ok;
+            _AssertFun(I, 5) ->
+                receive
+                    {publish_async_result, {ok, #mqtt_msg{payload = Payload}}} ->
+                        ?assertEqual(
+                           <<"t_publish_async_", (integer_to_binary(I))/binary>>,
+                           Payload),
+                        _AssertFun(I + 1, 5)
+
+                end
+        end,
+    AssertFun(1, 5),
     ok = emqtt:disconnect(C).
 
 t_unsubscribe(Config) ->

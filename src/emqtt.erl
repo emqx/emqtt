@@ -425,6 +425,18 @@ publish(Client, Topic, Properties, Payload, Opts)
 publish(Client, Msg) ->
     gen_statem:call(Client, {publish, Msg}).
 
+-spec(publish_async(client(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok).
+publish_async(Client, Topic, Payload, Callback) when is_binary(Topic) ->
+    publish_async(Client, Topic, #{}, Payload, [{qos, ?QOS_0}], infinity, Callback);
+
+publish_async(Client, Msg = #mqtt_msg{}, Timeout, Callback) ->
+    ExpiredAt = case Timeout of
+                    infinity -> infinity;
+                    _ -> erlang:system_time(millisecond) + Timeout
+                end,
+    _ = erlang:send(Client, ?ASYNC_PUB(Msg, ExpiredAt, Callback)),
+    ok.
+
 -spec(publish_async(client(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok).
 publish_async(Client, Topic, Payload, QoS, Callback) when is_binary(Topic), is_atom(QoS) ->
     publish_async(Client, Topic, #{}, Payload, [{qos, ?QOS_I(QoS)}], infinity, Callback);
@@ -449,15 +461,6 @@ publish_async(Client, Topic, Properties, Payload, Opts, Timeout, Callback)
                             payload = iolist_to_binary(Payload)},
                   Timeout,
                   Callback).
-
--spec(publish_async(client(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok).
-publish_async(Client, Topic, Payload, Callback) when is_binary(Topic) ->
-    publish_async(Client, Topic, #{}, Payload, [{qos, ?QOS_0}], infinity, Callback);
-
-publish_async(Client, Msg = #mqtt_msg{}, Timeout, Callback) ->
-    ExpiredAt = erlang:system_time(millisecond) + Timeout,
-    _ = erlang:send(Client, ?ASYNC_PUB(Msg, ExpiredAt, Callback)),
-    ok.
 
 -spec(unsubscribe(client(), topic() | [topic()]) -> subscribe_ret()).
 unsubscribe(Client, Topic) when is_binary(Topic) ->
@@ -582,7 +585,8 @@ init([Options]) ->
                                  low_mem         = false,
                                  reconnect       = false,
                                  qoe             = false,
-                                 last_packet_id  = 1
+                                 last_packet_id  = 1,
+                                 pendings        = queue:new()
                                 }),
     {ok, initialized, init_parse_state(State)}.
 
@@ -974,7 +978,7 @@ connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight =
 	NState = case maps:find(PacketId, Inflight) of
 				 {ok, ?INFLIGHT_PUBLISH(Msg, _SentAt, ExpiredAt, Callback)} ->
                      Now = now_(),
-                     _ = Now > ExpiredAt andalso eval_callback_handler({ok, Msg}, Callback),
+                     _ = Now < ExpiredAt andalso eval_callback_handler({ok, Msg}, Callback),
                      Inflight1 = maps:put(PacketId, ?INFLIGHT_PUBREL(PacketId, Now, ExpiredAt), Inflight),
                      State#state{inflight = Inflight1};
 				 {ok, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpiredAt)} ->
@@ -1326,7 +1330,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpiredAt, Callback),
       State = #state{last_packet_id = PacketId, inflight = Inflight})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
     Msg1 = Msg#mqtt_msg{packet_id = PacketId},
-    case send(Msg, State) of
+    case send(Msg1, State) of
         {ok, NState} ->
             Inflight1 = update_inflight(
                           PacketId,
@@ -1385,7 +1389,7 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
                 Msg = #mqtt_msg{packet_id = PacketId},
                 _SentAt, ExpiredAt, Callback
                )} ->
-            _ = now_() > ExpiredAt andalso eval_callback_handler({ok, Msg}, Callback),
+            _ = now_() < ExpiredAt andalso eval_callback_handler({ok, Msg}, Callback),
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
@@ -1418,7 +1422,7 @@ drop_expired(Pendings) ->
     Now = now_(),
     queue:filter(
       fun(?PUB_REQ(_, ExpiredAt, _Callback)) ->
-        Now > ExpiredAt
+        Now < ExpiredAt
       end, Pendings).
 
 assign_id(?NO_CLIENT_ID, Props) ->
