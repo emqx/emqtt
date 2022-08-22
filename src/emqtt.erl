@@ -240,7 +240,7 @@
                       count := non_neg_integer()
                      }).
 
--type(publish_success() :: ok | publish_reply()).
+-type(publish_success() :: ok | {ok, publish_reply()}).
 
 -type(publish_reply() :: #{packet_id := packet_id(),
                            reason_code := reason_code(),
@@ -436,6 +436,7 @@ publish(Client, Msg) ->
     receive
         {Mref, Reply} ->
             erlang:demonitor(Mref, [flush]),
+            %% assert return type
             case Reply of
                 ok ->
                     ok;
