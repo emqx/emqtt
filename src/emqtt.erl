@@ -1552,11 +1552,10 @@ retry_send([Inf | Msgs], Now, State = #state{retry_interval = Interval}) ->
     end;
 
 retry_send(?INFLIGHT_PUBLISH(
-              Msg = #mqtt_msg{qos = QoS, packet_id = PacketId},
+              Msg = #mqtt_msg{packet_id = PacketId},
               _SentAt, _ExpireAt, _Callback),
            Now, State = #state{inflight = Inflight}) ->
-    %% XXX: always true?
-    Msg1 = Msg#mqtt_msg{dup = (QoS =:= ?QOS_1)},
+    Msg1 = Msg#mqtt_msg{dup = true},
     case send(Msg1, State) of
         {ok, NewState} ->
             Inflight1 = maps:put(
