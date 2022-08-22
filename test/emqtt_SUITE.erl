@@ -346,15 +346,20 @@ t_publish_async(Config) ->
     ok = emqtt:publish_async(C, Topic, #{}, <<"t_publish_async_5">>, [{qos, 2}], 5000,
                              fun(R) -> Parent ! {publish_async_result, 5, R} end),
 
-    AssertFun =
-        fun _AssertFun(6, 5) -> ok;
-            _AssertFun(I, 5) ->
+    CollectFun =
+        fun _CollectFun(Acc) ->
                 receive
-                    {publish_async_result, N, ok} ->
-                        ?assertEqual(I, N)
+                    {publish_async_result, N, Result} ->
+                        _CollectFun([{N, Result} | Acc])
+                after 5000 ->
+                      lists:reverse(Acc)
                 end
         end,
-    AssertFun(1, 5),
+    ?assertMatch([{1, ok},
+                  {2, ok},
+                  {3, ok},
+                  {4, {ok, _}},
+                  {5, {ok, _}}], CollectFun([])),
     ok = emqtt:disconnect(C).
 
 t_unsubscribe(Config) ->
