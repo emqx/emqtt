@@ -325,26 +325,23 @@ t_publish_async(Config) ->
     {ok, _} = emqtt:ConnFun(C),
 
     Parent = self(),
-    Callback = {fun(Result, second_param) ->
-                    Parent ! {publish_async_result, Result}
-                end, [second_param]},
-
-    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_1">>, Callback),
-    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_2">>, 0, Callback),
-    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_3">>, at_most_once, Callback),
-    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_4">>, [{qos, 1}], Callback),
-    ok = emqtt:publish_async(C, Topic, #{}, <<"t_publish_async_5">>, [{qos, 2}], 5000, Callback),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_1">>,
+                             fun(R) -> Parent ! {publish_async_result, 1, R} end),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_2">>, 0,
+                             fun(R) -> Parent ! {publish_async_result, 2, R} end),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_3">>, at_most_once,
+                             fun(R) -> Parent ! {publish_async_result, 3, R} end),
+    ok = emqtt:publish_async(C, Topic, <<"t_publish_async_4">>, [{qos, 1}],
+                             fun(R) -> Parent ! {publish_async_result, 4, R} end),
+    ok = emqtt:publish_async(C, Topic, #{}, <<"t_publish_async_5">>, [{qos, 2}], 5000,
+                             fun(R) -> Parent ! {publish_async_result, 5, R} end),
 
     AssertFun =
         fun _AssertFun(6, 5) -> ok;
             _AssertFun(I, 5) ->
                 receive
-                    {publish_async_result, {ok, #mqtt_msg{payload = Payload}}} ->
-                        ?assertEqual(
-                           <<"t_publish_async_", (integer_to_binary(I))/binary>>,
-                           Payload),
-                        _AssertFun(I + 1, 5)
-
+                    {publish_async_result, N, ok} ->
+                        ?assertEqual(I, N)
                 end
         end,
     AssertFun(1, 5),

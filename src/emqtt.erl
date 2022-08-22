@@ -1601,9 +1601,10 @@ eval_msg_handler(#state{msg_handler = Handler}, Kind, Msg) ->
 eval_callback_handler(_Result, ?NO_HDLR) ->
     ok;
 eval_callback_handler(Result, MFAs) ->
-    _ = apply_handler_function(MFAs, Result),
+    _ = apply_callback_function(MFAs, Result),
     ok.
 
+%% Msg returned at the front of args (compatible with old versions)
 apply_handler_function(F, Msg)
   when is_function(F) ->
     erlang:apply(F, [Msg]);
@@ -1616,6 +1617,20 @@ apply_handler_function({M, F, A}, Msg)
        is_atom(F),
        is_list(A) ->
     erlang:apply(M, F, [Msg] ++ A).
+
+%% Result returned at the end of args
+apply_callback_function(F, Result)
+  when is_function(F) ->
+    erlang:apply(F, [Result]);
+apply_callback_function({F, A}, Result)
+  when is_function(F),
+       is_list(A) ->
+    erlang:apply(F, A ++ [Result]);
+apply_callback_function({M, F, A}, Result)
+  when is_atom(M),
+       is_atom(F),
+       is_list(A) ->
+    erlang:apply(M, F, A ++ [Result]).
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
