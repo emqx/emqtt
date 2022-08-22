@@ -311,8 +311,18 @@ t_publish(Config) ->
     ok = emqtt:publish(C, Topic, <<"t_publish">>),
     ok = emqtt:publish(C, Topic, <<"t_publish">>, 0),
     ok = emqtt:publish(C, Topic, <<"t_publish">>, at_most_once),
-    {ok, _} = emqtt:publish(C, Topic, <<"t_publish">>, [{qos, 1}]),
-    {ok, _} = emqtt:publish(C, Topic, #{}, <<"t_publish">>, [{qos, 2}]),
+    {ok, Reply1} = emqtt:publish(C, Topic, <<"t_publish">>, [{qos, 1}]),
+    {ok, Reply2} = emqtt:publish(C, Topic, #{}, <<"t_publish">>, [{qos, 2}]),
+
+    ?assertMatch(#{packet_id := 1,
+                   reason_code := 0,
+                   reason_code_name := success
+                  }, Reply1),
+
+    ?assertMatch(#{packet_id := 2,
+                   reason_code := 0,
+                   reason_code_name := success
+                  }, Reply2),
 
     ok = emqtt:disconnect(C).
 
@@ -578,7 +588,7 @@ retry_interval_test(Config) ->
     meck:new(emqtt_quic, [passthrough, no_history]),
     meck:expect(emqtt_quic, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
 
-    {ok, _} = emqtt:publish(Pub, nth(1, ?TOPICS), <<"qos 1">>, 1),
+    ok = emqtt:publish_async(Pub, nth(1, ?TOPICS), <<"qos 1">>, 1, fun(_) -> ok end),
 
     timer:sleep(timer:seconds(2)),
     ?assertEqual(2, counters:get(CRef, 1)),

@@ -92,6 +92,9 @@
         , code_change/4
         ]).
 
+%% export for internal calls
+-export([sync_publish_result/3]).
+
 -ifdef(UPGRADE_TEST_CHEAT).
 -export([format_status/2]).
 -endif.
@@ -114,8 +117,7 @@
 
 -type(mfas() :: {module(), atom(), list()} | {function(), list()}).
 
--type(msg_handler() :: #{puback := fun((_) -> any()) | mfas(),
-                         publish := fun((emqx_types:message()) -> any()) | mfas(),
+-type(msg_handler() :: #{publish := fun((emqx_types:message()) -> any()) | mfas(),
                          disconnected := fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
 
@@ -246,6 +248,16 @@
 -type(pendings() :: #{requests := queue:queue(publish_req()),
                       count := non_neg_integer()
                      }).
+
+-type(publish_sucess() :: ok | publish_reply()).
+
+-type(publish_reply() :: #{packet_id := packet_id(),
+                           reason_code := reason_code(),
+                           reason_code_name := atom(),
+                           properties => undefined | properties()
+                          }).
+
+-export_type([publish_sucess/0, publish_reply/0]).
 
 -define(ASYNC_PUB(Msg, ExpireAt, Callback),
         {publish_async, Msg, ExpireAt, Callback}).
@@ -395,12 +407,13 @@ parse_subopt([{qos, QoS} | Opts], Result) ->
 parse_subopt([_ | Opts], Result) ->
     parse_subopt(Opts, Result).
 
--spec(publish(client(), topic(), payload()) -> ok | {error, term()}).
+-spec(publish(client(), topic(), payload())
+      -> publish_sucess() | {error, term()}).
 publish(Client, Topic, Payload) when is_binary(Topic) ->
     publish(Client, #mqtt_msg{topic = Topic, qos = ?QOS_0, payload = iolist_to_binary(Payload)}).
 
 -spec(publish(client(), topic(), payload(), qos() | qos_name() | [pubopt()])
-        -> ok | {ok, packet_id()} | {error, term()}).
+      -> publish_sucess() | {error, term()}).
 publish(Client, Topic, Payload, QoS) when is_binary(Topic), is_atom(QoS) ->
     publish(Client, Topic, Payload, [{qos, ?QOS_I(QoS)}]);
 publish(Client, Topic, Payload, QoS) when is_binary(Topic), ?IS_QOS(QoS) ->
@@ -409,7 +422,7 @@ publish(Client, Topic, Payload, Opts) when is_binary(Topic), is_list(Opts) ->
     publish(Client, Topic, #{}, Payload, Opts).
 
 -spec(publish(client(), topic(), properties(), payload(), [pubopt()])
-      -> ok | {ok, packet_id()} | {error, term()}).
+      -> publish_sucess() | {error, term()}).
 publish(Client, Topic, Properties, Payload, Opts)
     when is_binary(Topic), is_map(Properties), is_list(Opts) ->
     ok = emqtt_props:validate(Properties),
@@ -421,9 +434,31 @@ publish(Client, Topic, Properties, Payload, Opts)
                               props   = Properties,
                               payload = iolist_to_binary(Payload)}).
 
--spec(publish(client(), #mqtt_msg{}) -> ok | {ok, packet_id()} | {error, term()}).
+-spec(publish(client(), #mqtt_msg{}) -> publish_sucess() | {error, term()}).
 publish(Client, Msg) ->
-    gen_statem:call(Client, {publish, Msg}).
+    %% copied from otp23.4 gen:do_call/4
+    Mref = erlang:monitor(process, Client),
+    %% Local without timeout; no need to use alias since we unconditionally
+    %% will wait for either a reply or a down message which corresponds to
+    %% the process being terminated (as opposed to 'noconnection')...
+    publish_async(Client, Msg, infinity, {fun ?MODULE:sync_publish_result/3, [self(), Mref]}),
+    receive
+        {Mref, Reply} ->
+            erlang:demonitor(Mref, [flush]),
+            case Reply of
+                ok ->
+                    ok;
+                {ok, Result} ->
+                    {ok, Result};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {'DOWN', Mref, _, _, Reason} ->
+            exit(Reason)
+    end.
+
+sync_publish_result(Caller, Mref, Result) ->
+    erlang:send(Caller, {Mref, Result}).
 
 -spec(publish_async(client(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok).
 publish_async(Client, Topic, Payload, Callback) when is_binary(Topic) ->
@@ -897,31 +932,6 @@ connected({call, From}, SubReq = {subscribe, Properties, Topics},
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
 
-connected({call, From}, {publish, Msg = #mqtt_msg{qos = ?QOS_0}}, State) ->
-    case send(Msg, State) of
-        {ok, NewState} ->
-            {keep_state, NewState, [{reply, From, ok}]};
-        Error = {error, Reason} ->
-            {stop_and_reply, Reason, [{reply, From, Error}]}
-    end;
-
-connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
-          State = #state{inflight = Inflight, last_packet_id = PacketId})
-    when (QoS =:= ?QOS_1); (QoS =:= ?QOS_2) ->
-    Msg1 = Msg#mqtt_msg{packet_id = PacketId},
-    case send(Msg1, State) of
-        {ok, NewState} ->
-            Inflight1 = update_inflight(PacketId, Msg1, Inflight),
-            State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
-            Actions = [{reply, From, {ok, PacketId}}],
-            case is_inflight_full(State1) of
-                true -> {next_state, inflight_full, State1, Actions};
-                false -> {keep_state, State1, Actions}
-            end;
-        {error, Reason} ->
-            {stop_and_reply, Reason, [{reply, From, {error, {PacketId, Reason}}}]}
-    end;
-
 connected({call, From}, UnsubReq = {unsubscribe, Properties, Topics},
           State = #state{last_packet_id = PacketId}) ->
     case send(?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State) of
@@ -976,10 +986,14 @@ connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
 connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
     {keep_state, delete_inflight(PubAck, State)};
 
-connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight = Inflight}) ->
+connected(cast, ?PUBREC_PACKET(PacketId, ReasonCode, Properties), State = #state{inflight = Inflight}) ->
     NState = case maps:find(PacketId, Inflight) of
                  {ok, ?INFLIGHT_PUBLISH(_Msg, _SentAt, ExpireAt, Callback)} ->
-                     eval_callback_handler(ok, Callback),
+                     eval_callback_handler(
+                       {ok, #{packet_id => PacketId,
+                              reason_code => ReasonCode,
+                              reason_code_name => reason_code_name(ReasonCode),
+                              properties => Properties}}, Callback),
                      Inflight1 = maps:put(
                                    PacketId,
                                    ?INFLIGHT_PUBREL(PacketId, now_ts(), ExpireAt),
@@ -1105,8 +1119,6 @@ connected(info, ?ASYNC_PUB(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
 connected(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, connected, Data).
 
-inflight_full({call, _From}, {publish, #mqtt_msg{qos = QoS}}, _State) when (QoS =:= ?QOS_1); (QoS =:= ?QOS_2) ->
-    {keep_state_and_data, [postpone]};
 inflight_full(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
     delete_inflight_when_full(PubAck, State);
 inflight_full(cast, ?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, State) ->
@@ -1341,7 +1353,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
                           Inflight
                          ),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
-            maybe_shoot(State1);
+            maybe_shoot(bump_last_packet_id(State1));
         {error, Reason} ->
             shutdown_due_to_send_failed({error, Reason}, State)
     end.
@@ -1395,22 +1407,22 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
                 _Msg = #mqtt_msg{packet_id = PacketId},
                 _SentAt, _ExpireAt, Callback
                )} ->
-            eval_callback_handler(ok, Callback),
-            ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
-                                                   reason_code => ReasonCode,
-                                                   properties  => Properties}),
+
+            eval_callback_handler(
+              {ok, #{packet_id => PacketId,
+                     reason_code => ReasonCode,
+                     reason_code_name => reason_code_name(ReasonCode),
+                     properties => Properties
+                    }}, Callback),
             State#state{inflight = maps:remove(PacketId, Inflight)};
         error ->
             ?LOG(warning, "unexpected_PUBACK", #{packet_id => PacketId}, State),
             State
     end;
-delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
+delete_inflight(?PUBCOMP_PACKET(PacketId, _ReasonCode, _Properties),
                 State = #state{inflight = Inflight}) ->
     case maps:find(PacketId, Inflight) of
         {ok, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)} ->
-            ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
-                                                   reason_code => ReasonCode,
-                                                   properties  => Properties}),
             State#state{inflight = maps:remove(PacketId, Inflight)};
         error ->
             ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
@@ -1496,7 +1508,7 @@ timeout_calls(Timeout, Calls) ->
     timeout_calls(os:timestamp(), Timeout, Calls).
 timeout_calls(Now, Timeout, Calls) ->
     lists:foldl(fun(C = #call{from = From, ts = Ts}, Acc) ->
-                    case (timer:now_tsdiff(Now, Ts) div 1000) >= Timeout of
+                    case (timer:now_diff(Now, Ts) div 1000) >= Timeout of
                         true  ->
                             gen_statem:reply(From, {error, ack_timeout}),
                             Acc;
@@ -1688,7 +1700,7 @@ send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
     Data = emqtt_frame:serialize(Packet, Ver),
     ?LOG(debug, "SEND_Data", #{packet => Packet}, State),
     case ConnMod:send(Sock, Data) of
-        ok  -> {ok, bump_last_packet_id(State)};
+        ok  -> {ok, State};
         Error -> Error
     end.
 
@@ -1785,7 +1797,6 @@ reason_code_name(16#A0) -> maximum_connect_time;
 reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
-
 
 next_reconnect(#state{connect_timeout = Timeout} = State) ->
     {next_state, reconnect, State#state{connect_timeout = Timeout, clean_start = false},
