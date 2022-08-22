@@ -1310,7 +1310,6 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
         {error, Reason} ->
             shutdown_due_to_send_failed({error, Reason}, State)
     end;
-
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
       State = #state{last_packet_id = PacketId, inflight = Inflight})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
@@ -1345,17 +1344,15 @@ shutdown_due_to_send_failed(
           end, ok, Reqs),
     {stop, Reason, State}.
 
-is_pendings_empty(_Pendings = #{count := 0}) ->
-    true;
-is_pendings_empty(_) ->
-    false.
+is_pendings_empty(_Pendings = #{count := Cnt}) ->
+    Cnt =< 0 .
 
 enqueue_publish_req(PubReq, Pendings = #{requests := Reqs, count := Cnt}) ->
     Pendings#{requests := queue:in(PubReq, Reqs), count := Cnt + 1}.
 
-dequeue_publish_req(_Pendings = #{count := 0}) ->
-    error;
-dequeue_publish_req(Pendings = #{requests := Reqs, count := Cnt}) ->
+%% the previous decision ensures that the length of the queue
+%% is greater than 0
+dequeue_publish_req(Pendings = #{requests := Reqs, count := Cnt}) when Cnt > 0 ->
     {{value, PubReq}, NReqs} = queue:out(Reqs),
     {PubReq,
      Pendings#{requests := NReqs, count := Cnt - 1}}.
