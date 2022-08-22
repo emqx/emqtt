@@ -977,11 +977,13 @@ connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, St
     {keep_state, delete_inflight(PubAck, State)};
 
 connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight = Inflight}) ->
-	NState = case maps:find(PacketId, Inflight) of
-				 {ok, ?INFLIGHT_PUBLISH(Msg, _SentAt, ExpireAt, Callback)} ->
-                     Now = now_ts(),
-                     Now < ExpireAt andalso eval_callback_handler({ok, Msg}, Callback),
-                     Inflight1 = maps:put(PacketId, ?INFLIGHT_PUBREL(PacketId, Now, ExpireAt), Inflight),
+    NState = case maps:find(PacketId, Inflight) of
+                 {ok, ?INFLIGHT_PUBLISH(_Msg, _SentAt, ExpireAt, Callback)} ->
+                     eval_callback_handler(ok, Callback),
+                     Inflight1 = maps:put(
+                                   PacketId,
+                                   ?INFLIGHT_PUBREL(PacketId, now_ts(), ExpireAt),
+                                   Inflight),
                      State#state{inflight = Inflight1};
 				 {ok, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)} ->
                      ?LOG(notice, "duplicated_PUBREC_packet", #{packet_id => PacketId}, State),
@@ -1321,7 +1323,7 @@ shoot(State = #state{pendings = Pendings}) ->
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
     case send(Msg, State) of
         {ok, NState} ->
-            eval_callback_handler({ok, Msg}, Callback),
+            eval_callback_handler(ok, Callback),
             maybe_shoot(NState);
         {error, Reason} ->
             shutdown_due_to_send_failed({error, Reason}, State)
@@ -1390,10 +1392,10 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
                 State = #state{inflight = Inflight}) ->
 	case maps:find(PacketId, Inflight) of
         {ok, ?INFLIGHT_PUBLISH(
-                Msg = #mqtt_msg{packet_id = PacketId},
-                _SentAt, ExpireAt, Callback
+                _Msg = #mqtt_msg{packet_id = PacketId},
+                _SentAt, _ExpireAt, Callback
                )} ->
-            now_ts() < ExpireAt andalso eval_callback_handler({ok, Msg}, Callback),
+            eval_callback_handler(ok, Callback),
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
