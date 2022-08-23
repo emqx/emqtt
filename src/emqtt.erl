@@ -1623,7 +1623,7 @@ shutdown(Reason, State = #state{pendings = Pendings, inflight = Inflight}) ->
               ok
       end, Inflight),
     Reqs = maps:get(requests, Pendings),
-    _ = queue:fold(
+    _ = queue_fold(
           fun(?PUB_REQ(_, _, Callback), _) ->
                   eval_callback_handler({error, Reason}, Callback)
           end, ok, Reqs),
@@ -1799,3 +1799,10 @@ qoe_inject(Tag, #state{qoe = QoE} = S) when is_map(QoE) ->
 
 now_ts() ->
     erlang:system_time(millisecond).
+
+%% copied queue:fold/3 since it impl otp24+ only
+queue_fold(Fun, Acc0, {R, F}) when is_function(Fun, 2), is_list(R), is_list(F) ->
+    Acc1 = lists:foldl(Fun, Acc0, F),
+    lists:foldr(Fun, Acc1, R);
+queue_fold(Fun, Acc0, Q) ->
+    erlang:error(badarg, [Fun, Acc0, Q]).
