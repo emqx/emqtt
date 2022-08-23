@@ -1327,7 +1327,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
             eval_callback_handler(ok, Callback),
             maybe_shoot(NState);
         {error, Reason} ->
-            shutdown_due_to_send_failed({error, Reason}, State)
+            shutdown(Reason, State)
     end;
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
       State = #state{last_packet_id = PacketId, inflight = Inflight})
@@ -1343,25 +1343,8 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
             maybe_shoot(bump_last_packet_id(State1));
         {error, Reason} ->
-            shutdown_due_to_send_failed({error, Reason}, State)
+            shutdown(Reason, State)
     end.
-
-shutdown_due_to_send_failed(
-  {error, Reason},
-  State = #state{pendings = Pendings, inflight = Inflight}) ->
-    %% reply to all pendings caller
-    emqtt_inflight:foreach(
-      fun(_PacketId, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)) ->
-              eval_callback_handler({error, Reason}, Callback);
-         (_PacketId, _InflightPubReql) ->
-              ok
-      end, Inflight),
-    Reqs = maps:get(requests, Pendings),
-    _ = queue:fold(
-          fun(?PUB_REQ(_, _, Callback), _) ->
-                  eval_callback_handler({error, Reason}, Callback)
-          end, ok, Reqs),
-    {stop, Reason, State}.
 
 is_pendings_empty(_Pendings = #{count := Cnt}) ->
     Cnt =< 0 .
@@ -1550,7 +1533,7 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
                      ),
         {keep_state, ensure_retry_timer(State#state{inflight = NInflight})}
     catch error : Reason ->
-              {stop, Reason}
+              shutdown(Reason, State)
     end.
 
 retry_send(Now, ?INFLIGHT_PUBLISH(Msg, _SentAt, _ExpireAt, _Callback), State) ->
@@ -1630,6 +1613,21 @@ apply_callback_function({M, F, A}, Result)
        is_atom(F),
        is_list(A) ->
     erlang:apply(M, F, A ++ [Result]).
+
+shutdown(Reason, State = #state{pendings = Pendings, inflight = Inflight}) ->
+    %% reply to all pendings caller
+    emqtt_inflight:foreach(
+      fun(_PacketId, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)) ->
+              eval_callback_handler({error, Reason}, Callback);
+         (_PacketId, _InflightPubReql) ->
+              ok
+      end, Inflight),
+    Reqs = maps:get(requests, Pendings),
+    _ = queue:fold(
+          fun(?PUB_REQ(_, _, Callback), _) ->
+                  eval_callback_handler({error, Reason}, Callback)
+          end, ok, Reqs),
+    {stop, Reason, State}.
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,

@@ -1,4 +1,4 @@
-%%--------------------------------------------------------------------
+%to %--------------------------------------------------------------------
 %% Copyright (c) 2020 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,6 +49,7 @@ groups() ->
        t_subscribe_qoe,
        t_publish,
        t_publish_async,
+       t_eval_callback_in_order,
        t_unsubscribe,
        t_ping,
        t_puback,
@@ -361,6 +362,68 @@ t_publish_async(Config) ->
                   {4, {ok, _}},
                   {5, {ok, _}}], CollectFun([])),
     ok = emqtt:disconnect(C).
+
+t_eval_callback_in_order(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    process_flag(trap_exit, true),
+
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port},
+                                {retry_interval, 2}, {max_inflight, 2}]),
+    {ok, _} = emqtt:ConnFun(C),
+
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    meck:expect(emqtt_sock, send, fun(_, _) -> ok end),
+
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    meck:expect(emqtt_quic, send, fun(_, _) -> ok end),
+
+    Parent = self(),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"1">>, 0,
+                             fun(R) -> Parent ! {publish_async_result, 1, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"2">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 2, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"3">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 3, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"4">>, 2,
+                             fun(R) -> Parent ! {publish_async_result, 4, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"5">>, 2,
+                             fun(R) -> Parent ! {publish_async_result, 5, R} end),
+
+    timer:sleep(1000),
+
+    %% mock the send function to get an sending error
+
+    meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic),
+
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    meck:expect(emqtt_sock, send, fun(_, _) -> {error, closed} end),
+
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    meck:expect(emqtt_quic, send, fun(_, _) -> {error, closed} end),
+
+    CollectFun =
+        fun _CollectFun(Acc) ->
+                receive
+                    {publish_async_result, N, Result} ->
+                        _CollectFun([{N, Result} | Acc]);
+                    {'EXIT', C, _} = Msg ->
+                        _CollectFun([Msg | Acc])
+                after 5000 ->
+                      lists:reverse(Acc)
+                end
+        end,
+    ?assertMatch([{1, ok}, %% qos0: treat send as successfully
+                  {2, {error, closed}}, %% from inflight
+                  {3, {error, closed}},
+                  {4, {error, closed}}, %% from pending request queue
+                  {5, {error, closed}},
+                  {'EXIT', C, closed}], CollectFun([])),
+
+    meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic).
 
 t_unsubscribe(Config) ->
     ConnFun = ?config(conn_fun, Config),
