@@ -70,7 +70,7 @@ update(Id, Req, Inflight = #{sent := Sent}) ->
             Inflight#{sent := maps:put(Id, {No, Req}, Sent)}
     end.
 
--spec(delete(id(), inflight()) -> inflight()).
+-spec(delete(id(), inflight()) -> error | inflight()).
 delete(Id, Inflight = #{sent := Sent}) ->
     case maps:take(Id, Sent) of
         error -> error;
