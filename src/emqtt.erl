@@ -212,7 +212,9 @@
           properties      :: properties(),
           pending_calls   :: list(),
           subscriptions   :: map(),
-          inflight        :: emqtt_inflight:inflight(),
+          inflight        :: emqtt_inflight:inflight(
+                               inflight_publish() | inflight_pubrel()
+                              ),
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
@@ -247,6 +249,22 @@
                            reason_code_name := atom(),
                            properties => undefined | properties()
                           }).
+
+-type(inflight_publish() :: {publish,
+                             #mqtt_msg{},
+                             sent_at(),
+                             expire_at(),
+                             mfas() | ?NO_HANDLER
+                            }).
+
+-type(inflight_pubrel() :: {pubrel,
+                            packet_id(),
+                            sent_at(),
+                            expire_at()
+                           }).
+
+-type(sent_at() :: non_neg_integer()). %% in millisecond
+
 
 -export_type([publish_success/0, publish_reply/0]).
 
@@ -710,7 +728,7 @@ init([{force_ping, ForcePing} | Opts], State) when is_boolean(ForcePing) ->
 init([{properties, Properties} | Opts], State = #state{properties = InitProps}) ->
     init(Opts, State#state{properties = maps:merge(InitProps, Properties)});
 init([{max_inflight, infinity} | Opts], State) ->
-    init(Opts, State#state{inflight = emqtt_inflight:new(inflight)});
+    init(Opts, State#state{inflight = emqtt_inflight:new(infinity)});
 init([{max_inflight, I} | Opts], State) when is_integer(I) ->
     init(Opts, State#state{inflight = emqtt_inflight:new(I)});
 init([auto_ack | Opts], State) ->
@@ -1514,29 +1532,39 @@ do_ensure_retry_timer(Interval, State = #state{retry_timer = undefined})
 do_ensure_retry_timer(_Interval, State) ->
     State.
 
+sent_at(?INFLIGHT_PUBLISH(_, SentAt, _, _)) ->
+    SentAt;
+sent_at(?INFLIGHT_PUBREL(_, SentAt, _)) ->
+    SentAt.
+
 retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
     try
-        RetryFun = fun(_PacketId, Inf) ->
-                       retry_send(Inf, State)
-                   end,
-        NInflight = emqtt_inflight:retry(Intv, RetryFun, Inflight),
+        Now = now_ts(),
+        Pred = fun(_, InflightReq) ->
+                       (sent_at(InflightReq) + timer:seconds(Intv)) > Now end,
+        NInflight = lists:foldl(
+                      fun({PacketId, InflightReq}, InflightAcc) ->
+                              NReq = retry_send(Now, InflightReq, State),
+                              emqtt_inflight:update(PacketId, NReq, InflightAcc)
+                      end, Inflight, emqtt_inflight:retry(Pred, Inflight)
+                     ),
         {keep_state, ensure_retry_timer(State#state{inflight = NInflight})}
-    catch throw : Reason ->
+    catch error : Reason ->
               {stop, Reason}
     end.
 
-retry_send(?INFLIGHT_PUBLISH(Msg, _SentAt, _ExpireAt, _Callback), State) ->
+retry_send(Now, ?INFLIGHT_PUBLISH(Msg, _SentAt, _ExpireAt, _Callback), State) ->
     Msg1 = Msg#mqtt_msg{dup = true},
     case send(Msg1, State) of
         {ok, _NewState} ->
-            ?INFLIGHT_PUBLISH(Msg1, now_ts(), _ExpireAt, _Callback);
+            ?INFLIGHT_PUBLISH(Msg1, Now, _ExpireAt, _Callback);
         {error, Reason} ->
             error(Reason)
     end;
-retry_send(?INFLIGHT_PUBREL(PacketId, _SentAt, _ExpireAt), State) ->
+retry_send(Now, ?INFLIGHT_PUBREL(PacketId, _SentAt, _ExpireAt), State) ->
     case send(?PUBREL_PACKET(PacketId), State) of
         {ok, _NewState} ->
-            ?INFLIGHT_PUBREL(PacketId, now_ts(), _ExpireAt);
+            ?INFLIGHT_PUBREL(PacketId, Now, _ExpireAt);
         {error, Reason} ->
             error(Reason)
     end.

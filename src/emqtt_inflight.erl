@@ -26,55 +26,43 @@
         , is_full/1
         , is_empty/1
         , foreach/2
-        , retry/3
+        , retry/2
         ]).
 
--type(inflight() :: #{emqtt:packet_id() => {seq_no(), inflight_publish()} | {seq_no(), inflight_pubrel()}}).
+-type(inflight() :: inflight(req())).
 
--type(inflight_publish() ::
-      {publish,
-       #mqtt_msg{},
-       sent_at(),
-       expire_at(),
-       emqtt:mfas() | undefined
-      }).
+-type(inflight(Req) :: #{max_inflight := pos_integer() | infinity,
+                         sent := sent(Req),
+                         seq := seq_no()
+                        }).
 
--type(inflight_pubrel() ::
-      {pubrel,
-       emqtt:packet_id(),
-       sent_at(),
-       expire_at()
-      }).
+-type(sent(Req) :: #{id() => {seq_no(), Req}}).
+
+-type(id() :: term()).
 
 -type(seq_no() :: pos_integer()).
--type(sent_at() :: non_neg_integer()). %% in millisecond
--type(expire_at() :: non_neg_integer() | infinity). %% in millisecond
 
--type(retry_func() :: fun(
-                        (emqtt:packet_id(),
-                         inflight_publish() | inflight_pubrel()
-                        ) -> inflight_publish() | inflight_pubrel())).
+-type(req() :: term()).
 
--export_type([inflight/0, inflight_publish/0, inflight_pubrel/0,
-              sent_at/0, expire_at/0, retry_func/0]).
+-export_type([inflight/1]).
 
 %%--------------------------------------------------------------------
 %% APIs
 
 -spec(new(infinity | pos_integer()) -> inflight()).
 new(MaxInflight) ->
-    #{max_inflight => MaxInflight, sent => #{}, size => 0, seq => 1}.
+    #{max_inflight => MaxInflight, sent => #{}, seq => 1}.
 
-insert(_Id, _Req, #{max_inflight := Max, size := Max}) ->
-    error;
-insert(Id, Req, Inflight = #{sent := Sent, size := Size, seq := Seq}) ->
-    Inflight#{sent := maps:put(Id, {Seq, Req}, Sent),
-              size := Size + 1,
-              seq  := Seq + 1
-             }.
+-spec(insert(id(), req(), inflight()) -> error | inflight()).
+insert(Id, Req, Inflight = #{max_inflight := Max, sent := Sent, seq := Seq}) ->
+    case maps:size(Sent) >= Max of
+        true ->
+            error;
+        false ->
+            Inflight#{sent := maps:put(Id, {Seq, Req}, Sent), seq  := Seq + 1}
+    end.
 
-update(_Id, _Req, #{max_inflight := Max, size := Max}) ->
-    error;
+-spec(update(id(), req(), inflight()) -> inflight()).
 update(Id, Req, Inflight = #{sent := Sent}) ->
     case maps:find(Id, Sent) of
         error -> error;
@@ -82,53 +70,44 @@ update(Id, Req, Inflight = #{sent := Sent}) ->
             Inflight#{sent := maps:put(Id, {No, Req}, Sent)}
     end.
 
-delete(_Id, _Inflight = #{size := 0}) ->
-    error;
-delete(Id, Inflight = #{sent := Sent, size := Size}) ->
+-spec(delete(id(), inflight()) -> inflight()).
+delete(Id, Inflight = #{sent := Sent}) ->
     case maps:take(Id, Sent) of
         error -> error;
         {{_, Req}, Sent1} ->
-            {Req, Inflight#{sent := Sent1, size := Size - 1}}
+            {Req, Inflight#{sent := Sent1}}
     end.
 
-size(#{size := Size}) ->
-    Size.
+-spec(size(inflight()) -> non_neg_integer()).
+size(#{sent := Sent}) ->
+    maps:size(Sent).
 
+-spec(is_full(inflight()) -> boolean()).
 is_full(#{max_inflight := infinity}) ->
     false;
-is_full(#{max_inflight := Max, size := Size}) ->
-    Max =:= Size.
+is_full(#{max_inflight := Max, sent := Sent}) ->
+    maps:size(Sent) >= Max.
 
-is_empty(#{size := Size}) ->
-    Size =< 0.
+-spec(is_empty(inflight()) -> boolean()).
+is_empty(#{sent := Sent}) ->
+    maps:size(Sent) =< 0.
+
 
 %% @doc first in first evaluate
-foreach(_F, #{size := 0}) ->
-    ok;
+-spec(foreach(F, inflight()) -> ok when
+    F :: fun((id(), req()) -> ok)).
 foreach(F, #{sent := Sent}) ->
     lists:foreach(
       fun({Id, {_SeqNo, Req}}) -> F(Id, Req) end,
-      arrange_sent(Sent)
+      sort_sent(Sent)
      ).
 
-%% @doc eval RetryFunc if held time(ms) over HeldIntv
--spec(retry(pos_integer(), retry_func(), inflight())
-      -> list(inflight_publish() | inflight_pubrel())).
-retry(_HeldIntv, _RetryFun, Inflight = #{size := 0}) ->
-    Inflight;
-retry(HeldIntv, RetryFun, Inflight = #{sent := Sent}) ->
-    Now = erlang:system_time(millisecond),
-    Need = arrange_sent(
-             filter_sent(
-               fun(_Id, Req) -> (sent_at(Req) + HeldIntv) < Now end,
-               Sent
-              )),
-    NSent = lists:foldl(
-              fun({Id, {SeqNo, Req}}, SentAcc) ->
-                      NReq = RetryFun(Id, Req),
-                      maps:put(Id, {SeqNo, NReq}, SentAcc)
-              end, Sent, Need),
-    Inflight#{sent := NSent}.
+%% @doc Return a sorted list of Pred returned true
+-spec(retry(Pred, inflight()) -> list({id(), req()}) when
+    Pred :: fun((id(), req()) -> boolean())).
+retry(Pred, #{sent := Sent}) ->
+    Need = sort_sent(filter_sent(fun(Id, Req) -> Pred(Id, Req) end, Sent)),
+    lists:map(fun({Id, {_SeqNo, Req}}) -> {Id, Req} end, Need).
 
 %%--------------------------------------------------------------------
 %% Internal funcs
@@ -136,14 +115,8 @@ retry(HeldIntv, RetryFun, Inflight = #{sent := Sent}) ->
 filter_sent(F, Sent) ->
     maps:filter(fun(Id, {_SeqNo, Req}) -> F(Id, Req) end, Sent).
 
-%% XXX: break opaque?
-sent_at({publish, _Msg, SentAt, _ExpireAt, _Callback}) ->
-    SentAt;
-sent_at({pubrel, _PacketId, SentAt, _ExpireAt}) ->
-    SentAt.
-
-%% @doc arrange with seqno
-arrange_sent(Sent) ->
+%% @doc sort with seqno
+sort_sent(Sent) ->
     Sort = fun({_Id1, {SeqNo1, _Req1}},
                {_Id2, {SeqNo2, _Req2}}) ->
                    SeqNo1 < SeqNo2
