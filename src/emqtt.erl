@@ -1338,7 +1338,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
                                 Inflight
                                ),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
-            maybe_shoot(bump_last_packet_id(State1));
+            maybe_shoot(State1);
         {error, Reason} ->
             shutdown(Reason, State)
     end.
@@ -1687,7 +1687,7 @@ send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
     Data = emqtt_frame:serialize(Packet, Ver),
     ?LOG(debug, "SEND_Data", #{packet => Packet}, State),
     case ConnMod:send(Sock, Data) of
-        ok  -> {ok, State};
+        ok  -> {ok, bump_last_packet_id(State)};
         Error -> Error
     end.
 

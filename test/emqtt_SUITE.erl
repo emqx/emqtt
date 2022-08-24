@@ -315,12 +315,12 @@ t_publish(Config) ->
     {ok, Reply1} = emqtt:publish(C, Topic, <<"t_publish">>, [{qos, 1}]),
     {ok, Reply2} = emqtt:publish(C, Topic, #{}, <<"t_publish">>, [{qos, 2}]),
 
-    ?assertMatch(#{packet_id := 1,
+    ?assertMatch(#{packet_id := _,
                    reason_code := 0,
                    reason_code_name := success
                   }, Reply1),
 
-    ?assertMatch(#{packet_id := 2,
+    ?assertMatch(#{packet_id := _,
                    reason_code := 0,
                    reason_code_name := success
                   }, Reply2),
