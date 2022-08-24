@@ -1249,6 +1249,7 @@ maybe_upgrade_test_cheat(_, _, _, _) ->
 
 %% Mandatory callback functions
 terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket}) ->
+    reply_all_pendings_reqs(Reason, State),
     case Reason of
         {disconnected, ReasonCode, Properties} ->
             %% backward compatible
@@ -1615,7 +1616,10 @@ apply_callback_function({M, F, A}, Result)
        is_list(A) ->
     erlang:apply(M, F, A ++ [Result]).
 
-shutdown(Reason, State = #state{pendings = Pendings, inflight = Inflight}) ->
+shutdown(Reason, State) ->
+    {stop, Reason, State}.
+
+reply_all_pendings_reqs(Reason, #state{pendings = Pendings, inflight = Inflight}) ->
     %% reply to all pendings caller
     emqtt_inflight:foreach(
       fun(_PacketId, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)) ->
@@ -1628,7 +1632,7 @@ shutdown(Reason, State = #state{pendings = Pendings, inflight = Inflight}) ->
           fun(?PUB_REQ(_, _, Callback), _) ->
                   eval_callback_handler({error, Reason}, Callback)
           end, ok, Reqs),
-    {stop, Reason, State}.
+    ok.
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
