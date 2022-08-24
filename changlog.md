@@ -1,0 +1,11 @@
+# 1.7.0
+
+## Enhancements
+
+* Added `publish_async` APIs to support asynchronous publishing. [#165](https://github.com/emqx/emqtt/pull/165)
+  Note that an incompatible update has been included, where the return format
+  of the `publish` function has been changed to `ok | {ok, publish_reply()} | {error, Reason}`
+
+## Bug fixes
+
+* Fixed inflight message retry after reconnect [#166](https://github.com/emqx/emqtt/pull/166)

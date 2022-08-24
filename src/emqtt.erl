@@ -828,7 +828,7 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = Password}), State).
 
-reconnect(state_timeout,  NextTimeout, #state{conn_mod = CMod} = State) ->
+reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State#state{clean_start = false}) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack, NewState, [Timeout]};
