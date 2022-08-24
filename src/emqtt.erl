@@ -828,13 +828,12 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = Password}), State).
 
-reconnect('state_timeout',  NextTimeout, #state{conn_mod = CMod} = State) ->
+reconnect(state_timeout,  NextTimeout, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State#state{clean_start = false}) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
-            {next_state, waiting_for_connack,
-             add_call(new_call(connect, self()), NewState), [Timeout]};
+            {next_state, waiting_for_connack, NewState, [Timeout]};
         _Err ->
-            {keep_state_and_data, {'state_timeout', NextTimeout, NextTimeout*2}}
+            {keep_state_and_data, {state_timeout, NextTimeout, NextTimeout*2}}
     end;
 reconnect({call, From}, stop, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
@@ -845,28 +844,26 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
                                           Properties),
                     State = #state{properties = AllProps,
-                                   clientid   = ClientId}) ->
-    case take_call(connect, State) of
-        {value, #call{from = From}, State1} ->
-            AllProps1 = case Properties of
-                            undefined -> AllProps;
-                            _ -> maps:merge(AllProps, Properties)
-                        end,
-            Reply = {ok, Properties},
-            State2 = State1#state{clientid = assign_id(ClientId, AllProps1),
-                                  properties = AllProps1,
-                                  session_present = SessPresent},
-            NextState = connected,
-            State3 = qoe_inject(connected, State2),
-            case self() == From of
-                true -> %% from reconnect
-                    {next_state, NextState, ensure_keepalive_timer(State3)};
-                _ ->
-                    {next_state, NextState, ensure_keepalive_timer(State3),
-                     [{reply, From, Reply}]}
-            end;
+                                   clientid = ClientId,
+                                   inflight = Inflight
+                                  }) ->
+    AllProps1 = case Properties of
+                    undefined -> AllProps;
+                    _ -> maps:merge(AllProps, Properties)
+                end,
+    Reply = {ok, Properties},
+    State1 = State#state{clientid = assign_id(ClientId, AllProps1),
+                         properties = AllProps1,
+                          session_present = SessPresent},
+    State2 = qoe_inject(connected, State1),
+    State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
+    Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
+    case take_call(connect, State3) of
+        {value, #call{from = From}, State4} ->
+            {next_state, connected, State4, [{reply, From, Reply} | Retry]};
         false ->
-            {stop, bad_connack}
+            %% unkown caller, internally initiated re-connect
+            {next_state, connected, State3, Retry}
     end;
 
 waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
@@ -893,16 +890,17 @@ waiting_for_connack(timeout, _Timeout, State) ->
     end;
 
 waiting_for_connack(EventType, EventContent, State) ->
-    case take_call(connect, State) of
-        {value, #call{from = From}, _State} ->
-            case handle_event(EventType, EventContent, waiting_for_connack, State) of
-                {stop, Reason, State} ->
+    case handle_event(EventType, EventContent, waiting_for_connack, State) of
+        {stop, Reason, NewState} ->
+            case take_call(connect, NewState) of
+                {value, #call{from = From}, _State} ->
                     Reply = {error, {Reason, EventContent}},
                     {stop_and_reply, Reason, [{reply, From, Reply}]};
-                StateCallbackResult ->
-                    StateCallbackResult
+                false ->
+                    {stop, Reason, NewState}
             end;
-        false -> {stop, connack_timeout}
+        StateCallbackResult ->
+            StateCallbackResult
     end.
 
 connected({call, From}, subscriptions, #state{subscriptions = Subscriptions}) ->
@@ -1083,10 +1081,14 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
                            pending_calls = timeout_calls(Timeout, Calls)},
     {keep_state, ensure_ack_timer(NewState)};
 
-connected(info, {timeout, TRef, retry}, State = #state{retry_timer = TRef,
-                                                       inflight    = Inflight}) ->
+connected(info, immediate_retry, State) ->
+    retry_send(State);
+
+connected(info, {timeout, TRef, retry}, State0 = #state{retry_timer = TRef,
+                                                        inflight    = Inflight}) ->
+    State = State0#state{retry_timer = undefined},
 	case emqtt_inflight:is_empty(Inflight) of
-        true  -> {keep_state, State#state{retry_timer = undefined}};
+        true  -> {keep_state, State};
         false -> retry_send(State)
     end;
 
@@ -1134,18 +1136,19 @@ handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
     process_incoming(Data, [], run_sock(State));
 
 handle_event(info, {Error, Sock, Reason}, connected,
-             #state{ reconnect = true } = State)
-    when Error =:= tcp_error; Error =:= ssl_error ->
+             #state{reconnect = true, socket = Sock} = State)
+    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
     case Error of
         tcp_error -> gen_tcp:close(Sock);
-        ssl_error -> ssl:close(Sock)
+        ssl_error -> ssl:close(Sock);
+        _ -> ok %% already down
     end,
     next_reconnect(State);
 
-handle_event(info, {Error, _Sock, Reason}, _StateName, State)
-    when Error =:= tcp_error; Error =:= ssl_error ->
+handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
+    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
     ?LOG(error, "connection_error",
          #{error => Error, reason =>Reason}, State),
     {stop, {shutdown, Reason}, State};
@@ -1217,6 +1220,11 @@ handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
 handle_event(info, {'EXIT', Pid, normal}, StateName, State) ->
     ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
     keep_state_and_data;
+
+handle_event(info, {timeout, TRef, retry}, StateName, State0 = #state{retry_timer = TRef}) ->
+    ?LOG(info, "discarded_retry_timer", #{state => StateName}, State0),
+    State = State0#state{retry_timer = undefined},
+    {keep_state, State};
 
 handle_event(EventType, EventContent, StateName, State) ->
     case maybe_upgrade_test_cheat(EventType, EventContent, StateName, State) of
@@ -1504,11 +1512,16 @@ ensure_ack_timer(State = #state{ack_timer     = undefined,
     State#state{ack_timer = erlang:start_timer(Timeout, self(), ack)};
 ensure_ack_timer(State) -> State.
 
-ensure_retry_timer(State = #state{retry_interval = Interval}) ->
-    do_ensure_retry_timer(Interval, State).
+ensure_retry_timer(State = #state{retry_interval = Interval, inflight = Inflight}) ->
+    case emqtt_inflight:is_empty(Inflight) of
+        true ->
+            %% nothing to retry
+            State;
+        false ->
+            do_ensure_retry_timer(Interval, State)
+    end.
 
-do_ensure_retry_timer(Interval, State = #state{retry_timer = undefined})
-    when Interval > 0 ->
+do_ensure_retry_timer(Interval, State = #state{retry_timer = undefined}) when Interval > 0 ->
     State#state{retry_timer = erlang:start_timer(Interval, self(), retry)};
 do_ensure_retry_timer(_Interval, State) ->
     State.
@@ -1788,9 +1801,25 @@ reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
 
-next_reconnect(#state{connect_timeout = Timeout} = State) ->
-    {next_state, reconnect, State#state{connect_timeout = Timeout, clean_start = false},
-     {'state_timeout', Timeout, Timeout*2}}.
+next_reconnect(#state{connect_timeout = Timeout,
+                      retry_timer = RetryTimer,
+                      keepalive_timer = KeepAliveTimer
+                     } = State) ->
+    ok = cancel_timer(RetryTimer),
+    ok = cancel_timer(KeepAliveTimer),
+    {next_state, reconnect, State#state{clean_start = false,
+                                        retry_timer = undefined,
+                                        keepalive_timer = undefined
+                                       },
+     {state_timeout, Timeout, Timeout*2}}.
+
+cancel_timer(undefined) ->
+    ok;
+cancel_timer(Tref) ->
+    %% we do not care if the timer is already expired
+    %% the expire event will be discarded when not in connected state
+    _ = timer:cancel(Tref),
+    ok.
 
 -spec qoe_inject(atom(), state()) -> state().
 qoe_inject(_Tag, #state{qoe = false} = S) ->
