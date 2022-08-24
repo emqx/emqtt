@@ -1321,6 +1321,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
             eval_callback_handler(ok, Callback),
             maybe_shoot(NState);
         {error, Reason} ->
+            eval_callback_handler({error, Reason}, Callback),
             shutdown(Reason, State)
     end;
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
@@ -1337,6 +1338,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
             maybe_shoot(State1);
         {error, Reason} ->
+            eval_callback_handler({error, Reason}, Callback),
             shutdown(Reason, State)
     end.
 
