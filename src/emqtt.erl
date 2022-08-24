@@ -265,7 +265,6 @@
 
 -type(sent_at() :: non_neg_integer()). %% in millisecond
 
-
 -export_type([publish_success/0, publish_reply/0]).
 
 -define(ASYNC_PUB(Msg, ExpireAt, Callback),
@@ -1098,12 +1097,10 @@ connected(info, ?ASYNC_PUB(Msg = #mqtt_msg{qos = ?QOS_0}, ExpireAt, Callback), S
     shoot(?PUB_REQ(Msg, ExpireAt, Callback), State0);
 
 connected(info, ?ASYNC_PUB(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
-          State0 = #state{pendings = Pendings})
+          State0 = #state{pendings = Pendings0})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
-    maybe_shoot(
-      State0#state{
-        pendings = enqueue_publish_req(?PUB_REQ(Msg, ExpireAt, Callback), Pendings)
-       });
+    Pendings = enqueue_publish_req(?PUB_REQ(Msg, ExpireAt, Callback), Pendings0),
+    maybe_shoot(State0#state{pendings = Pendings});
 
 connected(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, connected, Data).
@@ -1335,11 +1332,11 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
     Msg1 = Msg#mqtt_msg{packet_id = PacketId},
     case send(Msg1, State) of
         {ok, NState} ->
-            Inflight1 = emqtt_inflight:insert(
-                          PacketId,
-                          ?INFLIGHT_PUBLISH(Msg1, now_ts(), ExpireAt, Callback),
-                          Inflight
-                         ),
+            {ok, Inflight1} = emqtt_inflight:insert(
+                                PacketId,
+                                ?INFLIGHT_PUBLISH(Msg1, now_ts(), ExpireAt, Callback),
+                                Inflight
+                               ),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
             maybe_shoot(bump_last_packet_id(State1));
         {error, Reason} ->
@@ -1364,7 +1361,7 @@ ack_inflight(
   State = #state{inflight = Inflight}
  ) ->
     case emqtt_inflight:delete(PacketId, Inflight) of
-        {?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback), NInflight} ->
+        {{value, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)}, NInflight} ->
             eval_callback_handler(
               {ok, #{packet_id => PacketId,
                      reason_code => ReasonCode,
@@ -1382,18 +1379,19 @@ ack_inflight(
   State = #state{inflight = Inflight}
  ) ->
     case emqtt_inflight:delete(PacketId, Inflight) of
-        {?INFLIGHT_PUBLISH(_Msg, _SentAt, ExpireAt, Callback), Inflight1} ->
+        {{value, ?INFLIGHT_PUBLISH(_Msg, _SentAt, ExpireAt, Callback)}, Inflight1} ->
             eval_callback_handler(
               {ok, #{packet_id => PacketId,
                      reason_code => ReasonCode,
                      reason_code_name => reason_code_name(ReasonCode),
                      properties => Properties}}, Callback),
-            NInflight = emqtt_inflight:insert(
-                          PacketId,
-                          ?INFLIGHT_PUBREL(PacketId, now_ts(), ExpireAt),
-                          Inflight1),
+            {ok, NInflight} = emqtt_inflight:insert(
+                                PacketId,
+                                ?INFLIGHT_PUBREL(PacketId, now_ts(), ExpireAt),
+                                Inflight1
+                               ),
             State#state{inflight = NInflight};
-         {?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt), _} ->
+         {{value, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)}, _} ->
             ?LOG(notice, "duplicated_PUBREC_packet", #{packet_id => PacketId}, State),
             State;
         error ->
@@ -1406,7 +1404,7 @@ ack_inflight(
   State = #state{inflight = Inflight}
  ) ->
     case emqtt_inflight:delete(PacketId, Inflight) of
-        {?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt), NInflight} ->
+        {{value, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)}, NInflight} ->
             State#state{inflight = NInflight};
         error ->
             ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
@@ -1524,33 +1522,37 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
     try
         Now = now_ts(),
         Pred = fun(_, InflightReq) ->
-                       (sent_at(InflightReq) + timer:seconds(Intv)) > Now end,
-        NInflight = lists:foldl(
-                      fun({PacketId, InflightReq}, InflightAcc) ->
-                              NReq = retry_send(Now, InflightReq, State),
-                              emqtt_inflight:update(PacketId, NReq, InflightAcc)
-                      end, Inflight, emqtt_inflight:retry(Pred, Inflight)
-                     ),
-        {keep_state, ensure_retry_timer(State#state{inflight = NInflight})}
+                       (sent_at(InflightReq) + timer:seconds(Intv)) > Now
+               end,
+        NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
+        {keep_state, ensure_retry_timer(NState)}
     catch error : Reason ->
               shutdown(Reason, State)
     end.
 
-retry_send(Now, ?INFLIGHT_PUBLISH(Msg, _SentAt, _ExpireAt, _Callback), State) ->
+retry_send(Now, [{PacketId, ?INFLIGHT_PUBLISH(Msg, _, ExpireAt, Callback)} | More],
+           State = #state{inflight = Inflight}) ->
     Msg1 = Msg#mqtt_msg{dup = true},
     case send(Msg1, State) of
-        {ok, _NewState} ->
-            ?INFLIGHT_PUBLISH(Msg1, Now, _ExpireAt, _Callback);
+        {ok, NState} ->
+            NInflightReq = ?INFLIGHT_PUBLISH(Msg1, Now, ExpireAt, Callback),
+            {ok, NInflight} = emqtt_inflight:update(PacketId, NInflightReq, Inflight),
+            retry_send(Now, More, NState#state{inflight = NInflight});
         {error, Reason} ->
             error(Reason)
     end;
-retry_send(Now, ?INFLIGHT_PUBREL(PacketId, _SentAt, _ExpireAt), State) ->
+retry_send(Now, [{PacketId, ?INFLIGHT_PUBREL(PacketId, _, ExpireAt)} | More],
+           State = #state{inflight = Inflight}) ->
     case send(?PUBREL_PACKET(PacketId), State) of
-        {ok, _NewState} ->
-            ?INFLIGHT_PUBREL(PacketId, Now, _ExpireAt);
+        {ok, NState} ->
+            NInflightReq = ?INFLIGHT_PUBREL(PacketId, Now, ExpireAt),
+            {ok, NInflight} = emqtt_inflight:update(PacketId, NInflightReq, Inflight),
+            retry_send(Now, More, NState#state{inflight = NInflight});
         {error, Reason} ->
             error(Reason)
-    end.
+    end;
+retry_send(_Now, [], State) ->
+    State.
 
 deliver(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
                   topic = Topic, props = Props, payload = Payload},

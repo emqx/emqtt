@@ -30,7 +30,7 @@
         , is_full/1
         , is_empty/1
         , foreach/2
-        , retry/2
+        , to_retry_list/2
         ]).
 
 -type(inflight() :: inflight(req())).
@@ -48,7 +48,7 @@
 
 -type(req() :: term()).
 
--export_type([inflight/1]).
+-export_type([inflight/1, inflight/0]).
 
 %%--------------------------------------------------------------------
 %% APIs
@@ -57,29 +57,30 @@
 new(MaxInflight) ->
     #{max_inflight => MaxInflight, sent => #{}, seq => 1}.
 
--spec(insert(id(), req(), inflight()) -> error | inflight()).
+-spec(insert(id(), req(), inflight()) -> error | {ok, inflight()}).
 insert(Id, Req, Inflight = #{max_inflight := Max, sent := Sent, seq := Seq}) ->
     case maps:size(Sent) >= Max of
         true ->
             error;
         false ->
-            Inflight#{sent := maps:put(Id, {Seq, Req}, Sent), seq  := Seq + 1}
+            {ok, Inflight#{sent := maps:put(Id, {Seq, Req}, Sent),
+                       seq := Seq + 1}}
     end.
 
--spec(update(id(), req(), inflight()) -> inflight()).
+-spec(update(id(), req(), inflight()) -> error | {ok, inflight()}).
 update(Id, Req, Inflight = #{sent := Sent}) ->
     case maps:find(Id, Sent) of
         error -> error;
         {ok, {No, _OldReq}} ->
-            Inflight#{sent := maps:put(Id, {No, Req}, Sent)}
+            {ok, Inflight#{sent := maps:put(Id, {No, Req}, Sent)}}
     end.
 
--spec(delete(id(), inflight()) -> error | {req(), inflight()}).
+-spec(delete(id(), inflight()) -> error | {{value, req()}, inflight()}).
 delete(Id, Inflight = #{sent := Sent}) ->
     case maps:take(Id, Sent) of
         error -> error;
         {{_, Req}, Sent1} ->
-            {Req, Inflight#{sent := Sent1}}
+            {{value, Req}, maybe_reset_seq(Inflight#{sent := Sent1})}
     end.
 
 -spec(size(inflight()) -> non_neg_integer()).
@@ -93,8 +94,6 @@ is_full(#{max_inflight := Max, sent := Sent}) ->
     maps:size(Sent) >= Max.
 
 -spec(is_empty(inflight()) -> boolean()).
-is_empty(#{max_inflight := infinity}) ->
-    false;
 is_empty(#{sent := Sent}) ->
     maps:size(Sent) =< 0.
 
@@ -108,9 +107,9 @@ foreach(F, #{sent := Sent}) ->
      ).
 
 %% @doc Return a sorted list of Pred returned true
--spec(retry(Pred, inflight()) -> list({id(), req()}) when
+-spec(to_retry_list(Pred, inflight()) -> list({id(), req()}) when
     Pred :: fun((id(), req()) -> boolean())).
-retry(Pred, #{sent := Sent}) ->
+to_retry_list(Pred, #{sent := Sent}) ->
     Need = sort_sent(filter_sent(fun(Id, Req) -> Pred(Id, Req) end, Sent)),
     lists:map(fun({Id, {_SeqNo, Req}}) -> {Id, Req} end, Need).
 
@@ -120,13 +119,22 @@ retry(Pred, #{sent := Sent}) ->
 filter_sent(F, Sent) ->
     maps:filter(fun(Id, {_SeqNo, Req}) -> F(Id, Req) end, Sent).
 
-%% @doc sort with seqno
+%% @doc sort with seq
 sort_sent(Sent) ->
     Sort = fun({_Id1, {SeqNo1, _Req1}},
                {_Id2, {SeqNo2, _Req2}}) ->
                    SeqNo1 < SeqNo2
            end,
     lists:sort(Sort, maps:to_list(Sent)).
+
+%% @doc avoid integer overflows
+maybe_reset_seq(Inflight) ->
+    case is_empty(Inflight) of
+        true ->
+            Inflight#{seq := 1};
+        false ->
+            Inflight
+    end.
 
 %%--------------------------------------------------------------------
 %% tests
@@ -135,19 +143,19 @@ sort_sent(Sent) ->
 
 insert_delete_test() ->
     Inflight = emqtt_inflight:new(2),
-    Inflight1 = emqtt_inflight:insert(1, req1, Inflight),
-    Inflight2 = emqtt_inflight:insert(2, req2, Inflight1),
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
+    {ok, Inflight2} = emqtt_inflight:insert(2, req2, Inflight1),
     error = emqtt_inflight:insert(3, req3, Inflight2),
     error = emqtt_inflight:delete(3, Inflight),
-    {req2, _} = emqtt_inflight:delete(2, Inflight2).
+    {{value, req2}, _} = emqtt_inflight:delete(2, Inflight2).
 
 update_test() ->
     Inflight = emqtt_inflight:new(2),
-    Inflight1 = emqtt_inflight:insert(1, req1, Inflight),
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
     error = emqtt_inflight:update(2, req2, Inflight1),
 
-    Inflight11 = emqtt_inflight:update(1, req11, Inflight1),
-    {req11, _} = emqtt_inflight:delete(1, Inflight11).
+    {ok, Inflight11} = emqtt_inflight:update(1, req11, Inflight1),
+    {{value, req11}, _} = emqtt_inflight:delete(1, Inflight11).
 
 size_full_empty_test() ->
     Inflight = emqtt_inflight:new(1),
@@ -155,13 +163,13 @@ size_full_empty_test() ->
     true = emqtt_inflight:is_empty(Inflight),
     false = emqtt_inflight:is_full(Inflight),
 
-    Inflight1 = emqtt_inflight:insert(1, req1, Inflight),
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
     1 = emqtt_inflight:size(Inflight1),
     false = emqtt_inflight:is_empty(Inflight1),
     true = emqtt_inflight:is_full(Inflight1),
 
     false = emqtt_inflight:is_full(emqtt_inflight:new(infinity)),
-    false = emqtt_inflight:is_empty(emqtt_inflight:new(infinity)).
+    true = emqtt_inflight:is_empty(emqtt_inflight:new(infinity)).
 
 foreach_test() ->
     emqtt_inflight:foreach(
@@ -171,21 +179,33 @@ foreach_test() ->
 
 retry_test() ->
     [{"sorted by insert sequence",
-      [{1, 1}, {2, 2}] = emqtt_inflight:retry(
+      [{1, 1}, {2, 2}] = emqtt_inflight:to_retry_list(
                            fun(Id, Req) -> Id =:= Req end,
                            inflight_example()
                           )
      },
      {"filter",
-      [{2, 2}] = emqtt_inflight:retry(
+      [{2, 2}] = emqtt_inflight:to_retry_list(
                    fun(Id, _Req) -> Id =:= 2 end,
                    inflight_example())
      }].
 
+reset_seq_test() ->
+    Inflight = emqtt_inflight:new(infinity),
+    #{seq := 1} = Inflight,
+
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
+    #{seq := 2} = Inflight1,
+
+    {_, Inflight2} = emqtt_inflight:delete(1, Inflight1),
+
+    %% reset seq to 1 once inflight is empty
+    true = emqtt_inflight:is_empty(Inflight2),
+    #{seq := 1} = Inflight2.
+
 inflight_example() ->
-    emqtt_inflight:insert(
-      2, 2,
-      emqtt_inflight:insert(1, 1, emqtt_inflight:new(infinity))
-     ).
+    {ok, Inflight} = emqtt_inflight:insert(1, 1, emqtt_inflight:new(infinity)),
+    {ok, Inflight1} = emqtt_inflight:insert(2, 2, Inflight),
+    Inflight1.
 
 -endif.
