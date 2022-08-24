@@ -280,7 +280,7 @@
           dup = false    :: boolean(),
           packet_id      :: emqtt:packet_id(),
           topic          :: emqtt:topic(),
-          props          :: emqtt:properties(),
+          props          :: emqtt:properties() | undefined,
           payload        :: binary()
          }).
 

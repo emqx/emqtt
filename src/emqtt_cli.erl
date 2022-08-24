@@ -192,8 +192,6 @@ do_publish(Client, Opts, Payload) ->
     case emqtt:publish(Client, get_value(topic, Opts), Payload, Opts) of
         {error, Reason} ->
             io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
-        {error, _PacketId, Reason} ->
-            io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
         _ ->
             io:format("Client ~s sent PUBLISH (Q~p, R~p, D0, Topic=~s, Payload=...(~p bytes))~n",
                       [get_value(clientid, Opts),
