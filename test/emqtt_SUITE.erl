@@ -660,7 +660,7 @@ retry_interval_test(Config) ->
 
     timer:sleep(timer:seconds(2)),
     ?assertEqual(2, counters:get(CRef, 1)),
-    
+
     meck:unload(emqtt_sock),
     meck:unload(emqtt_quic),
     ok = emqtt:disconnect(Pub).

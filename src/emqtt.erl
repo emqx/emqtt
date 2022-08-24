@@ -267,9 +267,6 @@
 
 -export_type([publish_success/0, publish_reply/0]).
 
--define(ASYNC_PUB(Msg, ExpireAt, Callback),
-        {publish_async, Msg, ExpireAt, Callback}).
-
 -define(PUB_REQ(Msg, ExpireAt, Callback), {publish, Msg, ExpireAt, Callback}).
 
 -define(INFLIGHT_PUBLISH(Msg, SentAt, ExpireAt, Callback),
@@ -478,7 +475,7 @@ publish_async(Client, Msg = #mqtt_msg{}, Timeout, Callback) ->
                     infinity -> infinity;
                     _ -> erlang:system_time(millisecond) + Timeout
                 end,
-    _ = erlang:send(Client, ?ASYNC_PUB(Msg, ExpireAt, Callback)),
+    _ = erlang:send(Client, ?PUB_REQ(Msg, ExpireAt, Callback)),
     ok.
 
 -spec(publish_async(client(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok).
@@ -1093,13 +1090,13 @@ connected(info, {timeout, TRef, retry}, State = #state{retry_timer = TRef,
         false -> retry_send(State)
     end;
 
-connected(info, ?ASYNC_PUB(Msg = #mqtt_msg{qos = ?QOS_0}, ExpireAt, Callback), State0) ->
-    shoot(?PUB_REQ(Msg, ExpireAt, Callback), State0);
+connected(info, ?PUB_REQ(#mqtt_msg{qos = ?QOS_0}, _ExpireAt, _Callback) = PubReq, State0) ->
+    shoot(PubReq, State0);
 
-connected(info, ?ASYNC_PUB(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
+connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _ExpireAt, _Callback) = PubReq,
           State0 = #state{pendings = Pendings0})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
-    Pendings = enqueue_publish_req(?PUB_REQ(Msg, ExpireAt, Callback), Pendings0),
+    Pendings = enqueue_publish_req(PubReq, Pendings0),
     maybe_shoot(State0#state{pendings = Pendings});
 
 connected(EventType, EventContent, Data) ->
