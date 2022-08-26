@@ -33,6 +33,13 @@
 -define(WILD_TOPICS, [<<"TopicA/+">>, <<"+/C">>, <<"#">>, <<"/#">>, <<"/+">>,
                       <<"+/+">>, <<"TopicA/#">>]).
 
+-define(WAIT(Pattern, Result),
+        receive
+            Pattern ->
+                Result
+        after 5000 -> error(timeout)
+        end).
+
 all() ->
     [ {group, general}
     , {group, mqttv3}
@@ -50,6 +57,8 @@ groups() ->
        t_publish,
        t_publish_reply_error,
        t_publish_process_monitor,
+       t_publish_port_error,
+       t_publish_port_error_retry,
        t_publish_async,
        t_eval_callback_in_order,
        t_unsubscribe,
@@ -382,6 +391,133 @@ t_publish_process_monitor(Config) ->
 
     meck:unload(emqtt_sock),
     meck:unload(emqtt_quic).
+
+t_publish_port_error(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    case ConnFun of
+        quic_connect ->
+            ct:pal("skipped", []),
+            ok;
+        _ ->
+            test_publish_port_error(Config)
+    end.
+
+test_publish_port_error(Config) ->
+    Port = case ?config(port, Config) of
+               undefined -> 1883;
+               P -> P
+           end,
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    unlink(C),
+    Tester = self(),
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    %% catch the socket port
+    meck:expect(emqtt_sock, connect,
+                fun(Host, PortN, Opts, Timeout) ->
+                        {ok, Sock} = meck:passthrough([Host, PortN, Opts, Timeout]),
+                        Tester ! {socket, Sock},
+                        {ok, Sock}
+                end),
+    {ok, _} = emqtt:connect(C),
+    %% balckhole the publish packets, so the publish call is blocked
+    meck:expect(emqtt_sock, send, fun(_, _) -> Tester ! sent, ok end),
+    Sock = ?WAIT({socket, S}, S),
+    Payload = atom_to_binary(?FUNCTION_NAME),
+    spawn(
+      fun() ->
+              Tester ! {publish_result, emqtt:publish(C, Topic, #{}, Payload, [{qos, 1}])}
+      end),
+    receive sent -> ok end,
+    %% killing the socket now should result in an error reply, (but not EXIT exception)
+    exit(Sock, kill),
+    PublishResult = receive {publish_result, R} -> R
+                    after 5000 ->
+                              io:format(user, "~p\n", [sys:get_state(C)]),
+                              ct:fail(timeout)
+                    end,
+    ?assertEqual({error, {shutdown, killed}}, PublishResult),
+    meck:unload(emqtt_sock).
+
+t_publish_port_error_retry(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    case ConnFun of
+        quic_connect ->
+            ct:pal("skipped", []),
+            ok;
+        _ ->
+            test_publish_port_error_retry(Config)
+    end.
+
+test_publish_port_error_retry(Config) ->
+    Port = case ?config(port, Config) of
+               undefined -> 1883;
+               P -> P
+           end,
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{clean_start, true},
+                                {port, Port},
+                                %% no timer based retry, test state transition retry
+                                {retry_interval, 1000},
+                                {reconnect, true},
+                                %% seconds
+                                {connect_timeout, 2}
+                               ]),
+    unlink(C),
+    Tester = self(),
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    %% catch the socket port
+    meck:expect(emqtt_sock, connect,
+                fun(Host, PortN, Opts, Timeout) ->
+                        {ok, Sock} = meck:passthrough([Host, PortN, Opts, Timeout]),
+                        Tester ! {socket, Sock},
+                        {ok, Sock}
+                end),
+    {ok, _} = emqtt:connect(C),
+    Sock = ?WAIT({socket, S}, S),
+    %% balckhole the publish packets, so the publish call is blocked
+    meck:expect(emqtt_sock, send,
+                fun(_, Msg) ->
+                        MsgBin = iolist_to_binary(Msg),
+                        case binary:match(MsgBin, <<"MQTT">>) of
+                            nomatch ->
+                                Tester ! {sent, MsgBin};
+                            _ ->
+                                gen_statem:cast(C, ?CONNACK_PACKET(?RC_SUCCESS))
+                        end,
+                        ok
+                end),
+    Payload = atom_to_binary(?FUNCTION_NAME),
+    spawn(
+      fun() ->
+              Tester ! {publish_result, emqtt:publish(C, Topic, #{}, Payload, [{qos, 1}])}
+      end),
+    WaitForPayload = fun W() ->
+                             receive
+                                 {sent, Bin} ->
+                                     case binary:match(Bin, Payload) of
+                                         nomatch -> W();
+                                         _ -> ok
+                                     end
+                             after
+                                 10_000 ->
+                                     io:format(user, "~p~n", [sys:get_state(C)]),
+                                     error(timeout)
+                             end
+                     end,
+    WaitForPayload(),
+    %% fake a socket close after the first attempt is sent
+    C ! {tcp_error, Sock, fake_error},
+    %% socket will be re-established
+    ?WAIT({socket, _}, ok),
+    %% payload should be sent again
+    WaitForPayload(),
+    %% now stop the process while there is one inflight
+    emqtt:stop(C),
+    %% should still get a reply, but not EXIT exception!
+    Result = ?WAIT({publish_result, R}, R),
+    ?assertEqual(Result, {error, normal}),
+    meck:unload(emqtt_sock).
 
 t_publish_async(Config) ->
     ConnFun = ?config(conn_fun, Config),
