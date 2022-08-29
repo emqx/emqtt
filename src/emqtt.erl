@@ -90,14 +90,11 @@
         , handle_event/4
         , terminate/3
         , code_change/4
+        , format_status/2
         ]).
 
 %% export for internal calls
 -export([sync_publish_result/3]).
-
--ifdef(UPGRADE_TEST_CHEAT).
--export([format_status/2]).
--endif.
 
 -export_type([ host/0
              , option/0
@@ -185,6 +182,33 @@
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
 
+-define(FLAG_BRIDGE_MODE, 1).
+-define(FLAG_CLEAN_START, 2).
+-define(FLAG_FORCE_PING,  4).
+-define(FLAG_PAUSED, 8).
+-define(FLAG_AUTO_ACK, 16).
+-define(FLAG_SESSION_PRESENT, 32).
+-define(FLAG_LOW_MEM, 64).
+-define(FLAG_RECONNECT, 128).
+-define(IS_FLAG(BITS, BIT), (((BITS) band (BIT)) =:= (BIT))).
+
+-define(ALL_FLAGS,
+        [{?FLAG_BRIDGE_MODE, bridge_mode},
+         {?FLAG_CLEAN_START, clean_start},
+         {?FLAG_FORCE_PING,  force_ping},
+         {?FLAG_PAUSED, paused},
+         {?FLAG_AUTO_ACK, auto_ack},
+         {?FLAG_SESSION_PRESENT, session_present},
+         {?FLAG_LOW_MEM, low_mem},
+         {?FLAG_RECONNECT, reconnect}
+        ]).
+
+%% to make sure topic is initialised as undefined
+%% it is used to check if will flag should be set or not
+-define(NO_WILL_TOPIC, undefined).
+-define(NO_WILL_MSG, undefined).
+-define(DUMMY_WILL_MSG, (#mqtt_msg{topic = ?NO_WILL_TOPIC})).
+
 -record(state, {
           name            :: atom(),
           owner           :: pid(),
@@ -196,19 +220,14 @@
           socket          :: inet:socket() | pid(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
-          bridge_mode     :: boolean(),
           clientid        :: binary(),
-          clean_start     :: boolean(),
           username        :: maybe(binary()),
           password        :: function(),
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
           keepalive_timer :: maybe(reference()),
-          force_ping      :: boolean(),
-          paused          :: boolean(),
-          will_flag       :: boolean(),
-          will_msg        :: mqtt_msg(),
+          will_msg        :: ?NO_WILL_MSG | mqtt_msg(),
           properties      :: properties(),
           pending_calls   :: list(),
           subscriptions   :: map(),
@@ -216,21 +235,20 @@
                                inflight_publish() | inflight_pubrel()
                               ),
           awaiting_rel    :: map(),
-          auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
           ack_timer       :: reference(),
           retry_interval  :: pos_integer(),
           retry_timer     :: reference(),
-          session_present :: boolean(),
           last_packet_id  :: packet_id(),
-          low_mem         :: boolean(),
           parse_state     :: emqtt_frame:parse_state(),
-          reconnect       :: boolean(),
           qoe             :: boolean() | map(),
           nst             :: binary(), %% quic new session ticket
           pendings        :: pendings(),
+          flags           :: integer(),
           extra = #{}     :: map() %% extra field for easier to make appup
          }). %% note, always add the new fields at the tail for code_change.
+
+-define(IS_FLAGED(State, MASK), ?IS_FLAG(State#state.flags, MASK)).
 
 -type(state() ::  #state{}).
 
@@ -285,13 +303,6 @@
 
 -define(PROPERTY(Name, Val), #state{properties = #{Name := Val}}).
 
--define(WILL_MSG(QoS, Retain, Topic, Props, Payload),
-        #mqtt_msg{qos = QoS,
-		  retain = Retain,
-		  topic = Topic,
-		  props = Props,
-		  payload = Payload
-		 }).
 
 -define(NO_CLIENT_ID, <<>>).
 
@@ -603,34 +614,37 @@ init([Options]) ->
                                  hosts           = [],
                                  conn_mod        = emqtt_sock,
                                  sock_opts       = [],
-                                 bridge_mode     = false,
                                  clientid        = ClientId,
-                                 clean_start     = true,
                                  proto_ver       = ?MQTT_PROTO_V4,
                                  proto_name      = <<"MQTT">>,
                                  keepalive       = ?DEFAULT_KEEPALIVE,
-                                 force_ping      = false,
-                                 paused          = false,
-                                 will_flag       = false,
-                                 will_msg        = #mqtt_msg{},
+                                 will_msg        = ?DUMMY_WILL_MSG,
                                  pending_calls   = [],
                                  subscriptions   = #{},
                                  inflight        = emqtt_inflight:new(infinity),
                                  awaiting_rel    = #{},
                                  properties      = #{},
-                                 auto_ack        = true,
                                  ack_timeout     = ?DEFAULT_ACK_TIMEOUT,
                                  retry_interval  = ?DEFAULT_RETRY_INTERVAL,
                                  connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
-                                 low_mem         = false,
-                                 reconnect       = false,
                                  qoe             = false,
                                  last_packet_id  = 1,
+                                 flags           = (?FLAG_CLEAN_START bor ?FLAG_AUTO_ACK),
                                  pendings        = #{requests => queue:new(),
                                                      count => 0
                                                     }
                                 }),
-    {ok, initialized, init_parse_state(State)}.
+    {ok, initialized, init_parse_state(keep_will_msg_in_state(State))}.
+
+keep_will_msg_in_state(#state{will_msg = #mqtt_msg{topic = ?NO_WILL_TOPIC}} = State) ->
+    State#state{will_msg = ?NO_WILL_MSG};
+keep_will_msg_in_state(State) ->
+    State.
+
+resolve_will_msg_to_send(?NO_WILL_MSG) ->
+    ?DUMMY_WILL_MSG;
+resolve_will_msg_to_send(WillMsg) ->
+    WillMsg.
 
 random_client_id() ->
     rand:seed(exsplus, erlang:timestamp()),
@@ -686,7 +700,7 @@ init([{ws_path, Path} | Opts], State = #state{sock_opts = SockOpts}) ->
 init([{clientid, ClientId} | Opts], State) ->
     init(Opts, State#state{clientid = iolist_to_binary(ClientId)});
 init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
-    init(Opts, State#state{clean_start = CleanStart});
+    init(Opts, flag(State, ?FLAG_CLEAN_START, CleanStart));
 init([{username, Username} | Opts], State) ->
     init(Opts, State#state{username = iolist_to_binary(Username)});
 init([{password, Password} | Opts], State) ->
@@ -703,8 +717,7 @@ init([{proto_ver, v5} | Opts], State) ->
     init(Opts, State#state{proto_ver  = ?MQTT_PROTO_V5,
                            proto_name = <<"MQTT">>});
 init([{will_topic, Topic} | Opts], State = #state{will_msg = WillMsg}) ->
-    WillMsg1 = init_will_msg({topic, Topic}, WillMsg),
-    init(Opts, State#state{will_flag = true, will_msg = WillMsg1});
+    init(Opts, State#state{will_msg = init_will_msg({topic, Topic}, WillMsg)});
 init([{will_props, Properties} | Opts], State = #state{will_msg = WillMsg}) ->
     init(Opts, State#state{will_msg = init_will_msg({props, Properties}, WillMsg)});
 init([{will_payload, Payload} | Opts], State = #state{will_msg = WillMsg}) ->
@@ -718,9 +731,9 @@ init([{connect_timeout, Timeout}| Opts], State) ->
 init([{ack_timeout, Timeout}| Opts], State) ->
     init(Opts, State#state{ack_timeout = timer:seconds(Timeout)});
 init([force_ping | Opts], State) ->
-    init(Opts, State#state{force_ping = true});
+    init(Opts, flag(State, ?FLAG_FORCE_PING, true));
 init([{force_ping, ForcePing} | Opts], State) when is_boolean(ForcePing) ->
-    init(Opts, State#state{force_ping = ForcePing});
+    init(Opts, flag(State, ?FLAG_FORCE_PING, ForcePing));
 init([{properties, Properties} | Opts], State = #state{properties = InitProps}) ->
     init(Opts, State#state{properties = maps:merge(InitProps, Properties)});
 init([{max_inflight, infinity} | Opts], State) ->
@@ -728,17 +741,17 @@ init([{max_inflight, infinity} | Opts], State) ->
 init([{max_inflight, I} | Opts], State) when is_integer(I) ->
     init(Opts, State#state{inflight = emqtt_inflight:new(I)});
 init([auto_ack | Opts], State) ->
-    init(Opts, State#state{auto_ack = true});
+    init(Opts, flag(State, ?FLAG_AUTO_ACK, true));
 init([{auto_ack, AutoAck} | Opts], State) when is_boolean(AutoAck) ->
-    init(Opts, State#state{auto_ack = AutoAck});
+    init(Opts, flag(State, ?FLAG_AUTO_ACK, AutoAck));
 init([{retry_interval, I} | Opts], State) ->
     init(Opts, State#state{retry_interval = timer:seconds(I)});
 init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
-    init(Opts, State#state{bridge_mode = Mode});
+    init(Opts, flag(State, ?FLAG_BRIDGE_MODE, Mode));
 init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
-    init(Opts, State#state{reconnect = IsReconnect});
+    init(Opts, flag(State, ?FLAG_RECONNECT, IsReconnect));
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
-    init(Opts, State#state{low_mem = IsLow});
+    init(Opts, flag(State, ?FLAG_LOW_MEM, IsLow));
 init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binary(Ticket) ->
     init(Opts, State#state{sock_opts = [{nst, Ticket} | SockOpts]});
 init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
@@ -799,24 +812,28 @@ do_connect(ConnMod, #state{sock_opts = SockOpts,
     end.
 
 mqtt_connect(State = #state{clientid    = ClientId,
-                            clean_start = CleanStart,
-                            bridge_mode = IsBridge,
                             username    = Username,
                             password    = Password,
                             proto_ver   = ProtoVer,
                             proto_name  = ProtoName,
                             keepalive   = KeepAlive,
-                            will_flag   = WillFlag,
-                            will_msg    = WillMsg,
+                            will_msg    = WillMsg0,
+                            flags       = Flags,
                             properties  = Properties}) ->
-    ?WILL_MSG(WillQoS, WillRetain, WillTopic, WillProps, WillPayload) = WillMsg,
+   WillMsg = resolve_will_msg_to_send(WillMsg0),
+   #mqtt_msg{qos = WillQoS,
+             retain = WillRetain,
+             topic = WillTopic,
+             props = WillProps,
+             payload = WillPayload
+            } = WillMsg,
     ConnProps = emqtt_props:filter(?CONNECT, Properties),
     send(?CONNECT_PACKET(
             #mqtt_packet_connect{proto_ver    = ProtoVer,
                                  proto_name   = ProtoName,
-                                 is_bridge    = IsBridge,
-                                 clean_start  = CleanStart,
-                                 will_flag    = WillFlag,
+                                 is_bridge    = ?IS_FLAG(Flags, ?FLAG_BRIDGE_MODE),
+                                 clean_start  = ?IS_FLAG(Flags, ?FLAG_CLEAN_START),
+                                 will_flag    = WillTopic =/= ?NO_WILL_TOPIC,
                                  will_qos     = WillQoS,
                                  will_retain  = WillRetain,
                                  keepalive    = KeepAlive,
@@ -826,10 +843,11 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  will_topic   = WillTopic,
                                  will_payload = WillPayload,
                                  username     = Username,
-                                 password     = emqtt_secret:unwrap(Password)}), State).
+                                 password     = emqtt_secret:unwrap(Password)
+                                }), State).
 
 reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
-    case do_connect(CMod, State#state{clean_start = false}) of
+    case do_connect(CMod, flag(State, ?FLAG_CLEAN_START, false)) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack, NewState, [Timeout]};
         _Err ->
@@ -843,27 +861,27 @@ reconnect(_EventType, _, _State) ->
 waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
                                           Properties),
-                    State = #state{properties = AllProps,
-                                   clientid = ClientId,
-                                   inflight = Inflight
-                                  }) ->
+                    #state{properties = AllProps,
+                           clientid = ClientId,
+                           inflight = Inflight
+                           } = State0) ->
     AllProps1 = case Properties of
                     undefined -> AllProps;
                     _ -> maps:merge(AllProps, Properties)
                 end,
     Reply = {ok, Properties},
-    State1 = State#state{clientid = assign_id(ClientId, AllProps1),
-                         properties = AllProps1,
-                          session_present = SessPresent},
-    State2 = qoe_inject(connected, State1),
-    State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
+    State1 = flag(State0, ?FLAG_SESSION_PRESENT, SessPresent),
+    State2 = State1#state{clientid = assign_id(ClientId, AllProps1),
+                          properties = AllProps1},
+    State3 = qoe_inject(connected, State2),
+    State4 = ensure_retry_timer(ensure_keepalive_timer(State3)),
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
-    case take_call(connect, State3) of
-        {value, #call{from = From}, State4} ->
-            {next_state, connected, State4, [{reply, From, Reply} | Retry]};
+    case take_call(connect, State4) of
+        {value, #call{from = From}, State} ->
+            {next_state, connected, State, [{reply, From, Reply} | Retry]};
         false ->
             %% unkown caller, internally initiated re-connect
-            {next_state, connected, State3, Retry}
+            {next_state, connected, State4, Retry}
     end;
 
 waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
@@ -910,11 +928,13 @@ connected({call, From}, info, State) ->
     Info = lists:zip(record_info(fields, state), tl(tuple_to_list(State))),
     {keep_state_and_data, [{reply, From, Info}]};
 
-connected({call, From}, pause, State) ->
-    {keep_state, State#state{paused = true}, [{reply, From, ok}]};
+connected({call, From}, pause, State0) ->
+    State = flag(State0, ?FLAG_PAUSED, true),
+    {keep_state, State, [{reply, From, ok}]};
 
-connected({call, From}, resume, State) ->
-    {keep_state, State#state{paused = false}, [{reply, From, ok}]};
+connected({call, From}, resume, State0) ->
+    State = flag(State0, ?FLAG_PAUSED, false),
+    {keep_state, State, [{reply, From, ok}]};
 
 connected({call, From}, clientid, #state{clientid = ClientId}) ->
     {keep_state_and_data, [{reply, From, ClientId}]};
@@ -972,7 +992,7 @@ connected(cast, {pubrel, PacketId, ReasonCode, Properties}, State) ->
 connected(cast, {pubcomp, PacketId, ReasonCode, Properties}, State) ->
     send_puback(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties), State);
 
-connected(cast, ?PUBLISH_PACKET(_QoS, _PacketId), #state{paused = true}) ->
+connected(cast, ?PUBLISH_PACKET(_QoS, _PacketId), State) when ?IS_FLAGED(State, ?FLAG_PAUSED) ->
     keep_state_and_data;
 
 connected(cast, Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), State) ->
@@ -993,7 +1013,8 @@ connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode, _Properties) = PubRec, Sta
 
 %%TODO::... if auto_ack is false, should we take PacketId from the map?
 connected(cast, ?PUBREL_PACKET(PacketId),
-          State = #state{awaiting_rel = AwaitingRel, auto_ack = AutoAck}) ->
+          State = #state{awaiting_rel = AwaitingRel}) ->
+    AutoAck = ?IS_FLAGED(State, ?FLAG_AUTO_ACK),
      case maps:take(PacketId, AwaitingRel) of
          {Packet, AwaitingRel1} ->
              NewState = deliver(packet_to_msg(Packet), State#state{awaiting_rel = AwaitingRel1}),
@@ -1047,10 +1068,10 @@ connected(cast, ?PACKET(?PINGRESP), State) ->
 connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
-connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
+connected(info, {timeout, _TRef, keepalive}, State) when ?IS_FLAGED(State, ?FLAG_FORCE_PING) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
-            IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
+            ?IS_FLAGED(State, ?FLAG_LOW_MEM) andalso erlang:garbage_collect(self(), [{type, major}]),
             {keep_state, ensure_keepalive_timer(NewState)};
         Error -> {stop, Error}
     end;
@@ -1058,8 +1079,8 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, l
 connected(info, {timeout, TRef, keepalive},
           State = #state{conn_mod = ConnMod, socket = Sock,
                          last_packet_id = LastPktId,
-                         paused = Paused, keepalive_timer = TRef}) ->
-    case (not Paused) andalso should_ping(ConnMod, Sock, LastPktId) of
+                         keepalive_timer = TRef}) ->
+    case (not ?IS_FLAGED(State, ?FLAG_PAUSED)) andalso should_ping(ConnMod, Sock, LastPktId) of
         true ->
             case send(?PACKET(?PINGREQ), State) of
                 {ok, NewState} ->
@@ -1136,8 +1157,9 @@ handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
     process_incoming(Data, [], run_sock(State));
 
 handle_event(info, {Error, Sock, Reason}, connected,
-             #state{reconnect = true, socket = Sock} = State)
-    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
+             #state{socket = Sock} = State)
+    when ?IS_FLAGED(State, ?FLAG_RECONNECT) andalso
+         (Error =:= tcp_error orelse Error =:= ssl_error orelse Error =:= 'EXIT') ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
     case Error of
@@ -1153,8 +1175,8 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
          #{error => Error, reason =>Reason}, State),
     {stop, {shutdown, Reason}, State};
 
-handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = true } = State)
-    when Closed =:= tcp_closed; Closed =:= ssl_closed ->
+handle_event(info, {Closed, _Sock}, connected, State)
+    when ?IS_FLAGED(State, ?FLAG_RECONNECT) andalso (Closed =:= tcp_closed orelse Closed =:= ssl_closed) ->
     next_reconnect(State);
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1185,19 +1207,19 @@ handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
 %% QUIC, waiting_for_connack, handles async 0-RTT connect
 handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
     keep_state_and_data;
-handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
+handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, State) when ?IS_FLAGED(State, ?FLAG_RECONNECT) ->
     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
     keep_state_and_data;
-handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+handle_event(info, {quic, closed, _Connection}, waiting_for_connack, State) when ?IS_FLAGED(State, ?FLAG_RECONNECT) ->
     keep_state_and_data;
-handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, State) when ?IS_FLAGED(State, ?FLAG_RECONNECT) ->
     keep_state_and_data;
 
 handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
     ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
     {stop, {shutdown, {closed, Reason}}, State};
 
-handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = true} = State) ->
+handle_event(info, {quic, shutdown, Conn}, _, State) when ?IS_FLAGED(State, ?FLAG_RECONNECT) ->
     quicer:shutdown_connection(Conn),
     next_reconnect(State);
 
@@ -1286,11 +1308,27 @@ code_change(_OldVsn, OldState, OldData, _Extra) ->
 format_status(_, State) ->
     [{data, [{"State", State}]},
      {supervisor, [{"Callback", ?MODULE}]}].
+-else.
+format_status(_, [_PD, State, Data0]) ->
+    Data = Data0#state{password = "******",
+                       flags = catch readable_flags(Data0#state.flags)
+                      },
+    {State, Data}.
 -endif.
 
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+
+readable_flags(Flags) ->
+    lists:foldl(fun({Bit, Name}, Acc) ->
+                        case ?IS_FLAG(Flags, Bit) of
+                            true ->
+                                [Name | Acc];
+                            false ->
+                                Acc
+                        end
+                end, [], ?ALL_FLAGS).
 
 should_ping(emqtt_quic, _Sock, LastPktId) ->
     %% Unlike TCP, we should not use socket counter since it is the counter of the connection
@@ -1454,9 +1492,9 @@ assign_id(?NO_CLIENT_ID, Props) ->
 assign_id(Id, _Props) ->
     Id.
 
-publish_process(?QOS_1, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
-                State0 = #state{auto_ack = AutoAck}) ->
+publish_process(?QOS_1, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId), State0) ->
     State = deliver(packet_to_msg(Packet), State0),
+    AutoAck = ?IS_FLAGED(State, ?FLAG_AUTO_ACK),
     case AutoAck of
         true  -> send_puback(?PUBACK_PACKET(PacketId), State);
         false -> {keep_state, State}
@@ -1804,13 +1842,14 @@ reason_code_name(_Code) -> unknown_error.
 next_reconnect(#state{connect_timeout = Timeout,
                       retry_timer = RetryTimer,
                       keepalive_timer = KeepAliveTimer
-                     } = State) ->
+                     } = State0) ->
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
-    {next_state, reconnect, State#state{clean_start = false,
-                                        retry_timer = undefined,
-                                        keepalive_timer = undefined
-                                       },
+    State1 = State0#state{retry_timer = undefined,
+                          keepalive_timer = undefined
+                          },
+    State = flag(State1, ?FLAG_CLEAN_START, false),
+    {next_state, reconnect, State,
      {state_timeout, Timeout, Timeout*2}}.
 
 cancel_timer(undefined) ->
@@ -1840,3 +1879,13 @@ queue_fold(Fun, Acc0, {R, F}) when is_function(Fun, 2), is_list(R), is_list(F) -
     lists:foldr(Fun, Acc1, R);
 queue_fold(Fun, Acc0, Q) ->
     erlang:error(badarg, [Fun, Acc0, Q]).
+
+flag(#state{flags = Flag0} = State, Flag, Bool) ->
+    State#state{flags = do_flag(Flag0, Flag, Bool)}.
+
+do_flag(Flag0, Flag, true) ->
+    Flag0 bor Flag;
+do_flag(Flag0, Flag, false) ->
+    Flag0 band (bnot Flag);
+do_flag(Flag0, Flag, Int) when is_integer(Int) ->
+    do_flag(Flag0, Flag, Int =:= 1).
