@@ -200,7 +200,7 @@
           clientid        :: binary(),
           clean_start     :: boolean(),
           username        :: maybe(binary()),
-          password        :: maybe(binary()),
+          password        :: function(),
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
@@ -690,7 +690,7 @@ init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
 init([{username, Username} | Opts], State) ->
     init(Opts, State#state{username = iolist_to_binary(Username)});
 init([{password, Password} | Opts], State) ->
-    init(Opts, State#state{password = iolist_to_binary(Password)});
+    init(Opts, State#state{password = emqtt_secret:wrap(iolist_to_binary(Password))});
 init([{keepalive, Secs} | Opts], State) ->
     init(Opts, State#state{keepalive = Secs});
 init([{proto_ver, v3} | Opts], State) ->
@@ -826,7 +826,7 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  will_topic   = WillTopic,
                                  will_payload = WillPayload,
                                  username     = Username,
-                                 password     = Password}), State).
+                                 password     = emqtt_secret:unwrap(Password)}), State).
 
 reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State#state{clean_start = false}) of
