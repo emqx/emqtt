@@ -889,7 +889,8 @@ waiting_for_connack(timeout, _Timeout, State) ->
         false -> {stop, connack_timeout}
     end;
 
-waiting_for_connack(EventType, EventContent, State) ->
+waiting_for_connack(EventType, EventContent,
+                    State = #state{connect_timeout = Timeout}) ->
     case handle_event(EventType, EventContent, waiting_for_connack, State) of
         {stop, Reason, NewState} ->
             case take_call(connect, NewState) of
@@ -899,6 +900,8 @@ waiting_for_connack(EventType, EventContent, State) ->
                 false ->
                     {stop, Reason, NewState}
             end;
+        keep_state_and_data ->
+            {keep_state_and_data, Timeout};
         StateCallbackResult ->
             StateCallbackResult
     end.

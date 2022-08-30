@@ -10,3 +10,4 @@
 ## Bug fixes
 
 * Fixed inflight message retry after reconnect [#166](https://github.com/emqx/emqtt/pull/166)
+* Respect connect_timeout [#169](https://github.com/emqx/emqtt/pull/169)
