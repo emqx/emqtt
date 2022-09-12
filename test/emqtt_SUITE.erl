@@ -51,6 +51,7 @@ all() ->
 groups() ->
     [{general, [non_parallel_tests],
       [t_connect,
+       t_connect_timeout,
        t_ws_connect,
        t_subscribe,
        t_subscribe_qoe,
@@ -98,6 +99,9 @@ groups() ->
                 ]
      }
     ].
+
+suite() ->
+    [{timetrap, {seconds, 60}}].
 
 init_per_suite(Config) ->
     ok = emqtt_test_lib:start_emqx(),
@@ -162,8 +166,8 @@ t_connect(Config) ->
     Port = ?config(port, Config),
     {ok, C} = emqtt:start_link([{port, Port}]),
     {ok, _} = emqtt:ConnFun(C),
-    ok= emqtt:disconnect(C),
     ct:pal("C is connected ~p", [C]),
+    ok= emqtt:disconnect(C),
     {ok, C1} = emqtt:start_link([ {clean_start, true}
                                 , {port, Port}
                                 ]),
@@ -178,6 +182,27 @@ t_connect(Config) ->
     {ok, _} = emqtt:ConnFun(C2),
     ct:pal("C2 is connected ~p", [C2]),
     ok= emqtt:disconnect(C2).
+
+t_connect_timeout(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {connect_timeout, 1}]),
+    F = fun(Sock, _) ->
+                C ! {inet_reply, Sock, ok},
+                ok
+        end,
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    meck:expect(emqtt_sock, send, F),
+
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    meck:expect(emqtt_quic, send, F),
+
+    ?assertEqual({error, connack_timeout}, emqtt:ConnFun(C)),
+
+    meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic).
 
 t_reconnect_disabled(Config) ->
     ConnFun = ?config(conn_fun, Config),

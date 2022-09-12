@@ -777,7 +777,8 @@ initialized({call, From}, {connect, ConnMod}, State) ->
     case do_connect(ConnMod, qoe_inject(?FUNCTION_NAME, State)) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack,
-             add_call(new_call(connect, From), NewState), [Timeout]};
+             add_call(new_call(connect, From), NewState),
+             {state_timeout, Timeout, Timeout}};
         {error, Reason} = Error->
             {stop_and_reply, Reason, [{reply, From, Error}]};
         {sock_error, Reason} ->
@@ -831,7 +832,7 @@ mqtt_connect(State = #state{clientid    = ClientId,
 reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State#state{clean_start = false}) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
-            {next_state, waiting_for_connack, NewState, [Timeout]};
+            {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Timeout}};
         _Err ->
             {keep_state_and_data, {state_timeout, NextTimeout, NextTimeout*2}}
     end;
@@ -881,7 +882,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
 waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
-waiting_for_connack(timeout, _Timeout, State) ->
+waiting_for_connack(state_timeout, _Timeout, State) ->
     case take_call(connect, State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, connack_timeout},
