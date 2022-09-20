@@ -80,7 +80,6 @@
         , waiting_for_connack/3
         , connected/3
         , reconnect/3
-        , inflight_full/3
         , random_client_id/0
         , reason_code_name/1
         ]).
@@ -986,11 +985,10 @@ connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
     publish_process(?QOS_2, Packet, State);
 
 connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
-    {keep_state, ack_inflight(PubAck, State)};
+    maybe_shoot(ack_inflight(PubAck, State));
 
 connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode, _Properties) = PubRec, State) ->
-    NState = ack_inflight(PubRec, State),
-    send_puback(?PUBREL_PACKET(PacketId), NState);
+    send_puback(?PUBREL_PACKET(PacketId), ack_inflight(PubRec, State));
 
 %%TODO::... if auto_ack is false, should we take PacketId from the map?
 connected(cast, ?PUBREL_PACKET(PacketId),
@@ -1008,7 +1006,7 @@ connected(cast, ?PUBREL_PACKET(PacketId),
      end;
 
 connected(cast, ?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, State) ->
-    {keep_state, ack_inflight(PubComp, State)};
+    maybe_shoot(ack_inflight(PubComp, State));
 
 connected(cast, ?SUBACK_PACKET(PacketId, Properties, ReasonCodes),
           State = #state{subscriptions = _Subscriptions}) ->
@@ -1104,15 +1102,6 @@ connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _ExpireAt, _Callback) = PubReq,
 
 connected(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, connected, Data).
-
-inflight_full(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
-    ack_inflight_when_full(PubAck, State);
-inflight_full(cast, ?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, State) ->
-    ack_inflight_when_full(PubComp, State);
-inflight_full(EventType, EventContent, Data) ->
-    %% inflight_full is a sub-state of connected state,
-    %% delegate all other events to connected state.
-    connected(EventType, EventContent, Data).
 
 handle_event({call, From}, stop, _StateName, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
@@ -1318,7 +1307,7 @@ maybe_shoot(State0 = #state{pendings = Pendings, inflight = Inflight}) ->
         {true, _} ->
             {keep_state, State};
         {_, true} ->
-            {next_state, inflight_full, State}
+            {keep_state, State}
     end.
 
 shoot(State = #state{pendings = Pendings}) ->
@@ -1419,13 +1408,6 @@ ack_inflight(
             ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
             State
      end.
-
-ack_inflight_when_full(Packet, State = #state{inflight = Inflight}) ->
-    State1 = ack_inflight(Packet, State),
-    case emqtt_inflight:is_full(Inflight) of
-        true -> {keep_state, State1};
-        false -> {next_state, connected, State1}
-    end.
 
 drop_expired(Pendings = #{count := 0}) ->
     Pendings;

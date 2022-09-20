@@ -62,6 +62,7 @@ groups() ->
        t_publish_port_error_retry,
        t_publish_async,
        t_eval_callback_in_order,
+       t_ack_inflight_and_shoot_cycle,
        t_unsubscribe,
        t_ping,
        t_puback,
@@ -641,6 +642,100 @@ t_eval_callback_in_order(Config) ->
 
     meck:unload(emqtt_sock),
     meck:unload(emqtt_quic).
+
+t_ack_inflight_and_shoot_cycle(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    {ok, C} = emqtt:start_link([{clean_start, true}, {port, Port},
+                                {retry_interval, 30}, {max_inflight, 2}]),
+    {ok, _} = emqtt:ConnFun(C),
+
+    process_flag(trap_exit, true),
+    Parent = self(),
+
+    SendFun = fun(_Sock, Data) ->
+                      {ok, Pkt, _, _} = emqtt_frame:parse(iolist_to_binary(Data)),
+                      Parent ! {publish_async_sent, Pkt},
+                      ok
+              end,
+    ok = meck:new(emqtt_sock, [passthrough, no_history]),
+    ok = meck:expect(emqtt_sock, send, SendFun),
+
+    ok = meck:new(emqtt_quic, [passthrough, no_history]),
+    ok = meck:expect(emqtt_quic, send, SendFun),
+
+    ok = emqtt:publish_async(C, <<"topic">>, <<"1">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 1, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"2">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 2, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"3">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 3, R} end),
+    ok = emqtt:publish_async(C, <<"topic">>, <<"4">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 4, R} end),
+
+    CollectSentFun =
+        fun _CollectSentFun(Acc) ->
+                receive
+                    {publish_async_sent, Pkt} ->
+                        _CollectSentFun([Pkt| Acc]);
+                    {'EXIT', C, _} = Msg ->
+                        _CollectSentFun([Msg | Acc])
+                after 500 ->
+                      lists:reverse(Acc)
+                end
+        end,
+    %% the first 2 msgs in flight, other msgs in the queue
+    InflightMsgs1 = CollectSentFun([]),
+    ?assertMatch([?PUBLISH_PACKET(_, _, _, <<"1">>),
+                  ?PUBLISH_PACKET(_, _, _, <<"2">>)
+                 ], InflightMsgs1),
+
+    %% ack the fisrt 2 msgs
+    lists:foreach(
+      fun(?PUBLISH_PACKET(_, _, PacketId, _)) ->
+              gen_statem:cast(C, ?PUBACK_PACKET(PacketId))
+      end, InflightMsgs1),
+
+    CollectResFun =
+        fun _CollectResFun(Acc) ->
+                receive
+                    {publish_async_result, N, Result} ->
+                        _CollectResFun([{N, Result} | Acc]);
+                    {'EXIT', C, _} = Msg ->
+                        _CollectResFun([Msg | Acc])
+                after 500 ->
+                      lists:reverse(Acc)
+                end
+        end,
+
+    CompMsgs1 = CollectResFun([]),
+    InflightMsgs2 = CollectSentFun([]),
+
+    %% the first 2 msgs has sent successfully
+    ?assertMatch([{1, {ok, _}},
+                  {2, {ok, _}}
+                 ], CompMsgs1),
+    %% the 3,4 msg will be sent due to inflight window moved
+    ?assertMatch([?PUBLISH_PACKET(_, _, _, <<"3">>),
+                  ?PUBLISH_PACKET(_, _, _, <<"4">>)
+                 ], InflightMsgs2),
+
+    %% ack the 3,4 msg
+    lists:foreach(
+      fun(?PUBLISH_PACKET(_, _, PacketId, _)) ->
+              gen_statem:cast(C, ?PUBACK_PACKET(PacketId))
+      end, InflightMsgs2),
+
+    CompMsgs2 = CollectResFun([]),
+    %% the 3,4 msgs has sent successfully
+    ?assertMatch([{3, {ok, _}},
+                  {4, {ok, _}}
+                 ], CompMsgs2),
+
+    ok = meck:unload(emqtt_sock),
+    ok = meck:unload(emqtt_quic),
+    ok = emqtt:disconnect(C).
 
 t_unsubscribe(Config) ->
     ConnFun = ?config(conn_fun, Config),
