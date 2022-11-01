@@ -203,7 +203,7 @@
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
-          keepalive_timer :: maybe(reference()),
+          keepalive_timer :: maybe(timer:tref()),
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_flag       :: boolean(),
@@ -217,9 +217,9 @@
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
-          ack_timer       :: reference(),
+          ack_timer       :: maybe(timer:tref()),
           retry_interval  :: pos_integer(),
-          retry_timer     :: reference(),
+          retry_timer     :: maybe(timer:tref()),
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
@@ -518,15 +518,15 @@ unsubscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics)
 ping(Client) ->
     gen_statem:call(Client, ping).
 
--spec(disconnect(client()) -> ok).
+-spec(disconnect(client()) -> ok | {error, any()}).
 disconnect(Client) ->
     disconnect(Client, ?RC_SUCCESS).
 
--spec(disconnect(client(), reason_code()) -> ok).
+-spec(disconnect(client(), reason_code()) -> ok | {error, any()}).
 disconnect(Client, ReasonCode) ->
     disconnect(Client, ReasonCode, #{}).
 
--spec(disconnect(client(), reason_code(), properties()) -> ok).
+-spec(disconnect(client(), reason_code(), properties()) -> ok | {error, any()}).
 disconnect(Client, ReasonCode, Properties) ->
     gen_statem:call(Client, {disconnect, ReasonCode, Properties}).
 
@@ -790,9 +790,10 @@ initialized(EventType, EventContent, State) ->
 
 do_connect(ConnMod, #state{sock_opts = SockOpts,
                            connect_timeout = Timeout} = State) ->
-    case sock_connect(ConnMod, hosts(State), SockOpts, Timeout) of
+    State0 = maybe_init_quic_state(ConnMod, State),
+    case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         {ok, Sock} ->
-            State1 = qoe_inject(handshaked, State),
+            State1 = qoe_inject(handshaked, State0),
             mqtt_connect(run_sock(State1#state{conn_mod = ConnMod, socket = Sock}));
         {error, Reason} ->
             {sock_error, Reason}
@@ -1121,10 +1122,6 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
     ?LOG(debug, "RECV_Data", #{data => Data}, State),
     process_incoming(Data, [], run_sock(State));
 
-handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
-    ?LOG(debug, "RECV_Data", #{data => Data}, State),
-    process_incoming(Data, [], run_sock(State));
-
 handle_event(info, {Error, Sock, Reason}, connected,
              #state{reconnect = true, socket = Sock} = State)
     when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
@@ -1164,48 +1161,75 @@ handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     {stop, {shutdown, Reason}, State};
 
 %% QUIC messages
-handle_event(info, {quic, nst_received, _Conn, Ticket}, _, #state{clientid = Cid} = State) ->
-    catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
-    {keep_state, State};
-handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
-    %% This is just a notify, we can wait for close complete
-    ?LOG(error, "QUIC_transport_shutdown", #{reason => Reason}, State),
-    keep_state_and_data;
+handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} = State) ->
+    case emqtt_quic:handle_info(QuicMsg, StateName, Extra) of
+        {next_state, NewStatName, NewCBState} ->
+            {next_state, NewStatName, State#state{extra = NewCBState}};
+        {next_state, NewStatName, NewCBState, Actions} ->
+            {next_state, NewStatName, State#state{extra = NewCBState}, Actions};
+        {keep_state, NewCBState} ->
+            {keep_state, State#state{extra = NewCBState}};
+        {keep_state, NewCBState, Actions} ->
+            {keep_state, State#state{extra = NewCBState}, Actions};
+        {repeat_state, NewCBState} ->
+            {repeat_state, State#state{extra = NewCBState}};
+        {repeat_state, NewCBState, Actions} ->
+            {repeat_state, State#state{extra = NewCBState}, Actions};
+        {stop, Reason, NewCBState} ->
+            {stop, Reason, State#state{extra = NewCBState}};
+        {stop_and_reply, Reason, Replies, NewCBState} ->
+            {stop_and_reply, Reason, Replies, State#state{extra = NewCBState}};
+        Other -> %% Without NewCBState
+            Other
+    end;
+
+%% handle_event(info, {quic, Data, _Stream, _Props}, _StateName, State) when is_binary(Data) ->
+%%     ?LOG(debug, "RECV_Data", #{data => Data}, State),
+%%     process_incoming(Data, [], run_sock(State));
+
+%% handle_event(info, {quic, nst_received, _Conn, Ticket}, _, #state{clientid = Cid} = State)
+%%   when is_binary(Ticket) ->
+%%     catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
+%%     {keep_state, State};
+%% handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
+%%     %% This is just a notify, we can wait for close complete
+%%     ?LOG(error, "QUIC_transport_shutdown", #{reason => Reason}, State),
+%%     keep_state_and_data;
 
 %% QUIC, waiting_for_connack, handles async 0-RTT connect
-handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
-    keep_state_and_data;
-handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
-    ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
-    keep_state_and_data;
-handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
-    keep_state_and_data;
-handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
-    keep_state_and_data;
+%% handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
+%%     keep_state_and_data;
+%% handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
+%%     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
+%%     keep_state_and_data;
+%% handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+%%     keep_state_and_data;
+%% handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+%%     keep_state_and_data;
 
-handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
-    ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
-    {stop, {shutdown, {closed, Reason}}, State};
+%% handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
+%%     ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
+%%     {stop, {shutdown, {closed, Reason}}, State};
 
-handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = true} = State) ->
-    quicer:shutdown_connection(Conn),
-    next_reconnect(State);
+%% handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = true} = State) ->
+%%     quicer:shutdown_connection(Conn),
+%%     next_reconnect(State);
 
-handle_event(info, {quic, shutdown, _Stream}, _, State) ->
-    ?LOG(error, "QUIC_peer_conn_shutdown", #{}, State),
-    {stop, {shutdown, closed}, State};
+%% handle_event(info, {quic, shutdown, _Stream}, _, State) ->
+%%     ?LOG(error, "QUIC_peer_conn_shutdown", #{}, State),
+%%     {stop, {shutdown, closed}, State};
 
-handle_event(info, {quic, closed, _Stream}, _, State) ->
-    ?LOG(error, "QUIC_stream_closed", #{}, State),
-    keep_state_and_data;
+%% handle_event(info, {quic, closed, _Stream}, _, State) ->
+%%     ?LOG(error, "QUIC_stream_closed", #{}, State),
+%%     keep_state_and_data;
 
 %% Peer abort sending means the transport should be closed abruptly.
-handle_event(info, {quic, peer_send_aborted, _Stream, _ErrorCode}, _, State) ->
-    ?LOG(error, "QUIC_peer_send_aborted", #{}, State),
-    {stop, {shutdown, closed}, State};
-handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
-    ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
-    {stop, {shutdown, closed}, State};
+%% handle_event(info, {quic, peer_send_aborted, _Stream, _ErrorCode}, _, State) ->
+%%     ?LOG(error, "QUIC_peer_send_aborted", #{}, State),
+%%     {stop, {shutdown, closed}, State};
+%% handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
+%%     ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
+%%     {stop, {shutdown, closed}, State};
 
 handle_event(info, {'EXIT', Pid, normal}, StateName, State) ->
     ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
@@ -1823,3 +1847,11 @@ queue_fold(Fun, Acc0, {R, F}) when is_function(Fun, 2), is_list(R), is_list(F) -
     lists:foldr(Fun, Acc1, R);
 queue_fold(Fun, Acc0, Q) ->
     erlang:error(badarg, [Fun, Acc0, Q]).
+
+-spec maybe_init_quic_state(module(), #state{}) -> #state{}.
+maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid, reconnect = IsReconnect, parse_state = PS} = Old) ->
+    Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
+                                                  , parse_state => PS
+                                                  , reconnect => IsReconnect})};
+maybe_init_quic_state(_, Old) ->
+    Old.

@@ -46,8 +46,8 @@
 
 -opaque(parse_state() :: {none, options()} | cont_fun()).
 
--opaque(parse_result() :: {more, cont_fun()}
-                        | {ok, #mqtt_packet{}, binary(), parse_state()}).
+-type(parse_result() :: {more, cont_fun()}
+                      | {ok, #mqtt_packet{}, binary(), parse_state()}).
 
 -type(cont_fun() :: fun((binary()) -> parse_result())).
 

@@ -16,6 +16,9 @@
 
 -module(emqtt_quic).
 
+-include("logger.hrl").
+-include("emqtt.hrl").
+
 -ifndef(BUILD_WITHOUT_QUIC).
 -include_lib("quicer/include/quicer.hrl").
 -else.
@@ -23,6 +26,9 @@
 -define(QUICER_CONNECTION_EVENT_MASK_NST        , 1).
 -define(QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL      , 1).
 -endif.
+
+-define(LOG(Level, Msg, Meta, State),
+        ?SLOG(Level, Meta#{msg => Msg, clientid => maps:get(clientid, State)}, #{})).
 
 -export([ connect/4
         , send/2
@@ -35,12 +41,88 @@
         , sockname/1
         ]).
 
+-export([init_state/1]).
+
+%% state machine callback1
+-export([handle_info/3]).
+
+-export_type([ mqtt_packets/0
+             , quic_msg/0
+             ]).
+
+-type cb_data() :: #{ stream_opts := map()
+                    , clientid := binary()
+                    , state_name := gen_fsm:state_name()
+                    , is_local => boolean()
+                    , is_unidir => boolean()
+                    , quic_conn_cb => module()
+                    , quic_stream_cb => module()
+                    , reconnect => boolean()
+                    , peer_bidi_stream_count => non_neg_integer()
+                    , peer_unidi_stream_count => non_neg_integer()
+                    , parse_state := emqtt_frame:parse_state()
+                    }.
+-type mqtt_packets() :: [#mqtt_packet{}] | [].
+-type quic_msg() :: {quic, atom() | binary(), Resource::any(), Props::any()}.
+
+
+-spec init_state(map()) -> cb_data().
+init_state(#{ state_name := _S} = OldData) ->
+    OldData;
+init_state(Data) when is_map(Data) ->
+    Data#{ quic_conn_cb => emqtt_quic_connection
+         , quic_stream_cb => emqtt_quic_stream
+         , state_name => init
+         , is_local => true %% @TODO per stream
+         , is_unidir => false %% @TODO per stream
+         }.
+
+-spec handle_info(quic_msg(), gen_statem:state(), cb_data()) -> gen_statem:handle_event_result().
+%% Handle Quic Data
+handle_info({quic, Data, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
+  when is_binary(Data) ->
+    StreamCB:handle_stream_data(Stream, Data, Props, CBState#{state_name := StateName} );
+handle_info({quic, Event, Connection, Props}, StateName, #{quic_conn_cb := ConnCB} = CBState)
+  when connected =:= Event orelse
+       transport_shutdown =:= Event orelse
+       shutdown =:= Event orelse
+       closed =:= Event orelse
+       local_address_changed =:= Event orelse
+       peer_address_changed =:= Event orelse
+       streams_available =:= Event orelse
+       peer_needs_streams =:= Event orelse
+       nst_received =:= Event ->
+    ConnCB:Event(Connection, Props, CBState#{state_name := StateName});
+handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
+  when start_completed =:= Event orelse
+       send_complete =:= Event orelse
+       peer_send_complete =:= Event orelse
+       peer_send_aborted =:= Event orelse
+       peer_receive_aborted =:= Event orelse
+       send_shutdown_complete =:= Event orelse
+       stream_closed =:= Event orelse
+       peer_accepted =:= Event orelse
+       passive =:= Event ->
+    StreamCB:Event(Stream, Props, CBState#{state_name := StateName}).
+
+%% handle_info({quic, Bin, _Stream, _Props}, StateName, #{parse_state := PS} = QuicData)
+%%   when is_binary(Bin) ->
+%%     ?LOG(debug, "RECV_Data", #{data => Bin}, QuicData),
+%%     case parse(Bin, PS, []) of
+%%         {keep_state, NewPS, Packets} ->
+%%             {keep_state, QuicData#{parse_state := NewPS},
+%%              [{next_event, cast, P } || P <- lists:reverse(Packets)]};
+%%         {stop, _} = Stop ->
+%%             Stop
+%%     end.
+
 connect(Host, Port, Opts, Timeout) ->
     KeepAlive =  proplists:get_value(keepalive, Opts, 60),
     ConnOpts = [ {alpn, ["mqtt"]}
                , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 1}
+               , {verify, none}
                , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
