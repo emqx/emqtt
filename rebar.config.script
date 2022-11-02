@@ -47,7 +47,7 @@ NewProfiles = lists:foldl(fun(Key, Acc) ->
 
 NewConfig = lists:keystore(profiles, 1, CONFIG, {profiles, NewProfiles}),
 
-Quicer = {quicer, {git, "https://github.com/emqx/quic.git", {tag, "0.0.16"}}},
+Quicer = {quicer, {git, "https://github.com/qzhuyan/quic.git", {branch, "dev/william/multi-streams"}}},
 KillQuicer = fun(C) ->
                 {deps, Deps0} = lists:keyfind(deps, 1, C),
                 {erl_opts, ErlOpts0} = lists:keyfind(erl_opts, 1, C),
