@@ -37,12 +37,15 @@
 
 connect(Host, Port, Opts, Timeout) ->
     {ok, _} = application:ensure_all_started(gun),
-    %% 1. open connection
-    ConnOpts = #{connect_timeout => Timeout,
-                 retry => 3,
-                 retry_timeout => 30000
-                },
-    case gun:open(Host, Port, ConnOpts) of
+    ConnOpts = init_opts(
+                 Opts,
+                 #{connect_timeout => Timeout,
+                   retry => 3,
+                   retry_timeout => 30000,
+                   protocols => [http],
+                   transport_opts => []
+                  }),
+    case gun:open(maybe_ntoa(Host), Port, ConnOpts) of
         {ok, ConnPid} ->
             {ok, _} = gun:await_up(ConnPid, Timeout),
             case upgrade(ConnPid, Opts, Timeout) of
@@ -51,6 +54,22 @@ connect(Host, Port, Opts, Timeout) ->
             end;
         Error -> Error
     end.
+
+init_opts([], Acc) ->
+    Acc;
+init_opts([{ssl_opts, SslOpts} | More],
+          Acc = #{transport_opts := TransOpts}) ->
+    init_opts(More, Acc#{transport => tls, transport_opts => SslOpts ++ TransOpts});
+init_opts([{tcp_opts, TcpOpts} | More],
+          Acc = #{transport_opts := TransOpts}) ->
+    init_opts(More, Acc#{transport_opts => TcpOpts ++ TransOpts});
+init_opts([_ | More], Acc) ->
+    init_opts(More, Acc).
+
+maybe_ntoa(Host) when is_tuple(Host) ->
+    inet:ntoa(Host);
+maybe_ntoa(Domain) ->
+    Domain.
 
 -spec(upgrade(pid(), list(), timeout())
       -> {ok, Headers :: list()} | {error, Reason :: term()}).
