@@ -109,13 +109,19 @@ start_completed(_Stream, #{status := Other } = Prop, S) ->
 -spec handle_stream_data(stream_handle(), binary(), quicer:recv_data_props(), cb_data())
                         -> cb_ret().
 handle_stream_data(Stream, Bin, _Flags, #{ is_local := true
+                                         , control_stream_sock := {quic, Conn, ControlStream}
                                          , parse_state := PS} = S) ->
     ?LOG(debug, "RECV_Data", #{data => Bin}, S),
+    Via = case ControlStream == Stream of
+              true -> undefined; % convert it to default sock for backward compatibility
+              false -> {quic, Conn, Stream}
+          end,
     case parse(Bin, PS, []) of
         {keep_state, NewPS, Packets} ->
             quicer:setopt(Stream, active, once),
             {keep_state, S#{parse_state := NewPS},
-             [{next_event, cast, P } || P <- lists:reverse(Packets)]};
+             [{next_event, cast, {P, Via} }
+              || P <- lists:reverse(Packets)]};
         {stop, _} = Stop ->
             Stop
     end;

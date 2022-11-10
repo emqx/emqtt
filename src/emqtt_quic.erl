@@ -48,6 +48,7 @@
 
 -export_type([ mqtt_packets/0
              , quic_msg/0
+             , quic_sock/0
              ]).
 
 -type cb_data() :: #{ stream_opts := map()
@@ -61,8 +62,11 @@
                     , peer_bidi_stream_count => non_neg_integer()
                     , peer_unidi_stream_count => non_neg_integer()
                     , parse_state := emqtt_frame:parse_state()
+                    , control_stream_sock := undefined | quic_sock()
+                    , data_stream_socks := [quic_sock()]
                     }.
 -type mqtt_packets() :: [#mqtt_packet{}] | [].
+-type quic_sock() :: {quic, quicer:connection_handle(), quicer:stream_handle()}.
 -type quic_msg() :: {quic, atom() | binary(), Resource::any(), Props::any()}.
 
 
@@ -165,6 +169,8 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
     end.
 
 send({quic, _Conn, Stream}, Bin) ->
+    send(Stream, Bin);
+send(Stream, Bin) ->
     case quicer:async_send(Stream, Bin) of
         {ok, _Len} ->
             ok;

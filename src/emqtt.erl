@@ -39,6 +39,7 @@
 -export([ subscribe/2
         , subscribe/3
         , subscribe/4
+        , subscribe_via/4
         , publish/2
         , publish/3
         , publish/4
@@ -49,7 +50,9 @@
 
 -export([ publish_async/4
         , publish_async/5
+        , publish_async/6
         , publish_async/7
+        , publish_async/8
         ]).
 
 %% Puback...
@@ -106,6 +109,7 @@
              , subopt/0
              , mqtt_msg/0
              , client/0
+             , via/0
              ]).
 
 -type(host() :: inet:ip_address() | inet:hostname()).
@@ -181,6 +185,11 @@
 
 -type(client() :: pid() | atom()).
 
+-type via() :: undefined                                         % default, use socket in #state{}
+               | {new_data_stream, quicer:stream_opts()}         % create and use new long living data stream
+               | {new_req_stream, quicer:stream_opts()}          % @TODO create and use short lived req stream
+               | quicer:stream_handle().                         % reuse existing stream via stream handle
+
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
 
@@ -249,14 +258,16 @@
                            properties => undefined | properties()
                           }).
 
--type(inflight_publish() :: {publish,
+-type(inflight_publish() :: {via(),
+                             publish,
                              #mqtt_msg{},
                              sent_at(),
                              expire_at(),
                              mfas() | ?NO_HANDLER
                             }).
 
--type(inflight_pubrel() :: {pubrel,
+-type(inflight_pubrel() :: {via(),
+                            pubrel,
                             packet_id(),
                             sent_at(),
                             expire_at()
@@ -266,12 +277,12 @@
 
 -export_type([publish_success/0, publish_reply/0]).
 
--define(PUB_REQ(Msg, ExpireAt, Callback), {publish, Msg, ExpireAt, Callback}).
+-define(PUB_REQ(Via, Msg, ExpireAt, Callback), {publish, Via, Msg, ExpireAt, Callback}).
 
--define(INFLIGHT_PUBLISH(Msg, SentAt, ExpireAt, Callback),
+-define(INFLIGHT_PUBLISH(Via, Msg, SentAt, ExpireAt, Callback),
         {publish, Msg, SentAt, ExpireAt, Callback}).
 
--define(INFLIGHT_PUBREL(PacketId, SentAt, ExpireAt),
+-define(INFLIGHT_PUBREL(Via, PacketId, SentAt, ExpireAt),
         {pubrel, PacketId, SentAt, ExpireAt}).
 
 -record(call, {id, from, req, ts}).
@@ -391,6 +402,12 @@ subscribe(Client, Properties, Topic, Opts)
     when is_map(Properties), is_binary(Topic), is_list(Opts) ->
     subscribe(Client, Properties, [{Topic, Opts}]).
 
+-spec subscribe_via(client(), via(), properties(), [{topic(), subopt()}]) -> subscribe_ret().
+subscribe_via(Client, Via, Properties, Topics)
+  when is_map(Properties), is_list(Topics) ->
+    Topics1 = [{Topic, parse_subopt(Opts)} || {Topic, Opts} <- Topics],
+    gen_statem:call(Client, {subscribe, Via, Properties, Topics1}).
+
 parse_subopt(Opts) ->
     parse_subopt(Opts, #{rh => 0, rap => 0, nl => 0, qos => ?QOS_0}).
 
@@ -466,34 +483,47 @@ sync_publish_result(Caller, Mref, Result) ->
     erlang:send(Caller, {Mref, Result}).
 
 -spec(publish_async(client(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok).
-publish_async(Client, Topic, Payload, Callback) when is_binary(Topic) ->
-    publish_async(Client, Topic, #{}, Payload, [{qos, ?QOS_0}], infinity, Callback);
+publish_async(Client, Topic, Payload, Callback)  ->
+    publish_async(Client, _Via = undefined, Topic, Payload, Callback).
 
-publish_async(Client, Msg = #mqtt_msg{}, Timeout, Callback) ->
+-spec publish_async(client(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok;
+                   (client(), via(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok.
+publish_async(Client, Topic, Payload, QoS, Callback) when is_binary(Topic) ->
+    publish_async(Client, _Via = undefined, Topic, Payload, QoS, Callback);
+publish_async(Client, Via, Topic, Payload, Callback) when is_binary(Topic) ->
+    publish_async(Client, Via, Topic, #{}, Payload, [{qos, ?QOS_0}], infinity, Callback);
+publish_async(Client, Via, Msg = #mqtt_msg{}, Timeout, Callback) ->
     ExpireAt = case Timeout of
                     infinity -> infinity;
                     _ -> erlang:system_time(millisecond) + Timeout
                 end,
-    _ = erlang:send(Client, ?PUB_REQ(Msg, ExpireAt, Callback)),
+    _ = erlang:send(Client, ?PUB_REQ(Via, Msg, ExpireAt, Callback)),
     ok.
 
--spec(publish_async(client(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok).
-publish_async(Client, Topic, Payload, QoS, Callback) when is_binary(Topic), is_atom(QoS) ->
-    publish_async(Client, Topic, #{}, Payload, [{qos, ?QOS_I(QoS)}], infinity, Callback);
-publish_async(Client, Topic, Payload, QoS, Callback) when is_binary(Topic), ?IS_QOS(QoS) ->
-    publish_async(Client, Topic, #{}, Payload, [{qos, QoS}], infinity, Callback);
-publish_async(Client, Topic, Payload, Opts, Callback) when is_binary(Topic), is_list(Opts) ->
-    publish_async(Client, Topic, #{}, Payload, Opts, infinity, Callback).
+-spec(publish_async(client(), via(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok).
+publish_async(Client, Via, Topic, Payload, QoS, Callback) when is_binary(Topic), is_atom(QoS) ->
+    publish_async(Client, Via, Topic, #{}, Payload, [{qos, ?QOS_I(QoS)}], infinity, Callback);
+publish_async(Client, Via, Topic, Payload, QoS, Callback) when is_binary(Topic), ?IS_QOS(QoS) ->
+    publish_async(Client, Via, Topic, #{}, Payload, [{qos, QoS}], infinity, Callback);
+publish_async(Client, Via,Topic, Payload, Opts, Callback) when is_binary(Topic), is_list(Opts) ->
+    publish_async(Client, Via, Topic, #{}, Payload, Opts, infinity, Callback).
 
 -spec(publish_async(client(), topic(), properties(), payload(), [pubopt()],
                     timeout(), mfas())
       -> ok).
-publish_async(Client, Topic, Properties, Payload, Opts, Timeout, Callback)
+publish_async(Client, Topic, Properties, Payload, Opts, Timeout, Callback) ->
+    publish_async(Client, _Via = undefined, Topic, Properties, Payload, Opts, Timeout, Callback).
+
+-spec(publish_async(client(), via(), topic(), properties(), payload(), [pubopt()],
+                    timeout(), mfas())
+      -> ok).
+publish_async(Client, Via, Topic, Properties, Payload, Opts, Timeout, Callback)
     when is_binary(Topic), is_map(Properties), is_list(Opts) ->
     ok = emqtt_props:validate(Properties),
     Retain = proplists:get_bool(retain, Opts),
     QoS = ?QOS_I(proplists:get_value(qos, Opts, ?QOS_0)),
     publish_async(Client,
+                  Via,
                   #mqtt_msg{qos     = QoS,
                             retain  = Retain,
                             topic   = Topic,
@@ -793,8 +823,9 @@ do_connect(ConnMod, #state{sock_opts = SockOpts,
     State0 = maybe_init_quic_state(ConnMod, State),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         {ok, Sock} ->
-            State1 = qoe_inject(handshaked, State0),
-            mqtt_connect(run_sock(State1#state{conn_mod = ConnMod, socket = Sock}));
+            State1 = maybe_update_ctrl_sock(ConnMod, State0, Sock),
+            State2 = qoe_inject(handshaked, State1),
+            mqtt_connect(run_sock(State2#state{conn_mod = ConnMod, socket = Sock}));
         {error, Reason} ->
             {sock_error, Reason}
     end.
@@ -841,9 +872,11 @@ reconnect({call, From}, stop, _State) ->
 reconnect(_EventType, _, _State) ->
     {keep_state_and_data, postpone}.
 
-waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
+waiting_for_connack(cast, #mqtt_packet{} = P, State) ->
+    waiting_for_connack(cast, {P, _Via = undefined}, State);
+waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
-                                          Properties),
+                                          Properties), _Via},
                     State = #state{properties = AllProps,
                                    clientid = ClientId,
                                    inflight = Inflight
@@ -867,9 +900,9 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
             {next_state, connected, State3, Retry}
     end;
 
-waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
-                                          _SessPresent,
-                                          Properties),
+waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
+                                           _SessPresent,
+                                           Properties), undefined}, %% connect always use default(control) stream
                     State = #state{proto_ver = ProtoVer}) ->
     Reason = reason_code_name(ReasonCode, ProtoVer),
     case take_call(connect, State) of
@@ -920,11 +953,14 @@ connected({call, From}, resume, State) ->
 connected({call, From}, clientid, #state{clientid = ClientId}) ->
     {keep_state_and_data, [{reply, From, ClientId}]};
 
-connected({call, From}, SubReq = {subscribe, Properties, Topics},
+connected({call, From}, {subscribe, Properties, Topics}, State) ->
+    connected({call, From}, {subscribe, _Via = undefined, Properties, Topics}, State);
+connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
           State = #state{last_packet_id = PacketId, subscriptions = Subscriptions}) ->
-    case send(?SUBSCRIBE_PACKET(PacketId, Properties, Topics), State) of
+    {Via, State1} = maybe_new_stream(Via0, State),
+    case send(Via, ?SUBSCRIBE_PACKET(PacketId, Properties, Topics), State1) of
         {ok, NewState} ->
-            Call = new_call({subscribe, PacketId}, From, SubReq),
+            Call = new_call({subscribe, Via, PacketId}, From, SubReq),
             Subscriptions1 =
                 lists:foldl(fun({Topic, Opts}, Acc) ->
                                 maps:put(Topic, Opts, Acc)
@@ -934,20 +970,24 @@ connected({call, From}, SubReq = {subscribe, Properties, Topics},
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
 
-connected({call, From}, UnsubReq = {unsubscribe, Properties, Topics},
+connected({call, From}, {unsubscribe, Properties, Topics}, State) ->
+    connected({call, From}, {unsubscribe, _Via = undefined, Properties, Topics}, State);
+connected({call, From}, UnsubReq = {unsubscribe, Via, Properties, Topics},
           State = #state{last_packet_id = PacketId}) ->
-    case send(?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State) of
+    case send(Via, ?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State) of
         {ok, NewState} ->
-            Call = new_call({unsubscribe, PacketId}, From, UnsubReq),
+            Call = new_call({unsubscribe, Via, PacketId}, From, UnsubReq),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
 
 connected({call, From}, ping, State) ->
+    connected({call, From}, {ping, _Via = undefined}, State);
+connected({call, From}, {ping, Via}, State) ->
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
-            Call = new_call(ping, From),
+            Call = new_call({ping, Via}, From),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
@@ -962,43 +1002,56 @@ connected({call, From}, {disconnect, ReasonCode, Properties}, State) ->
     end;
 
 connected(cast, {puback, PacketId, ReasonCode, Properties}, State) ->
-    send_puback(?PUBACK_PACKET(PacketId, ReasonCode, Properties), State);
+    connected(cast, {puback, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+connected(cast, {puback, Via, PacketId, ReasonCode, Properties}, State) ->
+    send_puback(Via, ?PUBACK_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubrec, PacketId, ReasonCode, Properties}, State) ->
-    send_puback(?PUBREC_PACKET(PacketId, ReasonCode, Properties), State);
+    connected(cast, {pubrec, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+connected(cast, {pubrec, Via, PacketId, ReasonCode, Properties}, State) ->
+    send_puback(Via, ?PUBREC_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubrel, PacketId, ReasonCode, Properties}, State) ->
-    send_puback(?PUBREL_PACKET(PacketId, ReasonCode, Properties), State);
+    connected(cast, {pubrel, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+connected(cast, {pubrel, Via, PacketId, ReasonCode, Properties}, State) ->
+    send_puback(Via, ?PUBREL_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubcomp, PacketId, ReasonCode, Properties}, State) ->
-    send_puback(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties), State);
+    connected(cast, {pubcomp, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+connected(cast, {pubcomp, Via, PacketId, ReasonCode, Properties}, State) ->
+    send_puback(Via, ?PUBCOMP_PACKET(PacketId, ReasonCode, Properties), State);
 
-connected(cast, ?PUBLISH_PACKET(_QoS, _PacketId), #state{paused = true}) ->
+
+connected(cast, #mqtt_packet{} = P, State) ->
+    connected(cast, {P, _Via = undefined}, State);
+
+connected(cast, {?PUBLISH_PACKET(_QoS, _PacketId), _Via}, #state{paused = true}) ->
+    %% @FIXME what it get dropped?
     keep_state_and_data;
 
-connected(cast, Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), State) ->
-     {keep_state, deliver(packet_to_msg(Packet), State)};
+connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), Via}, State) ->
+     {keep_state, deliver(Via, packet_to_msg(Packet), State)};
 
-connected(cast, Packet = ?PUBLISH_PACKET(?QOS_1, _PacketId), State) ->
-    publish_process(?QOS_1, Packet, State);
+connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_1, _PacketId), Via}, State) ->
+    publish_process(Via, ?QOS_1, Packet, State);
 
-connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
-    publish_process(?QOS_2, Packet, State);
+connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), Via}, State) ->
+    publish_process(Via, ?QOS_2, Packet, State);
 
-connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
-    maybe_shoot(ack_inflight(PubAck, State));
+connected(cast, {?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, Via}, State) ->
+    maybe_shoot(ack_inflight(Via, PubAck, State));
 
-connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode, _Properties) = PubRec, State) ->
-    send_puback(?PUBREL_PACKET(PacketId), ack_inflight(PubRec, State));
+connected(cast, {?PUBREC_PACKET(PacketId, _ReasonCode, _Properties) = PubRec, Via}, State) ->
+    send_puback(Via, ?PUBREL_PACKET(PacketId), ack_inflight(Via, PubRec, State));
 
 %%TODO::... if auto_ack is false, should we take PacketId from the map?
-connected(cast, ?PUBREL_PACKET(PacketId),
+connected(cast, {?PUBREL_PACKET(PacketId), Via},
           State = #state{awaiting_rel = AwaitingRel, auto_ack = AutoAck}) ->
      case maps:take(PacketId, AwaitingRel) of
          {Packet, AwaitingRel1} ->
-             NewState = deliver(packet_to_msg(Packet), State#state{awaiting_rel = AwaitingRel1}),
+             NewState = deliver(Via, packet_to_msg(Packet), State#state{awaiting_rel = AwaitingRel1}),
              case AutoAck of
-                 true  -> send_puback(?PUBCOMP_PACKET(PacketId), NewState);
+                 true  -> send_puback(Via, ?PUBCOMP_PACKET(PacketId), NewState);
                  false -> {keep_state, NewState}
              end;
          error ->
@@ -1006,12 +1059,12 @@ connected(cast, ?PUBREL_PACKET(PacketId),
              keep_state_and_data
      end;
 
-connected(cast, ?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, State) ->
-    maybe_shoot(ack_inflight(PubComp, State));
+connected(cast, {?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, Via}, State) ->
+    maybe_shoot(ack_inflight(Via, PubComp, State));
 
-connected(cast, ?SUBACK_PACKET(PacketId, Properties, ReasonCodes),
+connected(cast, {?SUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
           State = #state{subscriptions = _Subscriptions}) ->
-    case take_call({subscribe, PacketId}, State) of
+    case take_call({subscribe, Via, PacketId}, State) of
         {value, #call{from = From}, NewState} ->
             %%TODO: Merge reason codes to subscriptions?
             Reply = {ok, Properties, ReasonCodes},
@@ -1020,9 +1073,9 @@ connected(cast, ?SUBACK_PACKET(PacketId, Properties, ReasonCodes),
             keep_state_and_data
     end;
 
-connected(cast, ?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes),
+connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
           State = #state{subscriptions = Subscriptions}) ->
-    case take_call({unsubscribe, PacketId}, State) of
+    case take_call({unsubscribe, Via, PacketId}, State) of
         {value, #call{from = From, req = {_, _, Topics}}, NewState} ->
             Subscriptions1 =
               lists:foldl(fun(Topic, Acc) ->
@@ -1034,17 +1087,17 @@ connected(cast, ?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes),
             keep_state_and_data
     end;
 
-connected(cast, ?PACKET(?PINGRESP), #state{pending_calls = []}) ->
+connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []}) ->
     keep_state_and_data;
-connected(cast, ?PACKET(?PINGRESP), State) ->
-    case take_call(ping, State) of
+connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
+    case take_call({ping, Via}, State) of
         {value, #call{from = From}, NewState} ->
             {keep_state, NewState, [{reply, From, pong}]};
         false ->
             keep_state_and_data
     end;
 
-connected(cast, ?DISCONNECT_PACKET(ReasonCode, Properties), State) ->
+connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
 connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
@@ -1092,10 +1145,10 @@ connected(info, {timeout, TRef, retry}, State0 = #state{retry_timer = TRef,
         false -> retry_send(State)
     end;
 
-connected(info, ?PUB_REQ(#mqtt_msg{qos = ?QOS_0}, _ExpireAt, _Callback) = PubReq, State0) ->
+connected(info, ?PUB_REQ(_Via, #mqtt_msg{qos = ?QOS_0}, _ExpireAt, _Callback) = PubReq, State0) ->
     shoot(PubReq, State0);
 
-connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _ExpireAt, _Callback) = PubReq,
+connected(info, ?PUB_REQ(_Via, #mqtt_msg{qos = QoS}, _ExpireAt, _Callback) = PubReq,
           State0 = #state{pendings = Pendings0})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
     Pendings = enqueue_publish_req(PubReq, Pendings0),
@@ -1338,8 +1391,8 @@ shoot(State = #state{pendings = Pendings}) ->
     {PubReq, NPendings} = dequeue_publish_req(Pendings),
     shoot(PubReq, State#state{pendings = NPendings}).
 
-shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
-    case send(Msg, State) of
+shoot(?PUB_REQ(Via, Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
+    case send(Via, Msg, State) of
         {ok, NState} ->
             eval_callback_handler(ok, Callback),
             maybe_shoot(NState);
@@ -1347,15 +1400,15 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
             eval_callback_handler({error, Reason}, Callback),
             shutdown(Reason, State)
     end;
-shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
+shoot(?PUB_REQ(Via, Msg = #mqtt_msg{qos = QoS}, ExpireAt, Callback),
       State = #state{last_packet_id = PacketId, inflight = Inflight})
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
     Msg1 = Msg#mqtt_msg{packet_id = PacketId},
-    case send(Msg1, State) of
+    case send(Via, Msg1, State) of
         {ok, NState} ->
             {ok, Inflight1} = emqtt_inflight:insert(
-                                PacketId,
-                                ?INFLIGHT_PUBLISH(Msg1, now_ts(), ExpireAt, Callback),
+                                {Via, PacketId},
+                                ?INFLIGHT_PUBLISH(Via, Msg1, now_ts(), ExpireAt, Callback),
                                 Inflight
                                ),
             State1 = ensure_retry_timer(NState#state{inflight = Inflight1}),
@@ -1378,12 +1431,12 @@ dequeue_publish_req(Pendings = #{requests := Reqs, count := Cnt}) when Cnt > 0 -
     {PubReq,
      Pendings#{requests := NReqs, count := Cnt - 1}}.
 
-ack_inflight(
+ack_inflight(Via,
   ?PUBACK_PACKET(PacketId, ReasonCode, Properties),
   State = #state{inflight = Inflight}
  ) ->
-    case emqtt_inflight:delete(PacketId, Inflight) of
-        {{value, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)}, NInflight} ->
+    case emqtt_inflight:delete({Via, PacketId}, Inflight) of
+        {{value, ?INFLIGHT_PUBLISH(_Via, _Msg, _SentAt, _ExpireAt, Callback)}, NInflight} ->
             eval_callback_handler(
               {ok, #{packet_id => PacketId,
                      reason_code => ReasonCode,
@@ -1396,37 +1449,37 @@ ack_inflight(
             State
     end;
 
-ack_inflight(
+ack_inflight(Via,
   ?PUBREC_PACKET(PacketId, ReasonCode, Properties),
   State = #state{inflight = Inflight}
  ) ->
-    case emqtt_inflight:delete(PacketId, Inflight) of
-        {{value, ?INFLIGHT_PUBLISH(_Msg, _SentAt, ExpireAt, Callback)}, Inflight1} ->
+    case emqtt_inflight:delete({Via, PacketId}, Inflight) of
+        {{value, ?INFLIGHT_PUBLISH(Via, _Msg, _SentAt, ExpireAt, Callback)}, Inflight1} ->
             eval_callback_handler(
               {ok, #{packet_id => PacketId,
                      reason_code => ReasonCode,
                      reason_code_name => reason_code_name(ReasonCode),
                      properties => Properties}}, Callback),
             {ok, NInflight} = emqtt_inflight:insert(
-                                PacketId,
-                                ?INFLIGHT_PUBREL(PacketId, now_ts(), ExpireAt),
+                                {Via, PacketId},
+                                ?INFLIGHT_PUBREL(Via, PacketId, now_ts(), ExpireAt),
                                 Inflight1
                                ),
             State#state{inflight = NInflight};
-         {{value, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)}, _} ->
-            ?LOG(notice, "duplicated_PUBREC_packet", #{packet_id => PacketId}, State),
+         {{value, ?INFLIGHT_PUBREL(Via, _PacketId, _SentAt, _ExpireAt)}, _} ->
+            ?LOG(notice, "duplicated_PUBREC_packet", #{via => Via, packet_id => PacketId}, State),
             State;
         error ->
-            ?LOG(warning, "unexpected_PUBREC_packet", #{packet_id => PacketId}, State),
+            ?LOG(warning, "unexpected_PUBREC_packet", #{via => Via, packet_id => PacketId}, State),
             State
     end;
 
-ack_inflight(
+ack_inflight(Via,
   ?PUBCOMP_PACKET(PacketId, _ReasonCode, _Properties),
   State = #state{inflight = Inflight}
  ) ->
-    case emqtt_inflight:delete(PacketId, Inflight) of
-        {{value, ?INFLIGHT_PUBREL(_PacketId, _SentAt, _ExpireAt)}, NInflight} ->
+    case emqtt_inflight:delete({Via, PacketId}, Inflight) of
+        {{value, ?INFLIGHT_PUBREL(Via, _PacketId, _SentAt, _ExpireAt)}, NInflight} ->
             State#state{inflight = NInflight};
         error ->
             ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
@@ -1441,7 +1494,7 @@ drop_expired(Pendings) ->
 drop_expired(Pendings = #{count := 0}, _Now) ->
     Pendings;
 drop_expired(Pendings = #{requests := Reqs}, Now) ->
-    {value, ?PUB_REQ(_Msg, ExpireAt, Callback)} = queue:peek(Reqs),
+    {value, ?PUB_REQ(_Via, _Msg, ExpireAt, Callback)} = queue:peek(Reqs),
     case Now > ExpireAt of
         true ->
             {_Dropped, NPendings} = dequeue_publish_req(Pendings),
@@ -1461,16 +1514,16 @@ assign_id(?NO_CLIENT_ID, Props) ->
 assign_id(Id, _Props) ->
     Id.
 
-publish_process(?QOS_1, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
+publish_process(Via, ?QOS_1, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
                 State0 = #state{auto_ack = AutoAck}) ->
     State = deliver(packet_to_msg(Packet), State0),
     case AutoAck of
-        true  -> send_puback(?PUBACK_PACKET(PacketId), State);
+        true  -> send_puback(Via, ?PUBACK_PACKET(PacketId), State);
         false -> {keep_state, State}
     end;
-publish_process(?QOS_2, Packet = ?PUBLISH_PACKET(?QOS_2, PacketId),
+publish_process(Via, ?QOS_2, Packet = ?PUBLISH_PACKET(?QOS_2, PacketId),
     State = #state{awaiting_rel = AwaitingRel}) ->
-    case send_puback(?PUBREC_PACKET(PacketId), State) of
+    case send_puback(Via, ?PUBREC_PACKET(PacketId), State) of
         {keep_state, NewState} ->
             AwaitingRel1 = maps:put(PacketId, Packet, AwaitingRel),
             {keep_state, NewState#state{awaiting_rel = AwaitingRel1}};
@@ -1533,9 +1586,9 @@ do_ensure_retry_timer(Interval, State = #state{retry_timer = undefined}) when In
 do_ensure_retry_timer(_Interval, State) ->
     State.
 
-sent_at(?INFLIGHT_PUBLISH(_, SentAt, _, _)) ->
+sent_at(?INFLIGHT_PUBLISH(_Via, _, SentAt, _, _)) ->
     SentAt;
-sent_at(?INFLIGHT_PUBREL(_, SentAt, _)) ->
+sent_at(?INFLIGHT_PUBREL(_Via, _, SentAt, _)) ->
     SentAt.
 
 retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
@@ -1550,23 +1603,23 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
               shutdown(Reason, State)
     end.
 
-retry_send(Now, [{PacketId, ?INFLIGHT_PUBLISH(Msg, _, ExpireAt, Callback)} | More],
+retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(Via, Msg, _, ExpireAt, Callback)} | More],
            State = #state{inflight = Inflight}) ->
     Msg1 = Msg#mqtt_msg{dup = true},
-    case send(Msg1, State) of
+    case send(Via, Msg1, State) of
         {ok, NState} ->
-            NInflightReq = ?INFLIGHT_PUBLISH(Msg1, Now, ExpireAt, Callback),
-            {ok, NInflight} = emqtt_inflight:update(PacketId, NInflightReq, Inflight),
+            NInflightReq = ?INFLIGHT_PUBLISH(Via, Msg1, Now, ExpireAt, Callback),
+            {ok, NInflight} = emqtt_inflight:update({Via, PacketId}, NInflightReq, Inflight),
             retry_send(Now, More, NState#state{inflight = NInflight});
         {error, Reason} ->
             error(Reason)
     end;
-retry_send(Now, [{PacketId, ?INFLIGHT_PUBREL(PacketId, _, ExpireAt)} | More],
+retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBREL(Via, PacketId, _, ExpireAt)} | More],
            State = #state{inflight = Inflight}) ->
-    case send(?PUBREL_PACKET(PacketId), State) of
+    case send(Via, ?PUBREL_PACKET(PacketId), State) of
         {ok, NState} ->
-            NInflightReq = ?INFLIGHT_PUBREL(PacketId, Now, ExpireAt),
-            {ok, NInflight} = emqtt_inflight:update(PacketId, NInflightReq, Inflight),
+            NInflightReq = ?INFLIGHT_PUBREL(Via, PacketId, Now, ExpireAt),
+            {ok, NInflight} = emqtt_inflight:update({Via, PacketId}, NInflightReq, Inflight),
             retry_send(Now, More, NState#state{inflight = NInflight});
         {error, Reason} ->
             error(Reason)
@@ -1574,8 +1627,11 @@ retry_send(Now, [{PacketId, ?INFLIGHT_PUBREL(PacketId, _, ExpireAt)} | More],
 retry_send(_Now, [], State) ->
     State.
 
-deliver(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
-                  topic = Topic, props = Props, payload = Payload},
+deliver(#mqtt_msg{} = Msg, State) ->
+    deliver(undefined, #mqtt_msg{} = Msg, State).
+
+deliver(_Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
+                       topic = Topic, props = Props, payload = Payload},
         State) ->
     Msg = #{qos => QoS, dup => Dup, retain => Retain, packet_id => PacketId,
             topic => Topic, properties => Props, payload => Payload,
@@ -1642,14 +1698,14 @@ shutdown(Reason, State) ->
 reply_all_pendings_reqs(Reason, #state{pendings = Pendings, inflight = Inflight}) ->
     %% reply to all pendings caller
     emqtt_inflight:foreach(
-      fun(_PacketId, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)) ->
+      fun(_PacketId, ?INFLIGHT_PUBLISH(Via, _Msg, _SentAt, _ExpireAt, Callback)) ->
               eval_callback_handler({error, Reason}, Callback);
          (_PacketId, _InflightPubReql) ->
               ok
       end, Inflight),
     Reqs = maps:get(requests, Pendings),
     _ = queue_fold(
-          fun(?PUB_REQ(_, _, Callback), _) ->
+          fun(?PUB_REQ(_, _, _, Callback), _) ->
                   eval_callback_handler({error, Reason}, Callback)
           end, ok, Reqs),
     ok.
@@ -1696,19 +1752,28 @@ hosts(#state{hosts = [], host = Host, port = Port}) ->
     [{Host, Port}];
 hosts(#state{hosts = Hosts}) -> Hosts.
 
-send_puback(Packet, State) ->
-    case send(Packet, State) of
+send_puback(Via, Packet, State) ->
+    case send(Via, Packet, State) of
         {ok, NewState}  -> {keep_state, NewState};
         {error, Reason} -> {stop, {shutdown, Reason}}
     end.
 
-send(Msg, State) when is_record(Msg, mqtt_msg) ->
-    send(msg_to_packet(Msg), State);
+send(Msg, State) ->
+    send(undefined, Msg, State).
 
-send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
+send(Via, Msg, State) when is_record(Msg, mqtt_msg) ->
+    send(Via, msg_to_packet(Msg), State);
+
+send(undefined, Packet, State = #state{socket = Socket}) ->
+    send(Socket, Packet, State);
+%% send({new_data_stream, StreamOpts}, Packet, State = #state{socket = {quic, Conn, _CtrlStream}, extra = Extra}) ->
+%%     {ok, NewStream} =  quicer:start_stream(Conn, StreamOpts),
+%%     NewSock = {quic, Conn, NewStream},
+%%     send(NewSock, Packet, );
+send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
-    ?LOG(debug, "SEND_Data", #{packet => Packet}, State),
+    ?LOG(debug, "SEND_Data", #{packet => Packet, socket => Sock}, State),
     case ConnMod:send(Sock, Data) of
         ok  -> {ok, bump_last_packet_id(State)};
         Error -> Error
@@ -1852,6 +1917,30 @@ queue_fold(Fun, Acc0, Q) ->
 maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid, reconnect = IsReconnect, parse_state = PS} = Old) ->
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , parse_state => PS
+                                                  , data_stream_socks => []
+                                                  , control_stream_sock => undefined
                                                   , reconnect => IsReconnect})};
 maybe_init_quic_state(_, Old) ->
     Old.
+
+update_data_streams(#{data_stream_socks := Socks} = Extra, NewSock) ->
+    Extra#{data_stream_socks := [ NewSock | Socks]}.
+
+
+maybe_update_ctrl_sock(emqtt_quic, #state{extra = OldExtra} = OldState, Sock) ->
+    OldState#state{extra = OldExtra#{control_stream_sock := Sock}};
+maybe_update_ctrl_sock(_, Old, _) ->
+    Old.
+
+
+-spec maybe_new_stream(via(), #state{}) -> {undefined |emqtt_quic:quic_sock(), #state{}}.
+maybe_new_stream(undefined, S) ->
+    {undefined, S};
+maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
+                                                       socket = {quic, Conn, _Stream},
+                                                       extra = Extra
+                                                      } = State) ->
+    {ok, NewStream} =  quicer:start_stream(Conn, StreamOpts),
+    NewSock = {quic, Conn, NewStream},
+    NewState = State#state{extra = update_data_streams(Extra, NewSock)},
+    {NewSock, NewState}.
