@@ -49,7 +49,7 @@ all() ->
     ].
 
 groups() ->
-    [{general, [non_parallel_tests],
+    [{general, [],
       [t_connect,
        t_connect_timeout,
        t_ws_connect,
@@ -78,9 +78,9 @@ groups() ->
        t_pause_resume,
        t_init,
        t_connected]},
-    {mqttv3,[non_parallel_tests],
+    {mqttv3,[],
       [basic_test_v3]},
-    {mqttv4, [non_parallel_tests],
+    {mqttv4, [],
       [basic_test_v4,
        %% anonymous_test,
        retry_interval_test,
@@ -90,7 +90,7 @@ groups() ->
        overlapping_subscriptions_test,
        redelivery_on_reconnect_test,
        dollar_topics_test]},
-    {mqttv5, [non_parallel_tests],
+    {mqttv5, [],
       [basic_test_v5,
        retain_as_publish_test]},
      {quic, [], [ {group, general}
@@ -484,7 +484,7 @@ test_publish_port_error_retry(Config) ->
     {ok, C} = emqtt:start_link([{clean_start, true},
                                 {port, Port},
                                 %% no timer based retry, test state transition retry
-                                {retry_interval, 1000},
+                                {retry_interval, 1},
                                 {reconnect, true},
                                 %% seconds
                                 {connect_timeout, 2}
@@ -957,7 +957,7 @@ retry_interval_test(Config) ->
     ConnFun = ?config(conn_fun, Config),
     Port = ?config(port, Config),
 
-    {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 1}, {port, Port}]),
+    {ok, Pub} = emqtt:start_link([{clean_start, true}, {retry_interval, 2}, {port, Port}]),
     {ok, _} = emqtt:ConnFun(Pub),
 
     CRef = counters:new(1, [atomics]),
@@ -968,10 +968,19 @@ retry_interval_test(Config) ->
     meck:new(emqtt_quic, [passthrough, no_history]),
     meck:expect(emqtt_quic, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
 
-    ok = emqtt:publish_async(Pub, nth(1, ?TOPICS), <<"qos 1">>, 1, fun(_) -> ok end),
+    ok = emqtt:publish_async(Pub, nth(1, ?TOPICS), <<"msg1">>, 1, fun(_) -> ok end),
+
+    timer:sleep(timer:seconds(1)),
+    ok = emqtt:publish_async(Pub, nth(1, ?TOPICS), <<"msg2">>, 1, fun(_) -> ok end),
 
     timer:sleep(timer:seconds(2)),
-    ?assertEqual(2, counters:get(CRef, 1)),
+    %% msg1 resent once
+    ?assertEqual(3, counters:get(CRef, 1)),
+
+    timer:sleep(timer:seconds(2)),
+    %% msg1 resent twice
+    %% msg2 resent once
+    ?assertEqual(5, counters:get(CRef, 1)),
 
     meck:unload(emqtt_sock),
     meck:unload(emqtt_quic),

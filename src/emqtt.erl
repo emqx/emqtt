@@ -1518,7 +1518,7 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
     try
         Now = now_ts(),
         Pred = fun(_, InflightReq) ->
-                       (sent_at(InflightReq) + timer:seconds(Intv)) > Now
+                       (sent_at(InflightReq) + Intv) =< Now
                end,
         NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
         {keep_state, ensure_retry_timer(NState)}
