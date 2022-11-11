@@ -136,6 +136,8 @@ passive(_Stream, undefined, _S)->
     keep_state_and_data.
 
 -spec stream_closed(stream_handle(), stream_closed_props(), cb_data()) -> cb_ret().
+stream_closed(_Stream, #{ is_conn_shutdown := true }, #{reconnect := true}) ->
+    keep_state_and_data;
 stream_closed(_Stream, #{ is_conn_shutdown := IsConnShutdown
                         , is_app_closing := IsAppClosing
                         , is_shutdown_by_app := IsAppShutdown

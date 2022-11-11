@@ -972,9 +972,10 @@ connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
 
 connected({call, From}, {unsubscribe, Properties, Topics}, State) ->
     connected({call, From}, {unsubscribe, _Via = undefined, Properties, Topics}, State);
-connected({call, From}, UnsubReq = {unsubscribe, Via, Properties, Topics},
+connected({call, From}, UnsubReq = {unsubscribe, Via0, Properties, Topics},
           State = #state{last_packet_id = PacketId}) ->
-    case send(Via, ?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State) of
+    {Via, State1} = maybe_new_stream(Via0, State),
+    case send(Via, ?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State1) of
         {ok, NewState} ->
             Call = new_call({unsubscribe, Via, PacketId}, From, UnsubReq),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
@@ -984,8 +985,9 @@ connected({call, From}, UnsubReq = {unsubscribe, Via, Properties, Topics},
 
 connected({call, From}, ping, State) ->
     connected({call, From}, {ping, _Via = undefined}, State);
-connected({call, From}, {ping, Via}, State) ->
-    case send(?PACKET(?PINGREQ), State) of
+connected({call, From}, {ping, Via0}, State) ->
+    {Via, State1} = maybe_new_stream(Via0, State),
+    case send(Via, ?PACKET(?PINGREQ), State1) of
         {ok, NewState} ->
             Call = new_call({ping, Via}, From),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
@@ -994,7 +996,10 @@ connected({call, From}, {ping, Via}, State) ->
     end;
 
 connected({call, From}, {disconnect, ReasonCode, Properties}, State) ->
-    case send(?DISCONNECT_PACKET(ReasonCode, Properties), State) of
+    connected({call, From}, {disconnect, _Via = undefined, ReasonCode, Properties}, State);
+connected({call, From}, {disconnect, Via0, ReasonCode, Properties}, State) ->
+    {Via, State1} = maybe_new_stream(Via0, State),
+    case send(Via, ?DISCONNECT_PACKET(ReasonCode, Properties), State1) of
         {ok, NewState} ->
             {stop_and_reply, normal, [{reply, From, ok}], NewState};
         Error = {error, Reason} ->
@@ -1076,7 +1081,7 @@ connected(cast, {?SUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
 connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
           State = #state{subscriptions = Subscriptions}) ->
     case take_call({unsubscribe, Via, PacketId}, State) of
-        {value, #call{from = From, req = {_, _, Topics}}, NewState} ->
+        {value, #call{from = From, req = {_, Via, _, Topics}}, NewState} ->
             Subscriptions1 =
               lists:foldl(fun(Topic, Acc) ->
                               maps:remove(Topic, Acc)
@@ -1177,7 +1182,7 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
 
 handle_event(info, {Error, Sock, Reason}, connected,
              #state{reconnect = true, socket = Sock} = State)
-    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
+    when Error =:= tcp_error; Error =:= ssl_error; Error =:= quic_error; Error =:= 'EXIT' ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
     case Error of
@@ -1194,7 +1199,7 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = true } = State)
-    when Closed =:= tcp_closed; Closed =:= ssl_closed ->
+    when Closed =:= tcp_closed; Closed =:= ssl_closed; Closed =:= quic_closed ->
     next_reconnect(State);
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1928,7 +1933,9 @@ update_data_streams(#{data_stream_socks := Socks} = Extra, NewSock) ->
 
 
 maybe_update_ctrl_sock(emqtt_quic, #state{extra = OldExtra} = OldState, Sock) ->
-    OldState#state{extra = OldExtra#{control_stream_sock := Sock}};
+    OldState#state{ extra = OldExtra#{control_stream_sock := Sock}
+                  , socket = Sock
+                  };
 maybe_update_ctrl_sock(_, Old, _) ->
     Old.
 

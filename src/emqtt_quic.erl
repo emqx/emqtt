@@ -174,6 +174,8 @@ send(Stream, Bin) ->
     case quicer:async_send(Stream, Bin) of
         {ok, _Len} ->
             ok;
+        {error, ErrorType, Reason} ->
+            {error, {ErrorType, Reason}};
         Other ->
             Other
     end.
@@ -191,7 +193,6 @@ setopts({quic, _Conn, Stream}, Opts) ->
 
 close({quic, Conn, Stream}) ->
     quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0),
-    timer:sleep(100),
     quicer:close_connection(Conn).
 
 sockname({quic, Conn, _Stream}) ->

@@ -238,15 +238,24 @@ t_reconnect_enabled(Config) ->
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
+    false = retry_if_errors([true], fun emqx:is_running/0),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             ct:fail(conn_dead)
     after 100 ->
             timer:apply_after(5000, emqtt_test_lib, start_emqx, []),
+            true = retry_if_errors([false], fun emqx:is_running/0),
+            ct:pal("emqx is up"),
+            connected = retry_if_errors([reconnect, waiting_for_connack],
+                                       fun() ->
+                                               {StateName, _Data} = sys:get_state(C),
+                                               StateName
+                                       end),
+            ct:pal("Old client is reconnected"),
             {ok, _, [0]} = emqtt:subscribe(C, Topic),
-            {ok, C2} = emqtt:start_link([{port, Port}]),
-            {ok, _} = emqtt:ConnFun(C2),
+            {ok, C2} = emqtt:start_link([{port, Port}, {reconnect, true}]),
             [{Topic, #{qos := 0}}] = emqtt:subscriptions(C),
+            {ok, _} = emqtt:ConnFun(C2),
             {ok, _} = emqtt:publish(C2, Topic, <<"t_reconnect_enabled">>, [{qos, 1}]),
             ?assertEqual(
                [#{client_pid => C,
@@ -1173,3 +1182,13 @@ merge_config(Config1, Config2) ->
       fun({K,V}, Acc) ->
               lists:keystore(K, 1, Acc, {K,V})
       end, Config1, Config2).
+
+retry_if_errors(Errors, Fun) ->
+    E = Fun(),
+    case lists:member(E, Errors) of
+        true ->
+            timer:sleep(200),
+            ?FUNCTION_NAME(Errors, Fun);
+        false ->
+            E
+    end.

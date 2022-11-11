@@ -83,9 +83,9 @@ shutdown(_Conn, _ErrorCode, #{state_name := waiting_for_connack, reconnect := tr
 shutdown(Conn, _ErrorCode, #{reconnect := true}) ->
     quicer:shutdown_connection(Conn),
     %% @TODO how to reconnect here?
-    keep_state_and_data;
+    {keep_state_and_data, {next_event, info, {quic_closed, Conn}}};
 shutdown(Conn, ErrorCode, S) ->
-    quicer:async_close_connection(Conn),
+    ok = quicer:async_close_connection(Conn),
     ?LOG(error, "QUIC_peer_conn_shutdown", #{error_code => ErrorCode}, S),
     {stop, {shutdown, closed}, S}.
 

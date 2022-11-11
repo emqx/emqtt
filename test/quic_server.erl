@@ -37,16 +37,17 @@ server_loop(L) ->
             case quicer:accept(L, [], 30000) of
                 {ok, Conn} ->
                     {ok, Conn} = quicer:handshake(Conn, 1000),
-                    {ok, Stm} = quicer:accept_stream(Conn, []),
+                    {ok, Stm} = quicer:accept_stream(Conn, [{active, false}]),
+                    %% Assertion
+                    {ok, false} = quicer:getopt(Stm, active),
+                    quicer:setopt(Stm, active, true),
                     receive
-                        {quic, <<"ping">>, _, _, _, _} ->
+                        {quic, <<"ping">>, Stm, #{}} ->
                             quicer:send(Stm, <<"pong">>)
                     end,
                     receive
-                        {quic, peer_send_shutdown, Stm0} ->
-                            quicer:close_stream(Stm0);
-                        {quic, peer_send_aborted, Stm0, _ReasonCode} ->
-                            quicer:close_stream(Stm0)
+                        {quic, shutdown, Conn, _} ->
+                            ok
                     end;
                 {error, timeout} ->
                     ok

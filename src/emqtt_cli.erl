@@ -57,7 +57,7 @@
          {will_qos, undefined, "will-qos", {integer, 0},
           "QoS for will message"},
          {will_retain, undefined, "will-retain", {boolean, false},
-          "Eetain in will message"},
+          "Retain in will message"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
           "Enable websocket transport or not"},
          {enable_quic, undefined, "enable-quic", {boolean, false},
