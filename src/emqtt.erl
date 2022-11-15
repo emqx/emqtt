@@ -185,10 +185,13 @@
 
 -type(client() :: pid() | atom()).
 
--type via() :: undefined                                         % default, use socket in #state{}
-               | {new_data_stream, quicer:stream_opts()}         % create and use new long living data stream
-               | {new_req_stream, quicer:stream_opts()}          % @TODO create and use short lived req stream
-               | quicer:stream_handle().                         % reuse existing stream via stream handle
+
+%% 'Via' field add ability of multi stream support for QUIC transport
+%% For TCP based it should be always 'default'
+-type via() :: default                                         % via default socket
+               | {new_data_stream, quicer:stream_opts()}       % Create and use new long living data stream
+               | {new_req_stream, quicer:stream_opts()}        % @TODO create and use short lived req stream
+               | inet:socket() | emqtt_quic:quic_sock().
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
@@ -201,7 +204,7 @@
           port            :: inet:port_number(),
           hosts           :: [{host(), inet:port_number()}],
           conn_mod        :: conn_mod(),
-          socket          :: inet:socket() | pid(),
+          socket          :: inet:socket() | pid() | emqtt_quic:quic_sock(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
@@ -482,14 +485,13 @@ publish(Client, Msg) ->
 sync_publish_result(Caller, Mref, Result) ->
     erlang:send(Caller, {Mref, Result}).
 
--spec(publish_async(client(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok).
 publish_async(Client, Topic, Payload, Callback)  ->
-    publish_async(Client, _Via = undefined, Topic, Payload, Callback).
+    publish_async(Client, _Via = default, Topic, Payload, Callback).
 
 -spec publish_async(client(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok;
                    (client(), via(), topic() | #mqtt_msg{}, payload() | timeout(), mfas()) -> ok.
 publish_async(Client, Topic, Payload, QoS, Callback) when is_binary(Topic) ->
-    publish_async(Client, _Via = undefined, Topic, Payload, QoS, Callback);
+    publish_async(Client, _Via = default, Topic, Payload, QoS, Callback);
 publish_async(Client, Via, Topic, Payload, Callback) when is_binary(Topic) ->
     publish_async(Client, Via, Topic, #{}, Payload, [{qos, ?QOS_0}], infinity, Callback);
 publish_async(Client, Via, Msg = #mqtt_msg{}, Timeout, Callback) ->
@@ -512,7 +514,7 @@ publish_async(Client, Via,Topic, Payload, Opts, Callback) when is_binary(Topic),
                     timeout(), mfas())
       -> ok).
 publish_async(Client, Topic, Properties, Payload, Opts, Timeout, Callback) ->
-    publish_async(Client, _Via = undefined, Topic, Properties, Payload, Opts, Timeout, Callback).
+    publish_async(Client, _Via = default, Topic, Properties, Payload, Opts, Timeout, Callback).
 
 -spec(publish_async(client(), via(), topic(), properties(), payload(), [pubopt()],
                     timeout(), mfas())
@@ -641,7 +643,7 @@ init([Options]) ->
                                  force_ping      = false,
                                  paused          = false,
                                  will_flag       = false,
-                                 will_msg        = #mqtt_msg{},
+                                 will_msg        = #mqtt_msg{payload = <<>>},
                                  pending_calls   = [],
                                  subscriptions   = #{},
                                  inflight        = emqtt_inflight:new(infinity),
@@ -802,11 +804,15 @@ merge_opts(Defaults, Options) ->
 
 callback_mode() -> state_functions.
 
+
+%%%%
+%%%% State Functions
+%%%%
 initialized({call, From}, {connect, ConnMod}, State) ->
     case do_connect(ConnMod, qoe_inject(?FUNCTION_NAME, State)) of
-        {ok, #state{connect_timeout = Timeout} = NewState} ->
+        {ok, #state{connect_timeout = Timeout, socket = Via} = NewState} ->
             {next_state, waiting_for_connack,
-             add_call(new_call(connect, From), NewState),
+             add_call(new_call({connect, Via}, From), NewState),
              {state_timeout, Timeout, Timeout}};
         {error, Reason} = Error->
             {stop_and_reply, Reason, [{reply, From, Error}]};
@@ -873,13 +879,14 @@ reconnect(_EventType, _, _State) ->
     {keep_state_and_data, postpone}.
 
 waiting_for_connack(cast, #mqtt_packet{} = P, State) ->
-    waiting_for_connack(cast, {P, _Via = undefined}, State);
+    waiting_for_connack(cast, {P, default_via(State)}, State);
 waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                                           SessPresent,
-                                          Properties), _Via},
+                                          Properties), Via},
                     State = #state{properties = AllProps,
                                    clientid = ClientId,
-                                   inflight = Inflight
+                                   inflight = Inflight,
+                                   socket = Via
                                   }) ->
     AllProps1 = case Properties of
                     undefined -> AllProps;
@@ -892,7 +899,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
-    case take_call(connect, State3) of
+    case take_call({connect, Via}, State3) of
         {value, #call{from = From}, State4} ->
             {next_state, connected, State4, [{reply, From, Reply} | Retry]};
         false ->
@@ -902,10 +909,10 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
 
 waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
                                            _SessPresent,
-                                           Properties), undefined}, %% connect always use default(control) stream
-                    State = #state{proto_ver = ProtoVer}) ->
+                                           Properties), Via},
+                    State = #state{proto_ver = ProtoVer, socket = Via}) ->
     Reason = reason_code_name(ReasonCode, ProtoVer),
-    case take_call(connect, State) of
+    case take_call({connect, Via}, State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, {Reason, Properties}},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Reply}]};
@@ -916,7 +923,7 @@ waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
 waiting_for_connack(state_timeout, _Timeout, State) ->
-    case take_call(connect, State) of
+    case take_call({connect, default_via(State)}, State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, connack_timeout},
             {stop_and_reply, connack_timeout, [{reply, From, Reply}]};
@@ -924,9 +931,9 @@ waiting_for_connack(state_timeout, _Timeout, State) ->
     end;
 
 waiting_for_connack(EventType, EventContent, State) ->
-    case handle_event(EventType, EventContent, waiting_for_connack, State) of
+    case handle_event(EventType, EventContent, waiting_for_connack, #state{socket = Via} = State) of
         {stop, Reason, NewState} ->
-            case take_call(connect, NewState) of
+            case take_call({connect, Via}, NewState) of
                 {value, #call{from = From}, _State} ->
                     Reply = {error, {Reason, EventContent}},
                     {stop_and_reply, Reason, [{reply, From, Reply}]};
@@ -954,7 +961,7 @@ connected({call, From}, clientid, #state{clientid = ClientId}) ->
     {keep_state_and_data, [{reply, From, ClientId}]};
 
 connected({call, From}, {subscribe, Properties, Topics}, State) ->
-    connected({call, From}, {subscribe, _Via = undefined, Properties, Topics}, State);
+    connected({call, From}, {subscribe, default_via(State), Properties, Topics}, State);
 connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
           State = #state{last_packet_id = PacketId, subscriptions = Subscriptions}) ->
     {Via, State1} = maybe_new_stream(Via0, State),
@@ -971,7 +978,7 @@ connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
     end;
 
 connected({call, From}, {unsubscribe, Properties, Topics}, State) ->
-    connected({call, From}, {unsubscribe, _Via = undefined, Properties, Topics}, State);
+    connected({call, From}, {unsubscribe, default_via(State), Properties, Topics}, State);
 connected({call, From}, UnsubReq = {unsubscribe, Via0, Properties, Topics},
           State = #state{last_packet_id = PacketId}) ->
     {Via, State1} = maybe_new_stream(Via0, State),
@@ -983,8 +990,8 @@ connected({call, From}, UnsubReq = {unsubscribe, Via0, Properties, Topics},
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
 
-connected({call, From}, ping, State) ->
-    connected({call, From}, {ping, _Via = undefined}, State);
+connected({call, From}, ping, #state{socket = Via} = State) ->
+    connected({call, From}, {ping, Via}, State);
 connected({call, From}, {ping, Via0}, State) ->
     {Via, State1} = maybe_new_stream(Via0, State),
     case send(Via, ?PACKET(?PINGREQ), State1) of
@@ -996,7 +1003,7 @@ connected({call, From}, {ping, Via0}, State) ->
     end;
 
 connected({call, From}, {disconnect, ReasonCode, Properties}, State) ->
-    connected({call, From}, {disconnect, _Via = undefined, ReasonCode, Properties}, State);
+    connected({call, From}, {disconnect, default_via(State), ReasonCode, Properties}, State);
 connected({call, From}, {disconnect, Via0, ReasonCode, Properties}, State) ->
     {Via, State1} = maybe_new_stream(Via0, State),
     case send(Via, ?DISCONNECT_PACKET(ReasonCode, Properties), State1) of
@@ -1007,31 +1014,29 @@ connected({call, From}, {disconnect, Via0, ReasonCode, Properties}, State) ->
     end;
 
 connected(cast, {puback, PacketId, ReasonCode, Properties}, State) ->
-    connected(cast, {puback, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+    connected(cast, {puback, default_via(State), PacketId, ReasonCode, Properties}, State);
 connected(cast, {puback, Via, PacketId, ReasonCode, Properties}, State) ->
     send_puback(Via, ?PUBACK_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubrec, PacketId, ReasonCode, Properties}, State) ->
-    connected(cast, {pubrec, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+    connected(cast, {pubrec, default_via(State), PacketId, ReasonCode, Properties}, State);
 connected(cast, {pubrec, Via, PacketId, ReasonCode, Properties}, State) ->
     send_puback(Via, ?PUBREC_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubrel, PacketId, ReasonCode, Properties}, State) ->
-    connected(cast, {pubrel, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+    connected(cast, {pubrel, default_via(State), PacketId, ReasonCode, Properties}, State);
 connected(cast, {pubrel, Via, PacketId, ReasonCode, Properties}, State) ->
     send_puback(Via, ?PUBREL_PACKET(PacketId, ReasonCode, Properties), State);
 
 connected(cast, {pubcomp, PacketId, ReasonCode, Properties}, State) ->
-    connected(cast, {pubcomp, _Via = undefined, PacketId, ReasonCode, Properties}, State);
+    connected(cast, {pubcomp, default_via(State), PacketId, ReasonCode, Properties}, State);
 connected(cast, {pubcomp, Via, PacketId, ReasonCode, Properties}, State) ->
     send_puback(Via, ?PUBCOMP_PACKET(PacketId, ReasonCode, Properties), State);
 
-
 connected(cast, #mqtt_packet{} = P, State) ->
-    connected(cast, {P, _Via = undefined}, State);
-
+    connected(cast, {P, default_via(State)}, State);
 connected(cast, {?PUBLISH_PACKET(_QoS, _PacketId), _Via}, #state{paused = true}) ->
-    %% @FIXME what it get dropped?
+    %% @FIXME what if it get dropped?
     keep_state_and_data;
 
 connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), Via}, State) ->
@@ -1241,54 +1246,6 @@ handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} =
             Other
     end;
 
-%% handle_event(info, {quic, Data, _Stream, _Props}, _StateName, State) when is_binary(Data) ->
-%%     ?LOG(debug, "RECV_Data", #{data => Data}, State),
-%%     process_incoming(Data, [], run_sock(State));
-
-%% handle_event(info, {quic, nst_received, _Conn, Ticket}, _, #state{clientid = Cid} = State)
-%%   when is_binary(Ticket) ->
-%%     catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
-%%     {keep_state, State};
-%% handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
-%%     %% This is just a notify, we can wait for close complete
-%%     ?LOG(error, "QUIC_transport_shutdown", #{reason => Reason}, State),
-%%     keep_state_and_data;
-
-%% QUIC, waiting_for_connack, handles async 0-RTT connect
-%% handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
-%%     keep_state_and_data;
-%% handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
-%%     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
-%%     keep_state_and_data;
-%% handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
-%%     keep_state_and_data;
-%% handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
-%%     keep_state_and_data;
-
-%% handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
-%%     ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
-%%     {stop, {shutdown, {closed, Reason}}, State};
-
-%% handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = true} = State) ->
-%%     quicer:shutdown_connection(Conn),
-%%     next_reconnect(State);
-
-%% handle_event(info, {quic, shutdown, _Stream}, _, State) ->
-%%     ?LOG(error, "QUIC_peer_conn_shutdown", #{}, State),
-%%     {stop, {shutdown, closed}, State};
-
-%% handle_event(info, {quic, closed, _Stream}, _, State) ->
-%%     ?LOG(error, "QUIC_stream_closed", #{}, State),
-%%     keep_state_and_data;
-
-%% Peer abort sending means the transport should be closed abruptly.
-%% handle_event(info, {quic, peer_send_aborted, _Stream, _ErrorCode}, _, State) ->
-%%     ?LOG(error, "QUIC_peer_send_aborted", #{}, State),
-%%     {stop, {shutdown, closed}, State};
-%% handle_event(info, {quic, peer_send_shutdown, _Stream}, _, State) ->
-%%     ?LOG(error, "QUIC_peer_send_shutdown", #{}, State),
-%%     {stop, {shutdown, closed}, State};
-
 handle_event(info, {'EXIT', Pid, normal}, StateName, State) ->
     ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
     keep_state_and_data;
@@ -1396,6 +1353,8 @@ shoot(State = #state{pendings = Pendings}) ->
     {PubReq, NPendings} = dequeue_publish_req(Pendings),
     shoot(PubReq, State#state{pendings = NPendings}).
 
+shoot(?PUB_REQ(default, Msg, ExpireAt, Callback), State) ->
+    shoot(?PUB_REQ(default_via(State), Msg, ExpireAt, Callback), State);
 shoot(?PUB_REQ(Via, Msg = #mqtt_msg{qos = ?QOS_0}, _ExpireAt, Callback), State) ->
     case send(Via, Msg, State) of
         {ok, NState} ->
@@ -1441,7 +1400,7 @@ ack_inflight(Via,
   State = #state{inflight = Inflight}
  ) ->
     case emqtt_inflight:delete({Via, PacketId}, Inflight) of
-        {{value, ?INFLIGHT_PUBLISH(_Via, _Msg, _SentAt, _ExpireAt, Callback)}, NInflight} ->
+        {{value, ?INFLIGHT_PUBLISH(Via, _Msg, _SentAt, _ExpireAt, Callback)}, NInflight} ->
             eval_callback_handler(
               {ok, #{packet_id => PacketId,
                      reason_code => ReasonCode,
@@ -1450,7 +1409,7 @@ ack_inflight(Via,
                     }}, Callback),
             State#state{inflight = NInflight};
         error ->
-            ?LOG(warning, "unexpected_PUBACK", #{packet_id => PacketId}, State),
+            ?LOG(warning, "unexpected_PUBACK", #{packet_id => PacketId, via => Via}, State),
             State
     end;
 
@@ -1633,7 +1592,7 @@ retry_send(_Now, [], State) ->
     State.
 
 deliver(#mqtt_msg{} = Msg, State) ->
-    deliver(undefined, #mqtt_msg{} = Msg, State).
+    deliver(default_via(State), #mqtt_msg{} = Msg, State).
 
 deliver(_Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
                        topic = Topic, props = Props, payload = Payload},
@@ -1764,17 +1723,11 @@ send_puback(Via, Packet, State) ->
     end.
 
 send(Msg, State) ->
-    send(undefined, Msg, State).
+    send(default_via(State), Msg, State).
 
 send(Via, Msg, State) when is_record(Msg, mqtt_msg) ->
     send(Via, msg_to_packet(Msg), State);
 
-send(undefined, Packet, State = #state{socket = Socket}) ->
-    send(Socket, Packet, State);
-%% send({new_data_stream, StreamOpts}, Packet, State = #state{socket = {quic, Conn, _CtrlStream}, extra = Extra}) ->
-%%     {ok, NewStream} =  quicer:start_stream(Conn, StreamOpts),
-%%     NewSock = {quic, Conn, NewStream},
-%%     send(NewSock, Packet, );
 send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
@@ -1790,25 +1743,25 @@ run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
 %%--------------------------------------------------------------------
 %% Process incomming
 
-process_incoming(<<>>, Packets, State) ->
-    {keep_state, State, next_events(Packets)};
+process_incoming(<<>>, Packets, #state{socket = Via} = State) ->
+    {keep_state, State, next_events(Via, Packets)};
 
-process_incoming(Bytes, Packets, State = #state{parse_state = ParseState}) ->
+process_incoming(Bytes, Packets, State = #state{parse_state = ParseState, socket = Via}) ->
     try emqtt_frame:parse(Bytes, ParseState) of
         {ok, Packet, Rest, NParseState} ->
             process_incoming(Rest, [Packet|Packets], State#state{parse_state = NParseState});
         {more, NParseState} ->
-            {keep_state, State#state{parse_state = NParseState}, next_events(Packets)}
+            {keep_state, State#state{parse_state = NParseState}, next_events(Via, Packets)}
     catch
         error:Error:Stacktrace -> {stop, {Error, Stacktrace}}
     end.
 
--compile({inline, [next_events/1]}).
-next_events([]) -> [];
-next_events([Packet]) ->
-    {next_event, cast, Packet};
-next_events(Packets) ->
-    [{next_event, cast, Packet} || Packet <- lists:reverse(Packets)].
+-compile({inline, [next_events/2]}).
+next_events(_Via, []) -> [];
+next_events(Via, [Packet]) ->
+    {next_event, cast, {Packet, Via}};
+next_events(Via, Packets) ->
+    [{next_event, cast, {Packet, Via}} || Packet <- lists:reverse(Packets)].
 
 %%--------------------------------------------------------------------
 %% packet_id generation
@@ -1919,7 +1872,8 @@ queue_fold(Fun, Acc0, Q) ->
     erlang:error(badarg, [Fun, Acc0, Q]).
 
 -spec maybe_init_quic_state(module(), #state{}) -> #state{}.
-maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid, reconnect = IsReconnect, parse_state = PS} = Old) ->
+maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
+                                         reconnect = IsReconnect, parse_state = PS} = Old) ->
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , parse_state => PS
                                                   , data_stream_socks => []
@@ -1940,9 +1894,7 @@ maybe_update_ctrl_sock(_, Old, _) ->
     Old.
 
 
--spec maybe_new_stream(via(), #state{}) -> {undefined |emqtt_quic:quic_sock(), #state{}}.
-maybe_new_stream(undefined, S) ->
-    {undefined, S};
+-spec maybe_new_stream(via(), #state{}) -> {inet:socket() | emqtt_quic:quic_sock(), #state{}}.
 maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
                                                        socket = {quic, Conn, _Stream},
                                                        extra = Extra
@@ -1950,4 +1902,11 @@ maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
     {ok, NewStream} =  quicer:start_stream(Conn, StreamOpts),
     NewSock = {quic, Conn, NewStream},
     NewState = State#state{extra = update_data_streams(Extra, NewSock)},
-    {NewSock, NewState}.
+    {NewSock, NewState};
+maybe_new_stream(Def, State) ->
+    {Def, State}.
+
+%% @doc use socket as default via
+-spec default_via(#state{}) -> via().
+default_via(#state{socket = Via})->
+    Via.

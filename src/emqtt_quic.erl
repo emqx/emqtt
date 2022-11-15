@@ -51,8 +51,11 @@
              , quic_sock/0
              ]).
 
--type cb_data() :: #{ stream_opts := map()
-                    , clientid := binary()
+-type cb_data() :: #{ clientid := binary()
+                    , parse_state := emqtt_frame:parse_state()
+                    , data_stream_socks := [quic_sock()]
+                    , control_stream_sock := undefined | quic_sock()
+                    , stream_opts := map()
                     , state_name := gen_fsm:state_name()
                     , is_local => boolean()
                     , is_unidir => boolean()
@@ -61,9 +64,6 @@
                     , reconnect => boolean()
                     , peer_bidi_stream_count => non_neg_integer()
                     , peer_unidi_stream_count => non_neg_integer()
-                    , parse_state := emqtt_frame:parse_state()
-                    , control_stream_sock := undefined | quic_sock()
-                    , data_stream_socks := [quic_sock()]
                     }.
 -type mqtt_packets() :: [#mqtt_packet{}] | [].
 -type quic_sock() :: {quic, quicer:connection_handle(), quicer:stream_handle()}.
