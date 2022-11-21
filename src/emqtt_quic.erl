@@ -147,6 +147,8 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
                 Error ->
                     Error
             end;
+        {error, Type, Info} ->
+            {error, {Type, Info}};
         {error, _} = Error ->
             Error
     end.
@@ -171,7 +173,7 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
 send({quic, _Conn, Stream}, Bin) ->
     send(Stream, Bin);
 send(Stream, Bin) ->
-    case quicer:async_send(Stream, Bin) of
+    case quicer:send(Stream, Bin) of
         {ok, _Len} ->
             ok;
         {error, ErrorType, Reason} ->

@@ -29,10 +29,8 @@ quic_server(Port, Opts) ->
 server_loop(L) ->
     receive
         stop ->
-            ok;
-        Other ->
-            ct:pal("unexp msg ~p", [Other]),
-            server_loop(L)
+            quicer:close_listener(L),
+            ok
     after 0 ->
             case quicer:accept(L, [], 30000) of
                 {ok, Conn} ->
@@ -57,4 +55,3 @@ server_loop(L) ->
 
 stop(Server) ->
     Server ! stop.
-

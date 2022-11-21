@@ -257,13 +257,17 @@ t_reconnect_enabled(Config) ->
             [{Topic, #{qos := 0}}] = emqtt:subscriptions(C),
             {ok, _} = emqtt:ConnFun(C2),
             {ok, _} = emqtt:publish(C2, Topic, <<"t_reconnect_enabled">>, [{qos, 1}]),
+            Via = proplists:get_value(socket, emqtt:info(C)),
             ?assertEqual(
                [#{client_pid => C,
-                 dup => false,packet_id => undefined,
-                 payload => <<"t_reconnect_enabled">>,
-                 properties => undefined,qos => 0,
-                 retain => false,
-                 topic => <<"TopicA">>}], receive_messages(1))
+                  dup => false,packet_id => undefined,
+                  payload => <<"t_reconnect_enabled">>,
+                  properties => undefined,qos => 0,
+                  retain => false,
+                  topic => <<"TopicA">>,
+                  via => Via
+                 }
+               ], receive_messages(1))
     end.
 
 t_reconnect_stop(Config) ->
