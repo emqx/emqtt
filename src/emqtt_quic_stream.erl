@@ -115,7 +115,6 @@ handle_stream_data(Stream, Bin, _Flags, #{ is_local := true
     Via = {quic, Conn, Stream},
     case parse(Bin, PS, []) of
         {keep_state, NewPS, Packets} ->
-            quicer:setopt(Stream, active, once),
             {keep_state, S#{parse_state := NewPS},
              [{next_event, cast, {P, Via} }
               || P <- lists:reverse(Packets)]};
@@ -129,7 +128,9 @@ handle_stream_data(_Stream, _Bin, _Flags,
 
 
 -spec passive(stream_handle(), undefined, cb_data()) -> cb_ret().
-passive(_Stream, undefined, _S)->
+passive(Stream, undefined, _S)->
+    %% @TODO Should be called only once during the whole connecion
+    quicer:setopt(Stream, active, true),
     keep_state_and_data.
 
 -spec stream_closed(stream_handle(), stream_closed_props(), cb_data()) -> cb_ret().

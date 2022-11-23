@@ -139,7 +139,7 @@ connect(Host, Port, Opts, Timeout) ->
 do_0rtt_connect(Host, Port, ConnOpts) ->
     case quicer:async_connect(Host, Port, ConnOpts) of
         {ok, Conn} ->
-            case quicer:start_stream(Conn, #{active => false}) of
+            case quicer:start_stream(Conn, #{active => true}) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
                 {error, Type, Info} ->
@@ -156,7 +156,7 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
 do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
         {ok, Conn} ->
-            case quicer:start_stream(Conn, #{active => false}) of
+            case quicer:start_stream(Conn, #{active => true}) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
                 {error, Type, Info} ->

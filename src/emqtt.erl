@@ -1782,6 +1782,8 @@ send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
         Error -> Error
     end.
 
+run_sock(State = #state{conn_mod = emqtt_quic}) ->
+    State;
 run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
     ConnMod:setopts(Sock, [{active, once}]), State.
 
