@@ -218,7 +218,8 @@ t_reconnect_disabled(Config) ->
             receive
                 {'EXIT', C, {shutdown, tcp_closed}} when ConnFun =:= connect->
                     ok;
-                {'EXIT', C, {shutdown, closed}} when ConnFun =:= quic_connect->
+                {'EXIT', C, {shutdown, Reason}} when ConnFun =:= quic_connect->
+                    ct:pal("shutdown with reason~p", [Reason]),
                     ok
             after 100 ->
                     ct:fail(no_shutdown)

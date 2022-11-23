@@ -100,7 +100,7 @@ handle_info({quic, Event, Connection, Props}, StateName, #{quic_conn_cb := ConnC
 handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
   when start_completed =:= Event orelse
        send_complete =:= Event orelse
-       peer_send_complete =:= Event orelse
+       peer_send_shutdown =:= Event orelse
        peer_send_aborted =:= Event orelse
        peer_receive_aborted =:= Event orelse
        send_shutdown_complete =:= Event orelse

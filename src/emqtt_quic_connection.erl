@@ -57,7 +57,7 @@ closed(_Conn, #{} = _Flags, #{state_name := waiting_for_connack, reconnect := tr
 closed(_Conn, #{} = _Flags, #{state_name := _Other} = S)->
     ?LOG(error, "QUIC_connection_closed", #{}, S),
     %% @TODO why not stop?
-    keep_state_and_data.
+    {stop, {shutdown, conn_closed}, S}.
 
 -spec new_conn(connection_handle(), quicer:conn_closed_props(), cb_data()) -> cb_ret().
  new_conn(_Conn, #{version := _Vsn}, #{stream_opts := _SOpts} = _S) ->
@@ -81,13 +81,21 @@ new_stream(_Stream, #{is_orphan := true} = _StreamProps,
 shutdown(_Conn, _ErrorCode, #{state_name := waiting_for_connack, reconnect := true} = _S) ->
     keep_state_and_data;
 shutdown(Conn, _ErrorCode, #{reconnect := true}) ->
-    quicer:shutdown_connection(Conn),
+    quicer:async_shutdown_connection(Conn, 0, 0),
     %% @TODO how to reconnect here?
     {keep_state_and_data, {next_event, info, {quic_closed, Conn}}};
 shutdown(Conn, ErrorCode, S) ->
     ok = quicer:async_close_connection(Conn),
-    ?LOG(error, "QUIC_peer_conn_shutdown", #{error_code => ErrorCode}, S),
-    {stop, {shutdown, closed}, S}.
+    ?LOG(info, "QUIC_peer_conn_shutdown", #{error_code => ErrorCode}, S),
+    %% TCP return {shutdown, closed}
+    case ErrorCode of
+        success ->
+            %% @TODO we should expect quicer/EMQX to send a custom error code instead.
+            %% {stop, normal, S}.
+            {stop, {shutdown, normal}, S};
+        _Other ->
+            {stop, {shutdown, ErrorCode}, S}
+    end.
 
 -spec transport_shutdown(connection_handle(), quicer:transport_shutdown_info(), cb_data())
                         -> cb_ret().
