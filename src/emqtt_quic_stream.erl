@@ -136,19 +136,32 @@ passive(Stream, undefined, _S)->
 -spec stream_closed(stream_handle(), stream_closed_props(), cb_data()) -> cb_ret().
 stream_closed(_Stream, #{ is_conn_shutdown := _ }, #{reconnect := true}) ->
     keep_state_and_data;
-stream_closed(_Stream, #{ is_conn_shutdown := IsConnShutdown
-                        , is_app_closing := IsAppClosing
-                        , is_shutdown_by_app := IsAppShutdown
-                        , is_closed_remotely := IsRemote
-                        , status := Status
-                        , error := Code
-                        }, _S) when is_boolean(IsConnShutdown) andalso
-                                    is_boolean(IsAppClosing) andalso
-                                    is_boolean(IsAppShutdown) andalso
-                                    is_boolean(IsRemote) andalso
-                                    is_atom(Status) andalso
-                                    is_integer(Code) ->
-    {stop, normal}.
+stream_closed(Stream, P = #{ is_conn_shutdown := IsConnShutdown
+                           , is_app_closing := IsAppClosing
+                           , is_shutdown_by_app := IsAppShutdown
+                           , is_closed_remotely := IsRemote
+                           , status := Status
+                           , error := Code
+                           }, #{ data_stream_socks := _DataStreams,
+                                 control_stream_sock := {quic, Conn, CtrlStream}
+                               } = S)
+  when is_boolean(IsConnShutdown) andalso
+       is_boolean(IsAppClosing) andalso
+       is_boolean(IsAppShutdown) andalso
+       is_boolean(IsRemote) andalso
+       is_atom(Status) andalso
+       is_integer(Code) ->
+    case lists:member({quic, Conn, Stream}, maps:get(data_stream_socks, S)) of
+        true ->
+            %% is data stream
+            keep_state_and_data;
+        false when Stream == CtrlStream ->
+            {stop, normal};
+        false ->
+            %% Other unknown streams: New stream from remote.
+            ?LOG(warning, "unknown stream closed", P#{stream => Stream}, S),
+            keep_state_and_data
+    end.
 
 handle_call(_Stream, _Request, _Opts, S) ->
     {error, unimpl, S}.

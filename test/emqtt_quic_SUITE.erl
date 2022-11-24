@@ -60,7 +60,8 @@ groups() ->
               t_multi_streams_unsub,
               t_multi_streams_corr_topic,
               t_multi_streams_unsub_via_other,
-              t_multi_streams_shutdown_data_stream_abortive
+              t_multi_streams_shutdown_data_stream_abortive,
+              t_multi_streams_dup_sub
              ]},
 
       {shutdown, [{group, graceful_shutdown},
@@ -361,6 +362,53 @@ t_multi_streams_sub_pub_sync(Config) ->
        ], lists:sort(PubRecvs)),
     ok = emqtt:disconnect(C).
 
+t_multi_streams_dup_sub(Config) ->
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    PktId1 = calc_pkt_id(RecQos, 1),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    Topic2 = << Topic/binary, "two">>,
+    {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
+    {ok, _} = emqtt:quic_connect(C),
+    {ok, #{via := SVia1}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+    {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+
+    #{data_stream_socks := [{quic, _Conn, SubStream} | _]} = proplists:get_value(extra, emqtt:info(C)),
+    ?assertEqual(2, length(emqx_broker:subscribers(Topic))),
+
+    case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<"stream data 3">>, [{qos, PubQos}]) of
+        ok when PubQos == 0 ->
+            Via1 = undefined,
+            ok;
+        {ok, #{reason_code := 0, via := Via1}} -> ok
+    end,
+    PubRecvs = recv_pub(2),
+    ?assertMatch(
+       [ {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<"stream data 3">>
+                    , qos := RecQos
+                    , via := SVia1
+                    }
+         }
+       , {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<"stream data 3">>
+                    , qos := RecQos
+                    , via := SVia2
+                    }
+         }
+       ], lists:sort(PubRecvs)),
+
+    %% Shutdown one stream
+    quicer:async_shutdown_stream(SubStream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 500),
+    timer:sleep(100),
+
+    ?assertEqual(1, length(emqx_broker:subscribers(Topic))),
+
+    ok = emqtt:disconnect(C).
+
 t_multi_streams_corr_topic(Config) ->
     PubQos = ?config(pub_qos, Config),
     SubQos = ?config(sub_qos, Config),
@@ -579,8 +627,10 @@ t_multi_streams_shutdown_ctrl_stream_then_reconnect(Config) ->
                                 {connect_timeout, 5} %% speedup test
                                | Config]),
     {ok, _} = emqtt:quic_connect(C),
-    {ok, #{via := _SVia}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+    {ok, #{via := SVia}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
     {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic2, [{qos, SubQos}]}]),
+
+    ?assert(SVia2 =/= SVia),
 
     case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<1,2,3,4,5>>, [{qos, PubQos}]) of
         ok when PubQos == 0 -> ok;
@@ -610,6 +660,7 @@ send_and_recv_with(Sock) ->
     {ok, {IP, _}} = emqtt_quic:sockname(Sock),
     ?assert(lists:member(tuple_size(IP), [4, 8])),
     ok = emqtt_quic:send(Sock, <<"ping">>),
+    emqtt_quic:setopts(Sock, [{active, false}]),
     {ok, <<"pong">>} = emqtt_quic:recv(Sock, 0),
     ok = emqtt_quic:setopts(Sock, [{active, 100}]),
     {ok, Stats} = emqtt_quic:getstat(Sock, [send_cnt, recv_cnt]),
