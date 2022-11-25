@@ -34,10 +34,18 @@ all() ->
     ].
 
 groups() ->
-    [ {mstream, [], [{group, pub_qos0},
-                     {group, pub_qos1},
-                     {group, pub_qos2}
-                    ]},
+    [ {mstream, [], [{group, profiles}]},
+
+      {profiles, [], [{group, profile_low_latency},
+                      {group, profile_max_throughput}
+                     ]},
+      {profile_low_latency, [], [{group, pub_qos0},
+                                 {group, pub_qos1},
+                                 {group, pub_qos2}
+                                ]},
+      {profile_max_throughput, [], [{group, pub_qos0},
+                                    {group, pub_qos1},
+                                    {group, pub_qos2}]},
       {pub_qos0, [], [{group, sub_qos0},
                       {group, sub_qos1},
                       {group, sub_qos2}
@@ -61,7 +69,9 @@ groups() ->
               t_multi_streams_corr_topic,
               t_multi_streams_unsub_via_other,
               t_multi_streams_shutdown_data_stream_abortive,
-              t_multi_streams_dup_sub
+              t_multi_streams_dup_sub,
+              t_multi_streams_packet_boundary,
+              t_multi_streams_packet_malform
              ]},
 
       {shutdown, [{group, graceful_shutdown},
@@ -76,20 +86,22 @@ groups() ->
       {abort_send_recv_shutdown, [{group, ctrl_stream_shutdown}]},
 
       {ctrl_stream_shutdown, [t_multi_streams_shutdown_ctrl_stream,
-                              t_multi_streams_shutdown_ctrl_stream_then_reconnect]
+                              t_multi_streams_shutdown_ctrl_stream_then_reconnect,
+                              t_multi_streams_remote_shutdown,
+                              t_multi_streams_remote_shutdown_with_reconnect
+                             ]
       }
     ].
 
 init_per_suite(Config) ->
     UdpPort = 14567,
-    emqtt_test_lib:start_emqx(),
-    application:ensure_all_started(quicer),
-    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, UdpPort),
-
-    %% dbg:tracer(process, {fun dbg:dhandler/2, group_leader()}),
-    %% dbg:p(all, c),
-    %% dbg:tpl(emqtt_quic_connection, cx),
-    %% dbg:tp(emqx_quic_stream, cx),
+    start_emqx_quic(UdpPort),
+    %dbg:tracer(process, {fun dbg:dhandler/2, group_leader()}),
+    dbg:tracer(),
+    dbg:p(all, c),
+    dbg:tpl(emqtt_quic_stream, cx),
+    %% dbg:tpl(emqx_quic_stream, cx),
+    %% dbg:tpl(emqx_quic_data_stream, cx),
     %% dbg:tpl(emqtt, cx),
     [{port, UdpPort}, {pub_qos, 0}, {sub_qos, 0} | Config].
 
@@ -117,6 +129,12 @@ init_per_group(abort_send_recv_shutdown, Config) ->
     [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT} | Config];
 init_per_group(graceful_shutdown, Config) ->
     [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL} | Config];
+init_per_group(profile_max_throughput, Config) ->
+    quicer:reg_open(quic_execution_profile_type_max_throughput),
+    Config;
+init_per_group(profile_low_latency, Config) ->
+    quicer:reg_open(quic_execution_profile_low_latency),
+    Config;
 init_per_group(_, Config) ->
     Config.
 
@@ -246,7 +264,6 @@ t_multi_streams_sub(Config) ->
     end,
     ok = emqtt:disconnect(C).
 
-
 t_multi_streams_pub_parallel(Config) ->
     PubQos = ?config(pub_qos, Config),
     SubQos = ?config(sub_qos, Config),
@@ -281,6 +298,125 @@ t_multi_streams_pub_parallel(Config) ->
     Payloads = [ P || {publish, #{payload := P}} <- PubRecvs ],
     ?assert([<<"stream data 1">>, <<"stream data 2">>] == Payloads orelse
             [<<"stream data 2">>, <<"stream data 1">>] == Payloads),
+    ok = emqtt:disconnect(C).
+
+t_multi_streams_packet_boundary(Config) ->
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    PktId1 = calc_pkt_id(RecQos, 1),
+    PktId2 = calc_pkt_id(RecQos, 2),
+    PktId3 = calc_pkt_id(RecQos, 3),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+
+    %% make quicer to batch job
+    quicer:reg_open(quic_execution_profile_type_max_throughput),
+
+    {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
+    {ok, _} = emqtt:quic_connect(C),
+    {ok, _, [SubQos]} = emqtt:subscribe(C, #{}, [{Topic, [{qos, SubQos}]}]),
+
+    {ok, PubVia} =emqtt:start_data_stream(C, []),
+    ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 1">>, [{qos, PubQos}],
+                             undefined),
+    ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 2">>, [{qos, PubQos}],
+                             undefined),
+    LargePart3 = binary:copy(<<"stream data3">>, 2000),
+    ok = emqtt:publish_async(C, PubVia, Topic,  LargePart3, [{qos, PubQos}],
+                             undefined),
+    PubRecvs = recv_pub(3),
+    ?assertMatch(
+       [ {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<"stream data 1">>
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       , {publish, #{ client_pid := C
+                    , packet_id := PktId2
+                    , payload := <<"stream data 2">>
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       , {publish, #{ client_pid := C
+                    , packet_id := PktId3
+                    , payload := LargePart3
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       ], PubRecvs),
+    ok = emqtt:disconnect(C).
+
+%% @doc test that one malformed stream will not close the entire connection
+t_multi_streams_packet_malform(Config) ->
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    PktId1 = calc_pkt_id(RecQos, 1),
+    PktId2 = calc_pkt_id(RecQos, 2),
+    PktId3 = calc_pkt_id(RecQos, 3),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+
+    %% make quicer to batch job
+    quicer:reg_open(quic_execution_profile_type_max_throughput),
+
+    {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
+    {ok, _} = emqtt:quic_connect(C),
+    {ok, _, [SubQos]} = emqtt:subscribe(C, #{}, [{Topic, [{qos, SubQos}]}]),
+
+    {ok, PubVia} = emqtt:start_data_stream(C, []),
+    ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 1">>, [{qos, PubQos}],
+                             undefined),
+
+    {ok, {quic, _Conn, MalformStream}} = emqtt:start_data_stream(C, []),
+    {ok, _} = quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>),
+
+    ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 2">>, [{qos, PubQos}],
+                             undefined),
+    LargePart3 = binary:copy(<<"stream data3">>, 2000),
+    ok = emqtt:publish_async(C, PubVia, Topic,  LargePart3, [{qos, PubQos}],
+                             undefined),
+    PubRecvs = recv_pub(3),
+    ?assertMatch(
+       [ {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<"stream data 1">>
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       , {publish, #{ client_pid := C
+                    , packet_id := PktId2
+                    , payload := <<"stream data 2">>
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       , {publish, #{ client_pid := C
+                    , packet_id := PktId3
+                    , payload := LargePart3
+                    , qos := RecQos
+                    , topic := Topic
+                    }
+         }
+       ], PubRecvs),
+
+    case quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>) of
+        {ok, 10} -> ok;
+        {error, cancelled} -> ok;
+        {error, stm_send_error, aborted} -> ok
+    end,
+
+    timer:sleep(200),
+    ?assert(is_list(emqtt:info(C))),
+
+    {error, stm_send_error, aborted} = quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>),
+    timer:sleep(200),
+    ?assert(is_list(emqtt:info(C))),
+
     ok = emqtt:disconnect(C).
 
 t_multi_streams_sub_pub_async(Config) ->
@@ -368,7 +504,6 @@ t_multi_streams_dup_sub(Config) ->
     RecQos = calc_qos(PubQos, SubQos),
     PktId1 = calc_pkt_id(RecQos, 1),
     Topic = atom_to_binary(?FUNCTION_NAME),
-    Topic2 = << Topic/binary, "two">>,
     {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
     {ok, _} = emqtt:quic_connect(C),
     {ok, #{via := SVia1}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
@@ -379,9 +514,8 @@ t_multi_streams_dup_sub(Config) ->
 
     case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<"stream data 3">>, [{qos, PubQos}]) of
         ok when PubQos == 0 ->
-            Via1 = undefined,
             ok;
-        {ok, #{reason_code := 0, via := Via1}} -> ok
+        {ok, #{reason_code := 0, via := _Via1}} -> ok
     end,
     PubRecvs = recv_pub(2),
     ?assertMatch(
@@ -389,17 +523,21 @@ t_multi_streams_dup_sub(Config) ->
                     , packet_id := PktId1
                     , payload := <<"stream data 3">>
                     , qos := RecQos
-                    , via := SVia1
                     }
          }
        , {publish, #{ client_pid := C
                     , packet_id := PktId1
                     , payload := <<"stream data 3">>
                     , qos := RecQos
-                    , via := SVia2
                     }
          }
        ], lists:sort(PubRecvs)),
+
+    RecvVias = [ Via || {publish, #{via := Via }} <- PubRecvs],
+
+    ct:pal("~p, ~p, ~n recv from: ~p~n", [SVia1, SVia2, PubRecvs]),
+    %% Can recv in any order
+    ?assert([SVia1, SVia2] == RecvVias orelse [SVia2, SVia1] == RecvVias),
 
     %% Shutdown one stream
     quicer:async_shutdown_stream(SubStream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 500),
@@ -653,6 +791,94 @@ t_multi_streams_shutdown_ctrl_stream_then_reconnect(Config) ->
     %% Client should be closed
     ?assert(is_list(emqtt:info(C))).
 
+
+t_multi_streams_remote_shutdown(Config) ->
+    erlang:process_flag(trap_exit, true),
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    PktId1 = calc_pkt_id(RecQos, 1),
+
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    Topic2 = << Topic/binary, "two">>,
+    {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, false},
+                                {connect_timeout, 5} %% speedup test
+                               | Config]),
+    {ok, _} = emqtt:quic_connect(C),
+    {ok, #{via := SVia}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+    {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic2, [{qos, SubQos}]}]),
+
+    ?assert(SVia2 =/= SVia),
+
+    case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<1,2,3,4,5>>, [{qos, PubQos}]) of
+        ok when PubQos == 0 -> ok;
+        {ok, #{reason_code := 0, via := _PVia}} -> ok
+    end,
+
+    PubRecvs = recv_pub(1),
+    ?assertMatch(
+       [ {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<1,2,3,4,5>>
+                    , qos := RecQos
+                    }
+         }
+       ], PubRecvs),
+
+    {quic, _Conn, _Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
+
+    ok = emqtt_test_lib:stop_emqx(),
+
+    timer:sleep(200),
+    start_emqx_quic(?config(port, Config)),
+
+    %% Client should be closed
+    ?assertMatch({'EXIT', {noproc, {gen_statem, call, [_,info,infinity] } }}, catch emqtt:info(C)).
+
+
+t_multi_streams_remote_shutdown_with_reconnect(Config) ->
+    erlang:process_flag(trap_exit, true),
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    PktId1 = calc_pkt_id(RecQos, 1),
+
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    Topic2 = << Topic/binary, "two">>,
+    {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, true},
+                                {connect_timeout, 5} %% speedup test
+                               | Config]),
+    {ok, _} = emqtt:quic_connect(C),
+    {ok, #{via := SVia}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+    {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic2, [{qos, SubQos}]}]),
+
+    ?assert(SVia2 =/= SVia),
+
+    case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<1,2,3,4,5>>, [{qos, PubQos}]) of
+        ok when PubQos == 0 -> ok;
+        {ok, #{reason_code := 0, via := _PVia}} -> ok
+    end,
+
+    PubRecvs = recv_pub(1),
+    ?assertMatch(
+       [ {publish, #{ client_pid := C
+                    , packet_id := PktId1
+                    , payload := <<1,2,3,4,5>>
+                    , qos := RecQos
+                    }
+         }
+       ], PubRecvs),
+
+    {quic, _Conn, _Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
+
+    ok = emqtt_test_lib:stop_emqx(),
+
+    timer:sleep(200),
+
+    start_emqx_quic(?config(port, Config)),
+    %% Client should be closed
+    ?assert(is_list(emqtt:info(C))).
+
 %%--------------------------------------------------------------------
 %% Helper functions
 %%--------------------------------------------------------------------
@@ -711,3 +937,9 @@ calc_pkt_id(1, Id)->
     Id;
 calc_pkt_id(2, Id)->
     Id.
+
+-spec start_emqx_quic(inet:port_number()) -> ok.
+start_emqx_quic(UdpPort) ->
+    emqtt_test_lib:start_emqx(),
+    application:ensure_all_started(quicer),
+    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, UdpPort).

@@ -28,6 +28,7 @@
 -export([ connect/1
         , ws_connect/1
         , quic_connect/1
+        , start_data_stream/2
         , disconnect/1
         , disconnect/2
         , disconnect/3
@@ -549,6 +550,11 @@ publish_async(Client, Via, Topic, Properties, Payload, Opts, Timeout, Callback)
                   Timeout,
                   Callback).
 
+%% QUIC only
+-spec start_data_stream(client(), quicer:stream_opts())-> {ok, via()} | {error, any()}.
+start_data_stream(Client, StreamOpts) ->
+    call(Client, {new_data_stream, StreamOpts}).
+
 -spec(unsubscribe(client(), topic() | [topic()]) -> subscribe_ret()).
 unsubscribe(Client, Topic) when is_binary(Topic) ->
     unsubscribe(Client, [Topic]);
@@ -1039,6 +1045,9 @@ connected({call, From}, {disconnect, Via0, ReasonCode, Properties}, State) ->
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
     end;
+connected({call, From}, {new_data_stream, _StreamOpts} = Via0, State) ->
+    {Via, State1} = maybe_new_stream(Via0, State),
+    {keep_state, State1, {reply, From, {ok, Via}}};
 
 connected(cast, {puback, PacketId, ReasonCode, Properties}, State) ->
     connected(cast, {puback, default_via(State), PacketId, ReasonCode, Properties}, State);
@@ -1946,7 +1955,8 @@ maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
                                                        socket = {quic, Conn, _Stream},
                                                        extra = Extra
                                                       } = State) ->
-    {ok, NewStream} =  quicer:start_stream(Conn, StreamOpts),
+    %% @TODO handle error
+    {ok, NewStream} = quicer:start_stream(Conn, StreamOpts),
     NewSock = {quic, Conn, NewStream},
     NewState = State#state{extra = update_data_streams(Extra, NewSock)},
     {NewSock, NewState};
