@@ -194,7 +194,8 @@ setopts({quic, _Conn, Stream}, Opts) ->
     ok.
 
 close({quic, Conn, Stream}) ->
-    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0),
+    %% gracefully shutdown the stream to flush all the msg in sndbuf.
+    quicer:shutdown_stream(Stream, infinity),
     quicer:close_connection(Conn).
 
 sockname({quic, Conn, _Stream}) ->
