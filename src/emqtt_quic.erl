@@ -15,17 +15,11 @@
 %%-------------------------------------------------------------------------
 
 -module(emqtt_quic).
-
+-ifndef(BUILD_WITHOUT_QUIC).
 -include("logger.hrl").
 -include("emqtt.hrl").
-
--ifndef(BUILD_WITHOUT_QUIC).
 -include_lib("quicer/include/quicer.hrl").
--else.
--define(QUIC_STREAM_SHUTDOWN_FLAG_NONE          , 0).
--define(QUICER_CONNECTION_EVENT_MASK_NST        , 1).
--define(QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL      , 1).
--endif.
+
 
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clientid => maps:get(clientid, State)}, #{})).
@@ -211,3 +205,7 @@ local_addr(SOpts) ->
         {Port, IpAddr} when is_tuple(IpAddr) ->
             [{param_conn_local_address, inet:ntoa(IpAddr) ++ ":" ++integer_to_list(Port)}]
     end.
+
+-else.
+%% BUILD_WITHOUT_QUIC
+-endif.

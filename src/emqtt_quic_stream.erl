@@ -15,6 +15,8 @@
 %%-------------------------------------------------------------------------
 -module(emqtt_quic_stream).
 
+-ifndef(BUILD_WITHOUT_QUIC).
+-include_lib("quicer/include/quicer.hrl").
 -export([ init_handoff/4
         , new_stream/3
         , start_completed/3
@@ -181,3 +183,7 @@ parse(Bin, PS, Packets) ->
         error:Error:ST ->
             {stop, {Error, ST}}
     end.
+
+-else.
+%% BUILD_WITHOUT_QUIC
+-endif.

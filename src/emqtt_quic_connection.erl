@@ -15,6 +15,9 @@
 %%--------------------------------------------------------------------
 -module(emqtt_quic_connection).
 
+-ifndef(BUILD_WITHOUT_QUIC).
+
+-include_lib("quicer/include/quicer.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 -include("logger.hrl").
 
@@ -129,3 +132,6 @@ connected(_Connecion, #{ is_resumed := true }, #{state_name := waiting_for_conna
     keep_state_and_data;
 connected(_Connecion, _Props, _S) ->
     keep_state_and_data.
+-else.
+%% BUILD_WITHOUT_QUIC
+-endif.
