@@ -44,6 +44,10 @@ server_loop(L) ->
                             quicer:send(Stm, <<"pong">>)
                     end,
                     receive
+                        %% graceful shutdown
+                        {quic, peer_send_shutdown, Stm, undefined} ->
+                            quicer:close_connection(Conn);
+                        %% Conn shutdown
                         {quic, shutdown, Conn, _} ->
                             ok
                     end;

@@ -22,6 +22,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("quicer/include/quicer.hrl").
 
+suite() ->
+    [{timetrap, {seconds, 30}}].
 
 all() ->
     [
@@ -161,13 +163,21 @@ t_quic_sock(Config) ->
 
 t_quic_sock_fail(_Config) ->
     Port = 4567,
-    Error = {error, {transport_down,#{ error => 2,
-                                       status => connection_refused}}
-            },
-    Error = emqtt_quic:connect("localhost",
+    Error1 = {error, {transport_down, #{ error => 2,
+                                         status => connection_refused}}
+             },
+    Error2 = {error, {transport_down, #{error => 1, status => unreachable}}},
+    case emqtt_quic:connect("localhost",
                                Port,
                                [{alpn, ["mqtt"]}, {active, false}],
-                               3000).
+                               3000) of
+        Error1 ->
+            ok;
+        Error2 ->
+            ok;
+        Other ->
+            ct:fail("unexpected return ~p", [Other])
+    end.
 
 t_0_rtt(Config) ->
     Port = 4568,
