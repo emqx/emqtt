@@ -30,10 +30,6 @@ test_pkg(){
                 echo 'package install error' && exit 1
             fi
             emqtt pub -t 'hello' --payload 'hello world' -h broker.emqx.io
-            dpkg -r emqtt
-            if [ "$(dpkg -l | grep emqtt | awk '{print $1}')" != "rc" ]; then
-                echo 'package remove error' && exit 1
-            fi
             dpkg -P emqtt
             if [ -n "$(dpkg -l | grep emqtt)" ]; then
                 echo 'package uninstall error' && exit 1
