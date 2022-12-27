@@ -125,8 +125,6 @@ jobs:
             aws s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
             aws cloudfront create-invalidation --distribution-id E3TYD0WSP4S14P --paths "/emqtt/$version/*"
         - name: upload github
-          run: |
-            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
-            for var in $(ls _packages) ; do
-                .github/workflows/script/upload_github_release_asset.sh owner=emqx repo=emqtt tag=$version filename=_packages/$var github_api_token=$(echo ${{ secrets.AccessToken }})
-            done
+          uses: softprops/action-gh-release@v1
+          with:
+            files: "_packages/*"
