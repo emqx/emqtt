@@ -1,14 +1,14 @@
 CT_NODE_NAME = ct@127.0.0.1
 
-REBAR := $(CURDIR)/rebar3
+REBAR ?= $(or $(shell which rebar3 2>/dev/null),$(CURDIR)/rebar3)
 
-REBAR_URL := https://github.com/emqx/rebar3/releases/download/3.16.1-emqx-1/rebar3
+REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.19.0/rebar3
 
 all: emqtt
 
 $(REBAR):
-	@curl -k -f -L "$(REBAR_URL)" -o ./rebar3
-	@chmod +x ./rebar3
+	curl -fsSL "$(REBAR_URL)" -o $@
+	chmod +x $@
 
 emqtt: $(REBAR) escript
 	$(REBAR) as emqtt release
