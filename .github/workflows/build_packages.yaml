@@ -35,7 +35,9 @@ jobs:
                 - 1.13.4
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v3
+          with:
+            fetch-depth: 0
         - name: build emqx packages
           env:
             BUILDER_IMAGE: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}:${{ matrix.elixir }}-${{ matrix.otp }}-${{ matrix.os }}"
@@ -55,7 +57,7 @@ jobs:
         - uses: actions/upload-artifact@v3
           with:
             name: packages
-            path: _packages/.
+            path: _packages/*
 
     build-on-mac:
         runs-on: macos-latest
@@ -68,7 +70,7 @@ jobs:
               - 25
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v3
         - name: prepare
           run: |
             # See https://github.com/actions/setup-python/issues/577
@@ -87,7 +89,7 @@ jobs:
         - uses: actions/upload-artifact@v3
           with:
             name: packages-mac
-            path: _packages/.
+            path: _packages/*
 
     release:
         runs-on: ubuntu-latest
@@ -96,12 +98,12 @@ jobs:
         if: ${{ github.event_name == 'release' }}
 
         steps:
-        - uses: actions/checkout@v2
-        - uses: actions/download-artifact@v1
+        - uses: actions/checkout@v3
+        - uses: actions/download-artifact@v3
           with:
             name: packages
             path: _packages
-        - uses: actions/download-artifact@v1
+        - uses: actions/download-artifact@v3
           with:
             name: packages-mac
             path: _packages

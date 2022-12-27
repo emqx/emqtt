@@ -29,7 +29,7 @@ jobs:
 
         steps:
         - name: Checkout
-          uses: actions/checkout@v2
+          uses: actions/checkout@v3
           with:
             submodules: recursive
         - name: work around https://github.com/actions/checkout/issues/766
@@ -42,12 +42,12 @@ jobs:
             make cover
             # @TODO rebar3 tar does not include appup of dep apps
             # make relup-test
-        - uses: actions/upload-artifact@v1
+        - uses: actions/upload-artifact@v3
           if: always()
           with:
             name: logs
             path: _build/test/logs
-        - uses: actions/upload-artifact@v1
+        - uses: actions/upload-artifact@v3
           with:
             name: cover
             path: _build/test/cover
