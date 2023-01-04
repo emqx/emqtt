@@ -22,7 +22,7 @@ Erlang MQTT v5.0 Client compatible with MQTT v3.0.
 %build
 
 %install
-if [-d %{buildroot}]; then
+if [ -d %{buildroot} ]; then
    rm -rf %{buildroot}
 fi
 mkdir -p %{buildroot}%{_lib_home}
