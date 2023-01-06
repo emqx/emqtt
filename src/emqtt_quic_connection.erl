@@ -69,7 +69,7 @@ closed(_Conn, #{} = _Flags, #{state_name := _Other} = S)->
 -spec nst_received(connection_handle(), binary(), cb_data()) -> cb_ret().
 nst_received(_Conn, Ticket, #{clientid := Cid} = S) when is_binary(Ticket) ->
     catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
-    {keep_state, S}.
+    {keep_state, S#{nst => Ticket}}.
 
 -spec new_stream(quicer:stream_handle(), quicer:new_stream_props(), cb_data()) -> cb_ret().
 %% handles stream when there is no stream acceptors.

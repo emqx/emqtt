@@ -73,7 +73,8 @@ groups() ->
               t_multi_streams_shutdown_data_stream_abortive,
               t_multi_streams_dup_sub,
               t_multi_streams_packet_boundary,
-              t_multi_streams_packet_malform
+              t_multi_streams_packet_malform,
+              t_multi_streams_sub_0_rtt
              ]},
 
       {shutdown, [{group, graceful_shutdown},
@@ -272,6 +273,36 @@ t_multi_streams_sub(Config) ->
             ct:fail("not received")
     end,
     ok = emqtt:disconnect(C).
+
+t_multi_streams_sub_0_rtt(Config) ->
+    PubQos = ?config(pub_qos, Config),
+    SubQos = ?config(sub_qos, Config),
+    RecQos = calc_qos(PubQos, SubQos),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    {ok, C0} = emqtt:start_link([{proto_ver, v5} | Config]),
+    {ok, _} = emqtt:quic_connect(C0),
+    {ok, _, [SubQos]} = emqtt:subscribe_via(C0, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
+    {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
+    ok = emqtt:open_quic_connection(C),
+    ok = emqtt:quic_mqtt_connect(C),
+    ok = emqtt:publish_async(C, {new_data_stream, []}, Topic, #{}, <<"qos 2 1">>, [{qos, PubQos}], infinity,
+                             fun(_)-> ok end),
+    {ok, _} = emqtt:quic_connect(C),
+    receive
+        {publish,#{ client_pid := C0
+                  , payload := <<"qos 2 1">>
+                  , qos := RecQos
+                  , topic := Topic
+                  }
+        } ->
+            ok;
+        Other ->
+            ct:fail("unexpected recv ~p", [Other] )
+    after 100 ->
+            ct:fail("not received")
+    end,
+    ok = emqtt:disconnect(C),
+    ok = emqtt:disconnect(C0).
 
 t_multi_streams_pub_parallel(Config) ->
     PubQos = ?config(pub_qos, Config),

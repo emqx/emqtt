@@ -28,6 +28,7 @@
         , send/2
         , recv/2
         , close/1
+        , open_connection/0
         ]).
 
 -export([ setopts/2
@@ -114,6 +115,9 @@ handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamC
 %%             Stop
 %%     end.
 
+open_connection() ->
+    quicer:open_connection().
+
 connect(Host, Port, Opts, Timeout) ->
     KeepAlive =  proplists:get_value(keepalive, Opts, 60),
     ConnOpts = [ {alpn, ["mqtt"]}
@@ -122,6 +126,8 @@ connect(Host, Port, Opts, Timeout) ->
                , {peer_bidi_stream_count, 1}
                , {verify, none}
                , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
+               , {send_idle_timeout_ms,  1000}
+               , {disconnect_timeout_ms, 300000}
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),
@@ -131,8 +137,9 @@ connect(Host, Port, Opts, Timeout) ->
     end.
 
 do_0rtt_connect(Host, Port, ConnOpts) ->
+    IsConnOpened = proplists:is_defined(handle, ConnOpts),
     case quicer:async_connect(Host, Port, ConnOpts) of
-        {ok, Conn} ->
+        {ok, Conn} when not IsConnOpened ->
             case quicer:start_stream(Conn, #{active => 1}) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
@@ -141,6 +148,8 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
                 Error ->
                     Error
             end;
+        {ok, _Conn} = Res ->
+            skip;
         {error, Type, Info} ->
             {error, {Type, Info}};
         {error, _} = Error ->
@@ -148,8 +157,9 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
     end.
 
 do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
+    IsConnOpened = proplists:is_defined(handle, ConnOpts),
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
-        {ok, Conn} ->
+        {ok, Conn} when not IsConnOpened ->
             case quicer:start_stream(Conn, #{active => 1}) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
@@ -158,6 +168,8 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
                 Error ->
                     Error
             end;
+        {ok, _Conn} = Res ->
+            skip;
         {error, transport_down, Reason} ->
             {error, {transport_down, Reason}};
         {error, _} = Error ->
@@ -167,7 +179,8 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
 send({quic, _Conn, Stream}, Bin) ->
     send(Stream, Bin);
 send(Stream, Bin) ->
-    case quicer:send(Stream, Bin) of
+    %% Use async here because we could send before start the connecion.
+    case quicer:async_send(Stream, Bin) of
         {ok, _Len} ->
             ok;
         {error, ErrorType, Reason} ->
