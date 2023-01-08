@@ -891,6 +891,9 @@ initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefi
             Error = {error, Reason},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Error}]}
     end;
+initialized({call, From}, {new_data_stream, _StreamOpts} = Via0, State) ->
+    {Via, State1} = maybe_new_stream(Via0, State),
+    {keep_state, State1, {reply, From, {ok, Via}}};
 initialized(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _Via, _ExpireAt, _Callback) = PubReq,
             State0) ->
     shoot(PubReq, State0);
