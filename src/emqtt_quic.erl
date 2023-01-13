@@ -1,5 +1,5 @@
 %%-------------------------------------------------------------------------
-%% Copyright (c) 2021-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2021-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -104,17 +104,6 @@ handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamC
        passive =:= Event ->
     StreamCB:Event(Stream, Props, CBState#{state_name := StateName}).
 
-%% handle_info({quic, Bin, _Stream, _Props}, StateName, #{parse_state := PS} = QuicData)
-%%   when is_binary(Bin) ->
-%%     ?LOG(debug, "RECV_Data", #{data => Bin}, QuicData),
-%%     case parse(Bin, PS, []) of
-%%         {keep_state, NewPS, Packets} ->
-%%             {keep_state, QuicData#{parse_state := NewPS},
-%%              [{next_event, cast, P } || P <- lists:reverse(Packets)]};
-%%         {stop, _} = Stop ->
-%%             Stop
-%%     end.
-
 open_connection() ->
     quicer:open_connection().
 
@@ -126,8 +115,8 @@ connect(Host, Port, Opts, Timeout) ->
                , {peer_bidi_stream_count, 1}
                , {verify, none}
                , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
-               , {send_idle_timeout_ms,  1000}
-               , {disconnect_timeout_ms, 300000}
+               % , {send_idle_timeout_ms,  1000}
+               % , {disconnect_timeout_ms, 300000}
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
                | Opts] ++ local_addr(Opts),

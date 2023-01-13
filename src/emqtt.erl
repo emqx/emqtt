@@ -1,5 +1,5 @@
 %%-------------------------------------------------------------------------
-%% Copyright (c) 2020-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -1995,7 +1995,6 @@ maybe_init_quic_state(_, Old) ->
 update_data_streams(#{data_stream_socks := Socks} = Extra, NewSock) ->
     Extra#{data_stream_socks := [ NewSock | Socks]}.
 
-
 maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}
                                          } = OldState, _Sock)
   when Stream =/= undefined andalso Conn =/= undefined ->
@@ -2006,7 +2005,6 @@ maybe_update_ctrl_sock(emqtt_quic, #state{extra = OldExtra} = OldState, Sock) ->
                   };
 maybe_update_ctrl_sock(_, Old, _) ->
     Old.
-
 
 -spec maybe_new_stream(via(), #state{}) -> {inet:socket() | emqtt_quic:quic_sock(), #state{}}.
 maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
