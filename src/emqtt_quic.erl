@@ -137,7 +137,7 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
                 Error ->
                     Error
             end;
-        {ok, _Conn} = Res ->
+        {ok, _Conn} ->
             skip;
         {error, Type, Info} ->
             {error, {Type, Info}};
@@ -157,7 +157,7 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
                 Error ->
                     Error
             end;
-        {ok, _Conn} = Res ->
+        {ok, _Conn} ->
             skip;
         {error, transport_down, Reason} ->
             {error, {transport_down, Reason}};

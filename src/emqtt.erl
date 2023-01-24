@@ -894,7 +894,7 @@ initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefi
 initialized({call, From}, {new_data_stream, _StreamOpts} = Via0, State) ->
     {Via, State1} = maybe_new_stream(Via0, State),
     {keep_state, State1, {reply, From, {ok, Via}}};
-initialized(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _Via, _ExpireAt, _Callback) = PubReq,
+initialized(info, ?PUB_REQ(#mqtt_msg{}, _Via, _ExpireAt, _Callback) = PubReq,
             State0) ->
     shoot(PubReq, State0);
 initialized(EventType, EventContent, State) ->
@@ -1687,9 +1687,6 @@ retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBREL(Via, PacketId, _, ExpireAt)}
     end;
 retry_send(_Now, [], State) ->
     State.
-
-deliver(#mqtt_msg{} = Msg, State) ->
-    deliver(default_via(State), #mqtt_msg{} = Msg, State).
 
 deliver(Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
                        topic = Topic, props = Props, payload = Payload},

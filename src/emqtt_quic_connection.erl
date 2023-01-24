@@ -16,10 +16,12 @@
 -module(emqtt_quic_connection).
 
 -ifndef(BUILD_WITHOUT_QUIC).
+-include("emqtt.hrl").
+-include("logger.hrl").
+
 
 -include_lib("quicer/include/quicer.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
--include("logger.hrl").
 
 %% Callback init
 -export([ init/1 ]).
