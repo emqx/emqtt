@@ -33,7 +33,7 @@
         , disconnect/3
         ]).
 
--export([ping/1]).
+-export([status/1, ping/1]).
 
 %% PubSub
 -export([ subscribe/2
@@ -117,6 +117,7 @@
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
 -type(msg_handler() :: #{publish := fun((emqx_types:message()) -> any()) | mfas(),
+                         connected := fun((_Properties :: term()) -> any()) | mfas(),
                          disconnected := fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
 
@@ -149,7 +150,7 @@
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
-                | {reconnect, boolean()}
+                | {reconnect, boolean() | pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
                 | {nst,  binary()}).
@@ -224,7 +225,7 @@
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
           parse_state     :: emqtt_frame:parse_state(),
-          reconnect       :: boolean(),
+          reconnect       :: boolean() | pos_integer(),
           qoe             :: boolean() | map(),
           nst             :: binary(), %% quic new session ticket
           pendings        :: pendings(),
@@ -293,6 +294,8 @@
 		 }).
 
 -define(NO_CLIENT_ID, <<>>).
+
+-define(IS_RECONNECT(Re), (Re == true orelse is_integer(Re))).
 
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clietntid => State#state.clientid}, #{})).
@@ -518,6 +521,10 @@ unsubscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics)
 ping(Client) ->
     gen_statem:call(Client, ping).
 
+-spec(status(client()) -> connected | waiting_for_connack | reconnect).
+status(Client) ->
+    gen_statem:call(Client, status).
+
 -spec(disconnect(client()) -> ok).
 disconnect(Client) ->
     disconnect(Client, ?RC_SUCCESS).
@@ -736,6 +743,8 @@ init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
 init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
     init(Opts, State#state{reconnect = IsReconnect});
+init([{reconnect, Timeout} | Opts], State) when is_integer(Timeout) andalso Timeout > 0 ->
+    init(Opts, State#state{reconnect = timer:seconds(Timeout)});
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
     init(Opts, State#state{low_mem = IsLow});
 init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binary(Ticket) ->
@@ -837,6 +846,11 @@ reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
     end;
 reconnect({call, From}, stop, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
+reconnect(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
+    eval_callback_handler({error, waiting_reconnect}, Callback),
+    keep_state_and_data;
+reconnect({call, From}, status, _State) ->
+    {keep_state_and_data, {reply, From, reconnect}};
 reconnect(_EventType, _, _State) ->
     {keep_state_and_data, postpone}.
 
@@ -858,6 +872,7 @@ waiting_for_connack(cast, ?CONNACK_PACKET(?RC_SUCCESS,
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
+    ok = eval_msg_handler(State3, connected, Properties),
     case take_call(connect, State3) of
         {value, #call{from = From}, State4} ->
             {next_state, connected, State4, [{reply, From, Reply} | Retry]};
@@ -880,6 +895,10 @@ waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
 
 waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
+
+waiting_for_connack(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
+    eval_callback_handler({error, waiting_for_connack}, Callback),
+    keep_state_and_data;
 
 waiting_for_connack(state_timeout, _Timeout, State) ->
     case take_call(connect, State) of
@@ -1080,8 +1099,13 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
                            pending_calls = timeout_calls(Timeout, Calls)},
     {keep_state, ensure_ack_timer(NewState)};
 
-connected(info, immediate_retry, State) ->
-    retry_send(State);
+connected(info, immediate_retry, State = #state{inflight = Inflight}) ->
+    %% Retry all messages in the inflight window once the reconnection
+    %% succeed, regardless of the value of the retry_interval.
+    Now = now_ts(),
+    Pred = fun(_, _) -> true end,
+    NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
+    {keep_state, NState};
 
 connected(info, {timeout, TRef, retry}, State0 = #state{retry_timer = TRef,
                                                         inflight    = Inflight}) ->
@@ -1106,6 +1130,9 @@ connected(EventType, EventContent, Data) ->
 handle_event({call, From}, stop, _StateName, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
 
+handle_event({call, From}, status, StateName, _State) ->
+    {keep_state_and_data, {reply, From, StateName}};
+
 handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
              _StateName, State = #state{socket = ConnPid}) ->
     ?LOG(debug, "RECV_Data", #{data => Data}, State),
@@ -1126,8 +1153,8 @@ handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
     process_incoming(Data, [], run_sock(State));
 
 handle_event(info, {Error, Sock, Reason}, connected,
-             #state{reconnect = true, socket = Sock} = State)
-    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
+             #state{reconnect = Re, socket = Sock} = State)
+    when (Error =:= tcp_error orelse Error =:= ssl_error orelse Error =:= 'EXIT') andalso ?IS_RECONNECT(Re) ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
     case Error of
@@ -1143,8 +1170,8 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
          #{error => Error, reason =>Reason}, State),
     {stop, {shutdown, Reason}, State};
 
-handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = true } = State)
-    when Closed =:= tcp_closed; Closed =:= ssl_closed ->
+handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
+    when (Closed =:= tcp_closed orelse Closed =:= ssl_closed) andalso ?IS_RECONNECT(Re) ->
     next_reconnect(State);
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1175,19 +1202,23 @@ handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
 %% QUIC, waiting_for_connack, handles async 0-RTT connect
 handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
     keep_state_and_data;
-handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = true} = State) ->
+handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = Re} = State)
+  when ?IS_RECONNECT(Re) ->
     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
     keep_state_and_data;
-handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = Re})
+   when ?IS_RECONNECT(Re) ->
     keep_state_and_data;
-handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = true}) ->
+handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = Re})
+   when ?IS_RECONNECT(Re) ->
     keep_state_and_data;
 
 handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
     ?LOG(error, "QUIC_stream_closed", #{reason => Reason}, State),
     {stop, {shutdown, {closed, Reason}}, State};
 
-handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = true} = State) ->
+handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = Re} = State)
+   when ?IS_RECONNECT(Re) ->
     quicer:shutdown_connection(Conn),
     next_reconnect(State);
 
@@ -1784,12 +1815,17 @@ reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
 
-next_reconnect(#state{connect_timeout = Timeout,
+next_reconnect(#state{connect_timeout = Timeout0,
                       retry_timer = RetryTimer,
-                      keepalive_timer = KeepAliveTimer
+                      keepalive_timer = KeepAliveTimer,
+                      reconnect = Reconnect
                      } = State) ->
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
+    Timeout = case is_integer(Reconnect) andalso Reconnect > 0 of
+                  true -> Reconnect;
+                  false -> Timeout0
+              end,
     {next_state, reconnect, State#state{clean_start = false,
                                         retry_timer = undefined,
                                         keepalive_timer = undefined
