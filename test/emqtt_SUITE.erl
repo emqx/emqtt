@@ -138,8 +138,10 @@ end_per_testcase(TC, _Config)
        TC =:= t_reconnect_reach_max_attempts ->
     process_flag(trap_exit, false),
     ok = emqtt_test_lib:start_emqx(),
+    meck:unload(),
     ok;
 end_per_testcase(_TC, _Config) ->
+    meck:unload(),
     ok.
 
 init_per_group(quic, Config) ->
@@ -307,27 +309,35 @@ t_reconnect_reach_max_attempts(Config) ->
     Port = ?config(port, Config),
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
-                                {reconnect, 3},
+                                {reconnect, 2},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
+
+    %% meck connect, close funcs to speed up
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    meck:expect(emqtt_sock, connect, fun(_, _, _, _) -> {error, fake_conn_error} end),
+    meck:expect(emqtt_sock, close, fun(_) -> ok end),
+
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    meck:expect(emqtt_quic, connect, fun(_, _, _, _) -> {error, fake_conn_error} end),
+    meck:expect(emqtt_quic, close, fun(_) -> ok end),
+
     ok = emqtt_test_lib:stop_emqx(),
+
     receive
         {'DOWN', MRef, process, C, _Info} ->
-            ct:fail(conn_dead)
-    after 500 ->
             receive
-                {'DOWN', MRef, process, C, _Info} ->
-                    receive
-                        {'EXIT', C, reach_max_reconnect_attempts} ->
-                            ok
-                    after 100 ->
-                            ct:fail(no_exit)
-                    end
-            after 15000 ->
-                    ct:fail(conn_still_alive)
+                {'EXIT', C, reach_max_reconnect_attempts} ->
+                    ok
+            after 100 ->
+                    ct:fail(no_exit)
             end
-    end.
+    after 5000 ->
+            ct:fail(conn_still_alive)
+    end,
+    meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic).
 
 t_reconnect_immediate_retry(Config) ->
     ConnFun = ?config(conn_fun, Config),
