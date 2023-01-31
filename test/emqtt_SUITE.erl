@@ -60,6 +60,7 @@ groups() ->
        t_publish_process_monitor,
        t_publish_port_error,
        t_publish_port_error_retry,
+       t_publish_in_not_connected,
        t_publish_async,
        t_eval_callback_in_order,
        t_ack_inflight_and_shoot_cycle,
@@ -72,6 +73,7 @@ groups() ->
        t_reconnect_disabled,
        t_reconnect_enabled,
        t_reconnect_stop,
+       t_reconnect_reach_max_attempts,
        t_subscriptions,
        t_info,
        t_stop,
@@ -118,7 +120,8 @@ init_per_testcase(_TC, Config) ->
 end_per_testcase(TC, _Config)
   when TC =:= t_reconnect_enabled orelse
        TC =:= t_reconnect_disabled orelse
-       TC =:= t_reconnect_stop ->
+       TC =:= t_reconnect_stop orelse
+       TC =:= t_reconnect_reach_max_attempts ->
     process_flag(trap_exit, false),
     ok = emqtt_test_lib:start_emqx(),
     ok;
@@ -234,7 +237,7 @@ t_reconnect_enabled(Config) ->
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {reconnect, true},
-                                {connect_timeout, 1}]), % 1 sec
+                                {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
@@ -263,7 +266,7 @@ t_reconnect_stop(Config) ->
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {reconnect, true},
-                                {connect_timeout, 1}]), % 1 sec
+                                {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
     ok = emqtt_test_lib:stop_emqx(),
@@ -281,6 +284,33 @@ t_reconnect_stop(Config) ->
                             ct:fail(no_exit)
                     end
             after 6000 ->
+                    ct:fail(conn_still_alive)
+            end
+    end.
+
+t_reconnect_reach_max_attempts(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {reconnect, 3},
+                                {reconnect_timeout, 1}]), % 1 sec
+    {ok, _} = emqtt:ConnFun(C),
+    MRef = erlang:monitor(process, C),
+    ok = emqtt_test_lib:stop_emqx(),
+    receive
+        {'DOWN', MRef, process, C, _Info} ->
+            ct:fail(conn_dead)
+    after 500 ->
+            receive
+                {'DOWN', MRef, process, C, _Info} ->
+                    receive
+                        {'EXIT', C, reach_max_reconnect_attempts} ->
+                            ok
+                    after 100 ->
+                            ct:fail(no_exit)
+                    end
+            after 10000 ->
                     ct:fail(conn_still_alive)
             end
     end.
@@ -544,6 +574,48 @@ test_publish_port_error_retry(Config) ->
     Result = ?WAIT({publish_result, R}, R),
     ?assertEqual(Result, {error, normal}),
     meck:unload(emqtt_sock).
+
+t_publish_in_not_connected(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {reconnect, true},
+                                {reconnect_timeout, 1}]), % 1 sec
+    {ok, _} = emqtt:ConnFun(C),
+
+    %% return `not_connected` error in reconnect state
+    ok = emqtt_test_lib:stop_emqx(),
+    timer:sleep(1000),
+    ?assertEqual(reconnect, emqtt:status(C)),
+    ?assertEqual({error, not_connected}, emqtt:publish(C, Topic, <<"payload">>)),
+
+    meck:new(emqx_access_control, [passthrough, no_history]),
+    meck:new(emqtt, [passthrough, no_history]),
+    meck:expect(emqx_access_control,
+                authenticate,
+                fun(Credential) ->
+                        timer:sleep(2000),
+                        meck:passthrough([Credential])
+                end),
+    Self = self(),
+    meck:expect(emqtt,
+                waiting_for_connack,
+                fun(EventType, Event, Data) ->
+                        Self ! waiting_for_connack,
+                        meck:passthrough([EventType, Event, Data])
+                end),
+
+    %% return `not_connected` error in waiting_for_connack state
+    ok = emqtt_test_lib:start_emqx(),
+    ?WAIT(waiting_for_connack, ok),
+    ?assertEqual(waiting_for_connack, emqtt:status(C)),
+    ?assertEqual({error, not_connected}, emqtt:publish(C, Topic, <<"payload">>)),
+
+    meck:unload(emqtt),
+    meck:unload(emqx_access_control).
+
 
 t_publish_async(Config) ->
     ConnFun = ?config(conn_fun, Config),

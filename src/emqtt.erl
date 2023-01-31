@@ -857,7 +857,7 @@ reconnect(state_timeout, Attempts, #state{conn_mod = CMod} = State) ->
                     {stop, reach_max_reconnect_attempts};
                 false ->
                     #state{reconnect_timeout = ReconnectTimeout} = State,
-                    {keep_state_and_data, {state_timeout, ReconnectTimeout, Attempts}}
+                    {keep_state_and_data, {state_timeout, ReconnectTimeout, NextAttempts}}
             end
     end;
 reconnect({call, From}, stop, _State) ->
@@ -909,6 +909,8 @@ waiting_for_connack(cast, ?CONNACK_PACKET(ReasonCode,
         false -> {stop, connack_error}
     end;
 
+waiting_for_connack({call, From}, status, _State) ->
+    {keep_state_and_data, {reply, From, waiting_for_connack}};
 waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
