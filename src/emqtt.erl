@@ -844,7 +844,7 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  password     = emqtt_secret:unwrap(Password)}), State).
 
 reconnect(state_timeout, Attempts, #state{conn_mod = CMod} = State) ->
-    case do_connect(CMod, State#state{clean_start = false}) of
+    case do_connect(CMod, State) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Attempts}};
         _Err ->
@@ -1117,13 +1117,18 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
                            pending_calls = timeout_calls(Timeout, Calls)},
     {keep_state, ensure_ack_timer(NewState)};
 
-connected(info, immediate_retry, State = #state{inflight = Inflight}) ->
-    %% Retry all messages in the inflight window once the reconnection
-    %% succeed, regardless of the value of the retry_interval.
+connected(info, immediate_retry, State = #state{clean_start = false, inflight = Inflight}) ->
+    ?LOG(debug, "replay_all_inflight_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
     Now = now_ts(),
     Pred = fun(_, _) -> true end,
     NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
     {keep_state, NState};
+
+connected(info, immediate_retry, State = #state{clean_start = true, inflight = Inflight}) ->
+    ?LOG(info, "drop_nack_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
+    ok = reply_all_inflight_reqs(dropped, State),
+    NState = State#state{inflight = emqtt_inflight:empty(Inflight)},
+    {keep_state, NState, {next_event, info, maybe_shoot}};
 
 connected(info, {timeout, TRef, retry}, State0 = #state{retry_timer = TRef,
                                                         inflight    = Inflight}) ->
@@ -1141,6 +1146,9 @@ connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _ExpireAt, _Callback) = PubReq,
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
     Pendings = enqueue_publish_req(PubReq, Pendings0),
     maybe_shoot(State0#state{pendings = Pendings});
+
+connected(info, maybe_shoot, State) ->
+    maybe_shoot(State);
 
 connected(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, connected, Data).
@@ -1296,6 +1304,7 @@ maybe_upgrade_test_cheat(_, _, _, _) ->
 
 %% Mandatory callback functions
 terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket}) ->
+    reply_all_inflight_reqs(Reason, State),
     reply_all_pendings_reqs(Reason, State),
     case Reason of
         {disconnected, ReasonCode, Properties} ->
@@ -1668,14 +1677,18 @@ apply_callback_function({M, F, A}, Result)
 shutdown(Reason, State) ->
     {stop, Reason, State}.
 
-reply_all_pendings_reqs(Reason, #state{pendings = Pendings, inflight = Inflight}) ->
-    %% reply to all pendings caller
+reply_all_inflight_reqs(Reason, #state{inflight = Inflight}) ->
+    %% reply error to all pendings caller
     emqtt_inflight:foreach(
       fun(_PacketId, ?INFLIGHT_PUBLISH(_Msg, _SentAt, _ExpireAt, Callback)) ->
               eval_callback_handler({error, Reason}, Callback);
          (_PacketId, _InflightPubReql) ->
               ok
       end, Inflight),
+    ok.
+
+reply_all_pendings_reqs(Reason, #state{pendings = Pendings}) ->
+    %% reply error to all pendings caller
     Reqs = maps:get(requests, Pendings),
     _ = queue_fold(
           fun(?PUB_REQ(_, _, Callback), _) ->
@@ -1844,8 +1857,7 @@ next_reconnect(#state{retry_timer = RetryTimer,
                      } = State) ->
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
-    {next_state, reconnect, State#state{clean_start = false,
-                                        retry_timer = undefined,
+    {next_state, reconnect, State#state{retry_timer = undefined,
                                         keepalive_timer = undefined
                                        },
      {state_timeout, Timeout, num_of_reconnect_attempts(Reconnect)}}.

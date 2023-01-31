@@ -23,6 +23,7 @@
 -endif.
 
 -export([ new/1
+        , empty/1
         , insert/3
         , update/3
         , delete/2
@@ -56,6 +57,10 @@
 -spec(new(infinity | pos_integer()) -> inflight()).
 new(MaxInflight) ->
     #{max_inflight => MaxInflight, sent => #{}, seq => 1}.
+
+-spec(empty(inflight()) -> inflight()).
+empty(Inflight) ->
+    Inflight#{sent := #{}, seq := 1}.
 
 -spec(insert(id(), req(), inflight()) -> error | {ok, inflight()}).
 insert(Id, Req, Inflight = #{max_inflight := Max, sent := Sent, seq := Seq}) ->
