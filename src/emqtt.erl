@@ -521,7 +521,7 @@ unsubscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics)
 ping(Client) ->
     gen_statem:call(Client, ping).
 
--spec(status(client()) -> connected | waiting_for_connack | reconnect).
+-spec(status(client()) -> initialized | connected | waiting_for_connack | reconnect).
 status(Client) ->
     gen_statem:call(Client, status).
 
