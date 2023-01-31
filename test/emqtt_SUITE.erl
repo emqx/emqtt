@@ -487,7 +487,7 @@ test_publish_port_error_retry(Config) ->
                                 {retry_interval, 1},
                                 {reconnect, true},
                                 %% seconds
-                                {connect_timeout, 2}
+                                {reconnect_timeout, 2}
                                ]),
     unlink(C),
     Tester = self(),

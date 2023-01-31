@@ -151,6 +151,7 @@
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
                 | {reconnect, boolean() | pos_integer()}
+                | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
                 | {nst,  binary()}).
@@ -186,50 +187,51 @@
 
 
 -record(state, {
-          name            :: atom(),
-          owner           :: pid(),
-          msg_handler     :: ?NO_HANDLER | msg_handler(),
-          host            :: host(),
-          port            :: inet:port_number(),
-          hosts           :: [{host(), inet:port_number()}],
-          conn_mod        :: conn_mod(),
-          socket          :: inet:socket() | pid(),
-          sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
-          connect_timeout :: pos_integer(),
-          bridge_mode     :: boolean(),
-          clientid        :: binary(),
-          clean_start     :: boolean(),
-          username        :: maybe(binary()),
-          password        :: function(),
-          proto_ver       :: version(),
-          proto_name      :: iodata(),
-          keepalive       :: non_neg_integer(),
-          keepalive_timer :: maybe(reference()),
-          force_ping      :: boolean(),
-          paused          :: boolean(),
-          will_flag       :: boolean(),
-          will_msg        :: mqtt_msg(),
-          properties      :: properties(),
-          pending_calls   :: list(),
-          subscriptions   :: map(),
-          inflight        :: emqtt_inflight:inflight(
-                               inflight_publish() | inflight_pubrel()
-                              ),
-          awaiting_rel    :: map(),
-          auto_ack        :: boolean(),
-          ack_timeout     :: pos_integer(),
-          ack_timer       :: reference(),
-          retry_interval  :: pos_integer(),
-          retry_timer     :: reference(),
-          session_present :: boolean(),
-          last_packet_id  :: packet_id(),
-          low_mem         :: boolean(),
-          parse_state     :: emqtt_frame:parse_state(),
-          reconnect       :: boolean() | pos_integer(),
-          qoe             :: boolean() | map(),
-          nst             :: binary(), %% quic new session ticket
-          pendings        :: pendings(),
-          extra = #{}     :: map() %% extra field for easier to make appup
+          name              :: atom(),
+          owner             :: pid(),
+          msg_handler       :: ?NO_HANDLER | msg_handler(),
+          host              :: host(),
+          port              :: inet:port_number(),
+          hosts             :: [{host(), inet:port_number()}],
+          conn_mod          :: conn_mod(),
+          socket            :: inet:socket() | pid(),
+          sock_opts         :: [emqtt_sock:option()|emqtt_ws:option()],
+          connect_timeout   :: pos_integer(),
+          bridge_mode       :: boolean(),
+          clientid          :: binary(),
+          clean_start       :: boolean(),
+          username          :: maybe(binary()),
+          password          :: function(),
+          proto_ver         :: version(),
+          proto_name        :: iodata(),
+          keepalive         :: non_neg_integer(),
+          keepalive_timer   :: maybe(reference()),
+          force_ping        :: boolean(),
+          paused            :: boolean(),
+          will_flag         :: boolean(),
+          will_msg          :: mqtt_msg(),
+          properties        :: properties(),
+          pending_calls     :: list(),
+          subscriptions     :: map(),
+          inflight          :: emqtt_inflight:inflight(
+                                 inflight_publish() | inflight_pubrel()
+                                ),
+          awaiting_rel      :: map(),
+          auto_ack          :: boolean(),
+          ack_timeout       :: pos_integer(),
+          ack_timer         :: reference(),
+          retry_interval    :: pos_integer(),
+          retry_timer       :: reference(),
+          session_present   :: boolean(),
+          last_packet_id    :: packet_id(),
+          low_mem           :: boolean(),
+          parse_state       :: emqtt_frame:parse_state(),
+          reconnect         :: boolean() | pos_integer(),
+          reconnect_timeout :: pos_integer(),
+          qoe               :: boolean() | map(),
+          nst               :: binary(), %% quic new session ticket
+          pendings          :: pendings(),
+          extra = #{}       :: map() %% extra field for easier to make appup
          }). %% note, always add the new fields at the tail for code_change.
 
 -type(state() ::  #state{}).
@@ -282,6 +284,7 @@
 -define(DEFAULT_RETRY_INTERVAL, 30000).
 -define(DEFAULT_ACK_TIMEOUT, 30000).
 -define(DEFAULT_CONNECT_TIMEOUT, 60000).
+-define(DEFAULT_RECONNECT_TIMEOUT, 5000).
 
 -define(PROPERTY(Name, Val), #state{properties = #{Name := Val}}).
 
@@ -295,7 +298,7 @@
 
 -define(NO_CLIENT_ID, <<>>).
 
--define(IS_RECONNECT(Re), (Re == true orelse is_integer(Re))).
+-define(NEED_RECONNECT(Re), (Re == true orelse (is_integer(Re) andalso Re > 0))).
 
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clietntid => State#state.clientid}, #{})).
@@ -604,37 +607,38 @@ init([Options]) ->
                    {_ver, undefined} -> random_client_id();
                    {_ver, Id}        -> iolist_to_binary(Id)
                end,
-    State = init(Options, #state{host            = {127,0,0,1},
-                                 port            = 1883,
-                                 hosts           = [],
-                                 conn_mod        = emqtt_sock,
-                                 sock_opts       = [],
-                                 bridge_mode     = false,
-                                 clientid        = ClientId,
-                                 clean_start     = true,
-                                 proto_ver       = ?MQTT_PROTO_V4,
-                                 proto_name      = <<"MQTT">>,
-                                 keepalive       = ?DEFAULT_KEEPALIVE,
-                                 force_ping      = false,
-                                 paused          = false,
-                                 will_flag       = false,
-                                 will_msg        = #mqtt_msg{},
-                                 pending_calls   = [],
-                                 subscriptions   = #{},
-                                 inflight        = emqtt_inflight:new(infinity),
-                                 awaiting_rel    = #{},
-                                 properties      = #{},
-                                 auto_ack        = true,
-                                 ack_timeout     = ?DEFAULT_ACK_TIMEOUT,
-                                 retry_interval  = ?DEFAULT_RETRY_INTERVAL,
-                                 connect_timeout = ?DEFAULT_CONNECT_TIMEOUT,
-                                 low_mem         = false,
-                                 reconnect       = false,
-                                 qoe             = false,
-                                 last_packet_id  = 1,
-                                 pendings        = #{requests => queue:new(),
-                                                     count => 0
-                                                    }
+    State = init(Options, #state{host              = {127,0,0,1},
+                                 port              = 1883,
+                                 hosts             = [],
+                                 conn_mod          = emqtt_sock,
+                                 sock_opts         = [],
+                                 bridge_mode       = false,
+                                 clientid          = ClientId,
+                                 clean_start       = true,
+                                 proto_ver         = ?MQTT_PROTO_V4,
+                                 proto_name        = <<"MQTT">>,
+                                 keepalive         = ?DEFAULT_KEEPALIVE,
+                                 force_ping        = false,
+                                 paused            = false,
+                                 will_flag         = false,
+                                 will_msg          = #mqtt_msg{},
+                                 pending_calls     = [],
+                                 subscriptions     = #{},
+                                 inflight          = emqtt_inflight:new(infinity),
+                                 awaiting_rel      = #{},
+                                 properties        = #{},
+                                 auto_ack          = true,
+                                 ack_timeout       = ?DEFAULT_ACK_TIMEOUT,
+                                 retry_interval    = ?DEFAULT_RETRY_INTERVAL,
+                                 connect_timeout   = ?DEFAULT_CONNECT_TIMEOUT,
+                                 low_mem           = false,
+                                 reconnect         = false,
+                                 reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
+                                 qoe               = false,
+                                 last_packet_id    = 1,
+                                 pendings          = #{requests => queue:new(),
+                                                       count => 0
+                                                      }
                                 }),
     {ok, initialized, init_parse_state(State)}.
 
@@ -743,8 +747,10 @@ init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
 init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
     init(Opts, State#state{reconnect = IsReconnect});
-init([{reconnect, Timeout} | Opts], State) when is_integer(Timeout) andalso Timeout > 0 ->
-    init(Opts, State#state{reconnect = timer:seconds(Timeout)});
+init([{reconnect, Attempts} | Opts], State) when is_integer(Attempts) ->
+    init(Opts, State#state{reconnect = Attempts});
+init([{reconnect_timeout, I} | Opts], State) ->
+    init(Opts, State#state{reconnect_timeout = timer:seconds(I)});
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
     init(Opts, State#state{low_mem = IsLow});
 init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binary(Ticket) ->
@@ -837,17 +843,27 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = emqtt_secret:unwrap(Password)}), State).
 
-reconnect(state_timeout, NextTimeout, #state{conn_mod = CMod} = State) ->
+reconnect(state_timeout, Attempts, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State#state{clean_start = false}) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
-            {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Timeout}};
+            {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Attempts}};
         _Err ->
-            {keep_state_and_data, {state_timeout, NextTimeout, NextTimeout*2}}
+            NextAttempts = case Attempts of
+                               infinity -> infinity;
+                               _ -> Attempts - 1
+                           end,
+            case NextAttempts =< 0 of
+                true ->
+                    {stop, reach_max_reconnect_attempts};
+                false ->
+                    #state{reconnect_timeout = ReconnectTimeout} = State,
+                    {keep_state_and_data, {state_timeout, ReconnectTimeout, Attempts}}
+            end
     end;
 reconnect({call, From}, stop, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
 reconnect(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
-    eval_callback_handler({error, waiting_reconnect}, Callback),
+    eval_callback_handler({error, not_connected}, Callback),
     keep_state_and_data;
 reconnect({call, From}, status, _State) ->
     {keep_state_and_data, {reply, From, reconnect}};
@@ -897,7 +913,7 @@ waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
 waiting_for_connack(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
-    eval_callback_handler({error, waiting_for_connack}, Callback),
+    eval_callback_handler({error, not_connected}, Callback),
     keep_state_and_data;
 
 waiting_for_connack(state_timeout, _Timeout, State) ->
@@ -1154,7 +1170,7 @@ handle_event(info, {quic, Data, _Stream, _, _, _}, _StateName, State) ->
 
 handle_event(info, {Error, Sock, Reason}, connected,
              #state{reconnect = Re, socket = Sock} = State)
-    when (Error =:= tcp_error orelse Error =:= ssl_error orelse Error =:= 'EXIT') andalso ?IS_RECONNECT(Re) ->
+    when (Error =:= tcp_error orelse Error =:= ssl_error orelse Error =:= 'EXIT') andalso ?NEED_RECONNECT(Re) ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
     case Error of
@@ -1171,7 +1187,7 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
-    when (Closed =:= tcp_closed orelse Closed =:= ssl_closed) andalso ?IS_RECONNECT(Re) ->
+    when (Closed =:= tcp_closed orelse Closed =:= ssl_closed) andalso ?NEED_RECONNECT(Re) ->
     next_reconnect(State);
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1203,14 +1219,14 @@ handle_event(info, {quic, transport_shutdown, _Stream, Reason}, _, State) ->
 handle_event(info, {quic, connected, _Conn}, waiting_for_connack, _State) ->
     keep_state_and_data;
 handle_event(info, {quic, closed, Stream, Reason}, waiting_for_connack, #state{reconnect = Re} = State)
-  when ?IS_RECONNECT(Re) ->
+  when ?NEED_RECONNECT(Re) ->
     ?LOG(error, "QUIC_stream_closed but reconnect", #{reason => Reason, stream => Stream}, State),
     keep_state_and_data;
 handle_event(info, {quic, closed, _Connection}, waiting_for_connack, #state{reconnect = Re})
-   when ?IS_RECONNECT(Re) ->
+   when ?NEED_RECONNECT(Re) ->
     keep_state_and_data;
 handle_event(info, {quic, shutdown, _Connection}, waiting_for_connack, #state{reconnect = Re})
-   when ?IS_RECONNECT(Re) ->
+   when ?NEED_RECONNECT(Re) ->
     keep_state_and_data;
 
 handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
@@ -1218,7 +1234,7 @@ handle_event(info, {quic, closed, _Stream, Reason}, connected, State) ->
     {stop, {shutdown, {closed, Reason}}, State};
 
 handle_event(info, {quic, shutdown, Conn}, _, #state{reconnect = Re} = State)
-   when ?IS_RECONNECT(Re) ->
+   when ?NEED_RECONNECT(Re) ->
     quicer:shutdown_connection(Conn),
     next_reconnect(State);
 
@@ -1605,9 +1621,13 @@ eval_msg_handler(#state{msg_handler = ?NO_HANDLER,
     Owner ! {Kind, Msg},
     ok;
 eval_msg_handler(#state{msg_handler = Handler}, Kind, Msg) ->
-    F = maps:get(Kind, Handler),
-    _ = apply_handler_function(F, Msg),
-    ok.
+    case maps:get(Kind, Handler, undefined) of
+        undefined ->
+            ok;
+        F ->
+            _ = apply_handler_function(F, Msg),
+            ok
+    end.
 
 eval_callback_handler(_Result, ?NO_HANDLER) ->
     ok;
@@ -1815,22 +1835,24 @@ reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
 
-next_reconnect(#state{connect_timeout = Timeout0,
-                      retry_timer = RetryTimer,
+next_reconnect(#state{retry_timer = RetryTimer,
                       keepalive_timer = KeepAliveTimer,
-                      reconnect = Reconnect
+                      reconnect = Reconnect,
+                      reconnect_timeout = Timeout
                      } = State) ->
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
-    Timeout = case is_integer(Reconnect) andalso Reconnect > 0 of
-                  true -> Reconnect;
-                  false -> Timeout0
-              end,
     {next_state, reconnect, State#state{clean_start = false,
                                         retry_timer = undefined,
                                         keepalive_timer = undefined
                                        },
-     {state_timeout, Timeout, Timeout*2}}.
+     {state_timeout, Timeout, num_of_reconnect_attempts(Reconnect)}}.
+
+num_of_reconnect_attempts(true) ->
+    infinity;
+num_of_reconnect_attempts(Re)
+  when is_integer(Re) andalso Re > 0 ->
+    Re.
 
 cancel_timer(undefined) ->
     ok;
