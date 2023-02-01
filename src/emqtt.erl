@@ -150,7 +150,7 @@
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
-                | {reconnect, boolean() | pos_integer()}
+                | {reconnect, boolean() | pos_integer() | infinity}
                 | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
@@ -1863,6 +1863,8 @@ next_reconnect(#state{retry_timer = RetryTimer,
      {state_timeout, Timeout, num_of_reconnect_attempts(Reconnect)}}.
 
 num_of_reconnect_attempts(true) ->
+    infinity;
+num_of_reconnect_attempts(infinity) ->
     infinity;
 num_of_reconnect_attempts(Re)
   when is_integer(Re) andalso Re > 0 ->
