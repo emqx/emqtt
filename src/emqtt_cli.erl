@@ -53,7 +53,15 @@
          {cert, undefined, "cert", string,
           "path to a file containing the user certificate on pem format"},
          {key, undefined, "key", string,
-          "path to the file containing the user's private pem-encoded key"}
+          "Path to the file containing the user's private pem-encoded key"},
+         {sni, undefined, "sni", string,
+          "Applicable when '--enable_ssl' is in use. "
+          "Use '--sni true' to apply the host name from '-h|--host' option "
+          "as SNI, therwise use the host name to which the server's SSL "
+          "certificate is issued"},
+         {verify, undefined, "verify", boolean,
+          "TLS verify option, default: false "
+         }
         ]).
 
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
@@ -273,6 +281,14 @@ parse_cmd_opts([{repeat, Repeat} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat, Repeat} | Acc]);
 parse_cmd_opts([{repeat_delay, RepeatDelay} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat_delay, RepeatDelay} | Acc]);
+parse_cmd_opts([{print, WhatToPrint} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{print, WhatToPrint} | Acc]);
+parse_cmd_opts([{verify, IsVerify} | Opts], Acc) ->
+    V = case IsVerify of
+            true -> verify_peer;
+            false -> verify_none
+        end,
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {verify, V}, Acc));
 parse_cmd_opts([_ | Opts], Acc) ->
     parse_cmd_opts(Opts, Acc).
 
