@@ -150,7 +150,7 @@
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
-                | {reconnect, boolean() | pos_integer() | infinity}
+                | {reconnect, non_neg_integer() | infinity}
                 | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
@@ -226,7 +226,7 @@
           last_packet_id    :: packet_id(),
           low_mem           :: boolean(),
           parse_state       :: emqtt_frame:parse_state(),
-          reconnect         :: boolean() | pos_integer(),
+          reconnect         :: non_neg_integer() | infinity,
           reconnect_timeout :: pos_integer(),
           qoe               :: boolean() | map(),
           nst               :: binary(), %% quic new session ticket
@@ -298,7 +298,7 @@
 
 -define(NO_CLIENT_ID, <<>>).
 
--define(NEED_RECONNECT(Re), (Re == true orelse (is_integer(Re) andalso Re > 0))).
+-define(NEED_RECONNECT(Re), (Re == infinity orelse (is_integer(Re) andalso Re > 0))).
 
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clietntid => State#state.clientid}, #{})).
@@ -632,7 +632,7 @@ init([Options]) ->
                                  retry_interval    = ?DEFAULT_RETRY_INTERVAL,
                                  connect_timeout   = ?DEFAULT_CONNECT_TIMEOUT,
                                  low_mem           = false,
-                                 reconnect         = false,
+                                 reconnect         = 0,
                                  reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
                                  qoe               = false,
                                  last_packet_id    = 1,
@@ -745,10 +745,16 @@ init([{retry_interval, I} | Opts], State) ->
     init(Opts, State#state{retry_interval = timer:seconds(I)});
 init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
+%% prior to 1.7.0, reconnect was of type boolean().
 init([{reconnect, IsReconnect} | Opts], State) when is_boolean(IsReconnect) ->
-    init(Opts, State#state{reconnect = IsReconnect});
-init([{reconnect, Attempts} | Opts], State) when is_integer(Attempts) ->
-    init(Opts, State#state{reconnect = Attempts});
+    Re = case IsReconnect of
+             true -> infinity;
+             false -> 0
+         end,
+    init(Opts, State#state{reconnect = Re});
+init([{reconnect, Reconnect} | Opts], State)
+  when is_integer(Reconnect) orelse Reconnect == infinity ->
+    init(Opts, State#state{reconnect = Reconnect});
 init([{reconnect_timeout, I} | Opts], State) ->
     init(Opts, State#state{reconnect_timeout = timer:seconds(I)});
 init([{low_mem, IsLow} | Opts], State) when is_boolean(IsLow) ->
@@ -843,21 +849,21 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = emqtt_secret:unwrap(Password)}), State).
 
-reconnect(state_timeout, Attempts, #state{conn_mod = CMod} = State) ->
+reconnect(state_timeout, Reconnect, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
-            {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Attempts}};
-        _Err ->
-            NextAttempts = case Attempts of
+            {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Reconnect}};
+        Err ->
+            Reconnect1 = case Reconnect of
                                infinity -> infinity;
-                               _ -> Attempts - 1
+                               _ -> Reconnect - 1
                            end,
-            case NextAttempts =< 0 of
+            case Reconnect1 =< 0 of
                 true ->
-                    {stop, {connect_error, Err}};
+                    {stop, {reconnect_error, Err}};
                 false ->
                     #state{reconnect_timeout = ReconnectTimeout} = State,
-                    {keep_state_and_data, {state_timeout, ReconnectTimeout, NextAttempts}}
+                    {keep_state_and_data, {state_timeout, ReconnectTimeout, Reconnect1}}
             end
     end;
 reconnect({call, From}, stop, _State) ->
@@ -1860,15 +1866,7 @@ next_reconnect(#state{retry_timer = RetryTimer,
     {next_state, reconnect, State#state{retry_timer = undefined,
                                         keepalive_timer = undefined
                                        },
-     {state_timeout, Timeout, num_of_reconnect_attempts(Reconnect)}}.
-
-num_of_reconnect_attempts(true) ->
-    infinity;
-num_of_reconnect_attempts(infinity) ->
-    infinity;
-num_of_reconnect_attempts(Re)
-  when is_integer(Re) andalso Re > 0 ->
-    Re.
+     {state_timeout, Timeout, Reconnect}}.
 
 cancel_timer(undefined) ->
     ok;

@@ -328,7 +328,7 @@ t_reconnect_reach_max_attempts(Config) ->
     receive
         {'DOWN', MRef, process, C, _Info} ->
             receive
-                {'EXIT', C, reach_max_reconnect_attempts} ->
+                {'EXIT', C, {reconnect_error, _}} ->
                     ok
             after 100 ->
                     ct:fail(no_exit)
