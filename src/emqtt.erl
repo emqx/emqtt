@@ -854,7 +854,7 @@ reconnect(state_timeout, Attempts, #state{conn_mod = CMod} = State) ->
                            end,
             case NextAttempts =< 0 of
                 true ->
-                    {stop, reach_max_reconnect_attempts};
+                    {stop, {connect_error, Err}};
                 false ->
                     #state{reconnect_timeout = ReconnectTimeout} = State,
                     {keep_state_and_data, {state_timeout, ReconnectTimeout, NextAttempts}}
