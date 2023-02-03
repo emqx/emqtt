@@ -108,18 +108,20 @@ open_connection() ->
     quicer:open_connection().
 
 connect(Host, Port, Opts, Timeout) ->
-    KeepAlive =  proplists:get_value(keepalive, Opts, 60),
+    KeepAlive = proplists:get_value(keepalive, Opts, 60),
+    OptsSSL = proplists:get_value(ssl_opts, Opts, []),
+    Opts1 = Opts ++ OptsSSL,
     ConnOpts = [ {alpn, ["mqtt"]}
                , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
                , {peer_unidi_stream_count, 1}
                , {peer_bidi_stream_count, 1}
-               , {verify, none}
+               , {verify, proplists:get_value(verify, Opts1, verify_none)}
                , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
                % , {send_idle_timeout_ms,  1000}
                % , {disconnect_timeout_ms, 300000}
                %% uncomment for decrypt wireshark trace
                %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
-               | Opts] ++ local_addr(Opts),
+               | Opts1] ++ local_addr(Opts1),
     case lists:keymember(nst, 1, ConnOpts) of
         true -> do_0rtt_connect(Host, Port, ConnOpts);
         false -> do_1rtt_connect(Host, Port, ConnOpts, Timeout)
