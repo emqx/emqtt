@@ -59,7 +59,7 @@
           "Use '--sni true' to apply the host name from '-h|--host' option "
           "as SNI, therwise use the host name to which the server's SSL "
           "certificate is issued"},
-         {verify, undefined, "verify", boolean,
+         {verify, undefined, "verify", {boolean, false},
           "TLS verify option, default: false "
          }
         ]).
