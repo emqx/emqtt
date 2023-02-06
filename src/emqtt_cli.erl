@@ -57,9 +57,9 @@
          {sni, undefined, "sni", string,
           "Applicable when '--enable_ssl' is in use. "
           "Use '--sni true' to apply the host name from '-h|--host' option "
-          "as SNI, therwise use the host name to which the server's SSL "
+          "as SNI, otherwise use the host name to which the server's SSL "
           "certificate is issued"},
-         {verify, undefined, "verify", boolean,
+         {verify, undefined, "verify", {boolean, false},
           "TLS verify option, default: false "
          }
         ]).
@@ -265,6 +265,8 @@ parse_cmd_opts([{cert, Cert} | Opts], Acc) ->
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {certfile, Cert}, Acc));
 parse_cmd_opts([{key, Key} | Opts], Acc) ->
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {keyfile, Key}, Acc));
+parse_cmd_opts([{sni, SNI} | Opts], Acc) ->
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {server_name_indication, SNI}, Acc));
 parse_cmd_opts([{qos, QoS} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{qos, QoS} | Acc]);
 parse_cmd_opts([{retain_as_publish, RetainAsPublish} | Opts], Acc) ->
