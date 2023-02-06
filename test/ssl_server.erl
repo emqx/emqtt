@@ -24,14 +24,19 @@
 start_link(Port, SslOpts) ->
     _ = ssl:start(),
     {ok, LSock} = ssl:listen(Port, [{active, false}|SslOpts]),
-    spawn_link(?MODULE, ssl_accept, [LSock]).
+    Pid = spawn_link(?MODULE, ssl_accept, [LSock]),
+    {Pid, LSock}.
 
 ssl_accept(LSock) ->
     {ok, Sock} = ssl:transport_accept(LSock),
-    {ok, SslSock} = ssl:handshake(Sock, 5000),
-    ssl:setopts(SslSock, [{active, true}]),
-    {stop, _Reason} = ssl_recvloop(SslSock),
-    ssl:close(LSock).
+    case ssl:handshake(Sock, 5000) of
+        {ok, SslSock} ->
+            ssl:setopts(SslSock, [{active, true}]),
+            {stop, _Reason} = ssl_recvloop(SslSock),
+            ssl:close(LSock);
+        {error, _} ->
+            ssl:close(LSock)
+    end.
 
 ssl_recvloop(SslSock) ->
     receive
