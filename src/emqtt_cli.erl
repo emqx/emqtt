@@ -1,5 +1,5 @@
 %%-------------------------------------------------------------------------
-%% Copyright (c) 2020-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@
          {will_qos, undefined, "will-qos", {integer, 0},
           "QoS for will message"},
          {will_retain, undefined, "will-retain", {boolean, false},
-          "Eetain in will message"},
+          "Retain in will message"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
           "Enable websocket transport or not"},
          {enable_quic, undefined, "enable-quic", {boolean, false},
