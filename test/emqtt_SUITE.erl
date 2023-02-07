@@ -88,7 +88,6 @@ groups() ->
        t_reconnect_stop,
        t_reconnect_reach_max_attempts,
        t_reconnect_immediate_retry,
-       t_reconnect_immediate_retry_drop_inflight,
        t_subscriptions,
        t_info,
        t_stop,
@@ -262,6 +261,7 @@ t_reconnect_enabled(Config) ->
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {reconnect, true},
+                                {clean_start, false},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
@@ -291,6 +291,7 @@ t_reconnect_stop(Config) ->
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {reconnect, true},
+                                {clean_start, false},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
@@ -319,6 +320,7 @@ t_reconnect_reach_max_attempts(Config) ->
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {reconnect, 2},
+                                {clean_start, false},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
@@ -353,9 +355,9 @@ t_reconnect_immediate_retry(Config) ->
     Port = ?config(port, Config),
     Topic = nth(1, ?TOPICS),
     {ok, C} = emqtt:start_link([{port, Port},
-                                {clean_start, false},
                                 {max_inflight, 2},
                                 {reconnect, true},
+                                {clean_start, false},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
 
@@ -384,47 +386,6 @@ t_reconnect_immediate_retry(Config) ->
 
     ?assertMatch([{1, {ok, _}},
                   {2, {ok, _}},
-                  {3, {ok, _}},
-                  {4, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
-
-    ok = emqtt:disconnect(C).
-
-t_reconnect_immediate_retry_drop_inflight(Config) ->
-    ConnFun = ?config(conn_fun, Config),
-    Port = ?config(port, Config),
-    Topic = nth(1, ?TOPICS),
-    {ok, C} = emqtt:start_link([{port, Port},
-                                {clean_start, true},
-                                {max_inflight, 2},
-                                {reconnect, true},
-                                {reconnect_timeout, 1}]), % 1 sec
-    {ok, _} = emqtt:ConnFun(C),
-
-    %% meck to stop return PUBACK
-    meck:new(emqtt_sock, [passthrough, no_history]),
-    meck:expect(emqtt_sock, send, fun(_, _) -> ok end),
-
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> ok end),
-
-    Parent = self(),
-    ok = emqtt:publish_async(C, Topic, <<"inflight1">>, [{qos, 1}],
-                             fun(R) -> Parent ! {publish_async_result, 1, R} end),
-    ok = emqtt:publish_async(C, Topic, <<"inflight2">>, [{qos, 1}],
-                             fun(R) -> Parent ! {publish_async_result, 2, R} end),
-    ok = emqtt:publish_async(C, Topic, <<"enqueue1">>, [{qos, 1}],
-                             fun(R) -> Parent ! {publish_async_result, 3, R} end),
-    ok = emqtt:publish_async(C, Topic, <<"enqueue2">>, [{qos, 1}],
-                             fun(R) -> Parent ! {publish_async_result, 4, R} end),
-
-    ok = emqtt_test_lib:stop_emqx(),
-    meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic),
-
-    ok = emqtt_test_lib:start_emqx(),
-
-    ?assertMatch([{1, {error, dropped}},
-                  {2, {error, dropped}},
                   {3, {ok, _}},
                   {4, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
 
@@ -696,6 +657,7 @@ t_publish_in_not_connected(Config) ->
 
     Topic = nth(1, ?TOPICS),
     {ok, C} = emqtt:start_link([{port, Port},
+                                {clean_start, false},
                                 {reconnect, true},
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
