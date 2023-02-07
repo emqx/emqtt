@@ -607,39 +607,42 @@ init([Options]) ->
                    {_ver, undefined} -> random_client_id();
                    {_ver, Id}        -> iolist_to_binary(Id)
                end,
-    State = init(Options, #state{host              = {127,0,0,1},
-                                 port              = 1883,
-                                 hosts             = [],
-                                 conn_mod          = emqtt_sock,
-                                 sock_opts         = [],
-                                 bridge_mode       = false,
-                                 clientid          = ClientId,
-                                 clean_start       = true,
-                                 proto_ver         = ?MQTT_PROTO_V4,
-                                 proto_name        = <<"MQTT">>,
-                                 keepalive         = ?DEFAULT_KEEPALIVE,
-                                 force_ping        = false,
-                                 paused            = false,
-                                 will_flag         = false,
-                                 will_msg          = #mqtt_msg{},
-                                 pending_calls     = [],
-                                 subscriptions     = #{},
-                                 inflight          = emqtt_inflight:new(infinity),
-                                 awaiting_rel      = #{},
-                                 properties        = #{},
-                                 auto_ack          = true,
-                                 ack_timeout       = ?DEFAULT_ACK_TIMEOUT,
-                                 retry_interval    = ?DEFAULT_RETRY_INTERVAL,
-                                 connect_timeout   = ?DEFAULT_CONNECT_TIMEOUT,
-                                 low_mem           = false,
-                                 reconnect         = 0,
-                                 reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
-                                 qoe               = false,
-                                 last_packet_id    = 1,
-                                 pendings          = #{requests => queue:new(),
-                                                       count => 0
-                                                      }
-                                }),
+    State = check_options(
+              init(Options,
+                   #state{host              = {127,0,0,1},
+                          port              = 1883,
+                           hosts             = [],
+                           conn_mod          = emqtt_sock,
+                           sock_opts         = [],
+                           bridge_mode       = false,
+                           clientid          = ClientId,
+                           clean_start       = true,
+                           proto_ver         = ?MQTT_PROTO_V4,
+                           proto_name        = <<"MQTT">>,
+                           keepalive         = ?DEFAULT_KEEPALIVE,
+                           force_ping        = false,
+                           paused            = false,
+                           will_flag         = false,
+                           will_msg          = #mqtt_msg{},
+                           pending_calls     = [],
+                           subscriptions     = #{},
+                           inflight          = emqtt_inflight:new(infinity),
+                           awaiting_rel      = #{},
+                           properties        = #{},
+                           auto_ack          = true,
+                           ack_timeout       = ?DEFAULT_ACK_TIMEOUT,
+                           retry_interval    = ?DEFAULT_RETRY_INTERVAL,
+                           connect_timeout   = ?DEFAULT_CONNECT_TIMEOUT,
+                           low_mem           = false,
+                           reconnect         = 0,
+                           reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
+                           qoe               = false,
+                           last_packet_id    = 1,
+                           pendings          = #{requests => queue:new(),
+                                                 count => 0
+                                                }
+                          }
+                  )),
     {ok, initialized, init_parse_state(State)}.
 
 random_client_id() ->
@@ -790,6 +793,11 @@ merge_opts(Defaults, Options) ->
          (Opt, Acc) ->
           lists:usort([Opt | Acc])
       end, Defaults, Options).
+
+check_options(#state{clean_start = true, reconnect = Re}) when ?NEED_RECONNECT(Re) ->
+    error({badarg, "Reconnect mechanism is not allowed with clean_start=true"});
+check_options(State) ->
+    State.
 
 callback_mode() -> state_functions.
 

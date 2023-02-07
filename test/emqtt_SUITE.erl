@@ -62,7 +62,8 @@ all() ->
 
 groups() ->
     [{general, [],
-      [t_connect,
+      [t_bad_options,
+       t_connect,
        t_connect_timeout,
        t_ws_connect,
        t_subscribe,
@@ -180,6 +181,14 @@ clean_retained(Topic) ->
 
 t_props(_) ->
     ok = emqtt_props:validate(#{'Payload-Format-Indicator' => 0}).
+
+t_bad_options(_) ->
+    process_flag(trap_exit, true),
+    ?assertMatch({error, {badarg, _}}, emqtt:start_link([{reconnect, 3}, {clean_start, true}])),
+    receive
+        {'EXIT', _, {{badarg, _}, _}} -> ok
+    end,
+    process_flag(trap_exit, false).
 
 t_connect(Config) ->
     ConnFun = ?config(conn_fun, Config),
