@@ -1295,7 +1295,16 @@ connected(info, immediate_retry, State = #state{clean_start = false, inflight = 
     ?LOG(debug, "replay_all_inflight_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
     Now = now_ts(),
     Pred = fun(_, _) -> true end,
-    NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
+    %% reset outdated via field due to reconnection
+    Inflight1 = emqtt_inflight:map(
+                  fun({_Via, Id}, Req) ->
+                          {{default_via(State), Id}, Req}
+                  end, Inflight),
+    NState = retry_send(
+               Now,
+               emqtt_inflight:to_retry_list(Pred, Inflight1),
+               State#state{inflight = Inflight1}
+              ),
     {keep_state, NState};
 
 connected(info, immediate_retry, State = #state{clean_start = true, inflight = Inflight}) ->
@@ -1736,7 +1745,7 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
               shutdown(Reason, State)
     end.
 
-retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(Via, Msg, _, ExpireAt, Callback)} | More],
+retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(_Via, Msg, _, ExpireAt, Callback)} | More],
            State = #state{inflight = Inflight}) ->
     Msg1 = Msg#mqtt_msg{dup = true},
     case send(Via, Msg1, State) of
@@ -1747,7 +1756,7 @@ retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(Via, Msg, _, ExpireAt, Call
         {error, Reason} ->
             error(Reason)
     end;
-retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBREL(Via, PacketId, _, ExpireAt)} | More],
+retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBREL(_Via, PacketId, _, ExpireAt)} | More],
            State = #state{inflight = Inflight}) ->
     case send(Via, ?PUBREL_PACKET(PacketId), State) of
         {ok, NState} ->
@@ -2060,12 +2069,12 @@ maybe_init_quic_state(emqtt_quic, Old = #state{extra = #{control_stream_sock := 
     %% Already opened
     Old;
 maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
-                                         reconnect = IsReconnect, parse_state = PS} = Old) ->
+                                         reconnect = Re, parse_state = PS} = Old) ->
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , parse_state => PS
                                                   , data_stream_socks => []
                                                   , control_stream_sock => undefined
-                                                  , reconnect => IsReconnect})};
+                                                  , reconnect => ?NEED_RECONNECT(Re)})};
 maybe_init_quic_state(_, Old) ->
     Old.
 

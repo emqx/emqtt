@@ -31,6 +31,7 @@
         , is_full/1
         , is_empty/1
         , foreach/2
+        , map/2
         , to_retry_list/2
         ]).
 
@@ -111,6 +112,16 @@ foreach(F, #{sent := Sent}) ->
       sort_sent(Sent)
      ).
 
+-spec(map(F, inflight()) -> inflight() when
+    F :: fun((id(), req()) -> {id(), req()})).
+map(F, Inflight = #{sent := Sent}) ->
+    Sent1 = maps:fold(
+              fun(Id, {SeqNo, Req}, Acc) ->
+                      {Id1, Req1} = F(Id, Req),
+                      Acc#{Id1 => {SeqNo, Req1}}
+              end, #{}, Sent),
+    Inflight#{sent := Sent1}.
+
 %% @doc Return a sorted list of Pred returned true
 -spec(to_retry_list(Pred, inflight()) -> list({id(), req()}) when
     Pred :: fun((id(), req()) -> boolean())).
@@ -181,6 +192,13 @@ foreach_test() ->
       fun(Id, Req) ->
         true = (Id =:= Req)
       end, inflight_example()).
+
+map_test() ->
+    Inflight1 = emqtt_inflight:map(
+                  fun(Id, Req) -> {Id + 1, Req + 1} end,
+                  inflight_example()
+                 ),
+    [{2, 2}, {3, 3}] = emqtt_inflight:to_retry_list(fun(_, _) -> true end, Inflight1).
 
 retry_test() ->
     [{"sorted by insert sequence",
