@@ -55,6 +55,7 @@ jobs:
               for var in $(ls); do echo $(sha256sum $var | awk "{print $1}") > $var.sha256; done
             '
         - uses: actions/upload-artifact@v3
+          if: ${{ github.event_name == 'release' }}
           with:
             name: packages
             path: _packages/*
@@ -87,6 +88,7 @@ jobs:
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
         - uses: actions/upload-artifact@v3
+          if: ${{ github.event_name == 'release' }}
           with:
             name: packages-mac
             path: _packages/*

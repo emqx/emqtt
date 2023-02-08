@@ -1,5 +1,5 @@
 %%-------------------------------------------------------------------------
-%% Copyright (c) 2020-2022 EMQ Technologies Co., Ltd. All Rights Reserved.
+%% Copyright (c) 2020-2023 EMQ Technologies Co., Ltd. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@
          {will_qos, undefined, "will-qos", {integer, 0},
           "QoS for will message"},
          {will_retain, undefined, "will-retain", {boolean, false},
-          "Eetain in will message"},
+          "Retain in will message"},
          {enable_websocket, undefined, "enable-websocket", {boolean, false},
           "Enable websocket transport or not"},
          {enable_quic, undefined, "enable-quic", {boolean, false},
@@ -76,7 +76,10 @@
           "Applicable when '--enable_ssl' is in use. "
           "Use '--sni true' to apply the host name from '-h|--host' option "
           "as SNI, therwise use the host name to which the server's SSL "
-          "certificate is issued"}
+          "certificate is issued"},
+         {verify, undefined, "verify", {boolean, false},
+          "TLS verify option, default: false "
+         }
         ]).
 
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
@@ -333,7 +336,12 @@ parse_cmd_opts([{repeat_delay, RepeatDelay} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{repeat_delay, RepeatDelay} | Acc]);
 parse_cmd_opts([{print, WhatToPrint} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{print, WhatToPrint} | Acc]);
-
+parse_cmd_opts([{verify, IsVerify} | Opts], Acc) ->
+    V = case IsVerify of
+            true -> verify_peer;
+            false -> verify_none
+        end,
+    parse_cmd_opts(Opts, maybe_append(ssl_opts, {verify, V}, Acc));
 parse_cmd_opts([_ | Opts], Acc) ->
     parse_cmd_opts(Opts, Acc).
 
