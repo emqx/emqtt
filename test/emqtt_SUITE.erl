@@ -73,7 +73,7 @@ groups() ->
        t_publish_process_monitor,
        t_publish_port_error,
        t_publish_port_error_retry,
-       t_publish_in_not_connected,
+       t_publish_in_reconnect,
        t_publish_async,
        t_eval_callback_in_order,
        t_ack_inflight_and_shoot_cycle,
@@ -651,7 +651,7 @@ test_publish_port_error_retry(Config) ->
     ?assertEqual(Result, {error, normal}),
     meck:unload(emqtt_sock).
 
-t_publish_in_not_connected(Config) ->
+t_publish_in_reconnect(Config) ->
     ConnFun = ?config(conn_fun, Config),
     Port = ?config(port, Config),
 
@@ -662,11 +662,13 @@ t_publish_in_not_connected(Config) ->
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
 
-    %% return `not_connected` error in reconnect state
+    %% enqueue PUBLISH request in reconnect state
     ok = emqtt_test_lib:stop_emqx(),
     timer:sleep(1000),
+    Parent = self(),
     ?assertEqual(reconnect, emqtt:status(C)),
-    ?assertEqual({error, not_connected}, emqtt:publish(C, Topic, <<"payload">>)),
+    ok = emqtt:publish_async(C, Topic, <<"enqueue_in_reconnect">>, 0,
+                             fun(R) -> Parent ! {publish_async_result, 1, R} end),
 
     meck:new(emqx_access_control, [passthrough, no_history]),
     meck:new(emqtt, [passthrough, no_history]),
@@ -684,15 +686,18 @@ t_publish_in_not_connected(Config) ->
                         meck:passthrough([EventType, Event, Data])
                 end),
 
-    %% return `not_connected` error in waiting_for_connack state
+    %% enqueue PUBLISH request in waiting_for_connack state
     ok = emqtt_test_lib:start_emqx(),
     ?WAIT(waiting_for_connack, ok),
     ?assertEqual(waiting_for_connack, emqtt:status(C)),
-    ?assertEqual({error, not_connected}, emqtt:publish(C, Topic, <<"payload">>)),
+    ok = emqtt:publish_async(C, Topic, <<"enqueue_in_waiting_for_connack">>, 1,
+                             fun(R) -> Parent ! {publish_async_result, 2, R} end),
+
+    ?assertMatch([{1, ok},
+                  {2, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
 
     meck:unload(emqtt),
     meck:unload(emqx_access_control).
-
 
 t_publish_async(Config) ->
     ConnFun = ?config(conn_fun, Config),

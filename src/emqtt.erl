@@ -876,9 +876,6 @@ reconnect(state_timeout, Reconnect, #state{conn_mod = CMod} = State) ->
     end;
 reconnect({call, From}, stop, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
-reconnect(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
-    eval_callback_handler({error, not_connected}, Callback),
-    keep_state_and_data;
 reconnect({call, From}, status, _State) ->
     {keep_state_and_data, {reply, From, reconnect}};
 reconnect(_EventType, _, _State) ->
@@ -928,9 +925,8 @@ waiting_for_connack({call, From}, status, _State) ->
 waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
     {keep_state_and_data, postpone};
 
-waiting_for_connack(info, ?PUB_REQ(_Msg, _ExpireAt, Callback), _State) ->
-    eval_callback_handler({error, not_connected}, Callback),
-    keep_state_and_data;
+waiting_for_connack(info, ?PUB_REQ(_Msg, _ExpireAt, _Callback), _State) ->
+    {keep_state_and_data, postpone};
 
 waiting_for_connack(state_timeout, _Timeout, State) ->
     case take_call(connect, State) of
