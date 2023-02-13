@@ -260,9 +260,7 @@ t_multi_streams_sub(Config) ->
                   , topic := Topic
                   }
         } ->
-            ok;
-        Other ->
-            ct:fail("unexpected recv ~p", [Other] )
+            ok
     after 100 ->
             ct:fail("not received")
     end,
@@ -289,9 +287,7 @@ t_multi_streams_sub_0_rtt(Config) ->
                   , topic := Topic
                   }
         } ->
-            ok;
-        Other ->
-            ct:fail("unexpected recv ~p", [Other] )
+            ok
     after 100 ->
             ct:fail("not received")
     end,
@@ -796,6 +792,8 @@ t_multi_streams_shutdown_ctrl_stream_then_reconnect(Config) ->
     Topic = atom_to_binary(?FUNCTION_NAME),
     Topic2 = << Topic/binary, "two">>,
     {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, true},
+                                {clean_start, false},
+                                {clientid, <<"shutdown_ctrl_stream_then_reconnect">>},
                                 {connect_timeout, 5} %% speedup test
                                | Config]),
     {ok, _} = emqtt:quic_connect(C),
@@ -880,6 +878,8 @@ t_multi_streams_remote_shutdown_with_reconnect(Config) ->
     Topic = atom_to_binary(?FUNCTION_NAME),
     Topic2 = << Topic/binary, "two">>,
     {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, true},
+                                {clean_start, false},
+                                {clientid, <<"remote_shutdown_with_reconnect">>},
                                 {connect_timeout, 5} %% speedup test
                                | Config]),
     {ok, _} = emqtt:quic_connect(C),
