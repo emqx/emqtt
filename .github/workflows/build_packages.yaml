@@ -85,23 +85,11 @@ jobs:
             path: _packages
         - uses: actions/download-artifact@v1
           with:
-            name: packages-ubuntu14.04
-            path: _packages
-        - uses: actions/download-artifact@v1
-          with:
             name: packages-debian10
             path: _packages
         - uses: actions/download-artifact@v1
           with:
             name: packages-debian9
-            path: _packages
-        - uses: actions/download-artifact@v1
-          with:
-            name: packages-debian8
-            path: _packages
-        - uses: actions/download-artifact@v1
-          with:
-            name: packages-opensuse
             path: _packages
         - uses: actions/download-artifact@v1
           with:
