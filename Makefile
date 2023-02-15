@@ -11,7 +11,7 @@ all: emqtt
 emqtt: compile
 	$(REBAR) as emqtt release
 
-pkg: compile
+pkg: escript
 	$(REBAR) as emqtt_pkg release
 	make -C packages
 

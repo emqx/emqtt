@@ -14,91 +14,117 @@ jobs:
         runs-on: ubuntu-latest
 
         strategy:
+            fail-fast: false
             matrix:
+              builder:
+                - 5.0-26
               os:
                 - ubuntu20.04
                 - ubuntu18.04
-                - ubuntu16.04
+                - debian11
                 - debian10
-                - debian9
-                - opensuse
-                - centos8
-                - centos7
-                - centos6
+                # - el8
+                # Fails with the following message:
+                # The compiler feature "cxx_std_17" is not known to CXX compiler "GNU" version 4.8.5.
+                - el7
+                # - amzn2
+              otp:
+                - 24.3.4.2-1
+                #- 25.1.2-2
+              elixir:
+                - 1.13.4
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v3
+          with:
+            fetch-depth: 0
         - name: build emqx packages
           env:
-            ERL_OTP: erl22.3
-            SYSTEM: ${{ matrix.os }}
+            BUILDER_IMAGE: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}:${{ matrix.elixir }}-${{ matrix.otp }}-${{ matrix.os }}"
+          # NOTE
+          # Doing it manually instead of just setting `container` for the job because of
+          # discrepancies in the images' environments affecting even basic things like
+          # repo checkouts.
           run: |
-            docker run -i --name emqtt-$SYSTEM-build -v $(pwd):/emqtt emqx/build-env:$ERL_OTP-$SYSTEM /bin/bash -c "cd /emqtt && .github/workflows/script/build.sh"
-            cd _packages && for var in $(ls); do sudo bash -c "echo $(sha256sum $var | awk '{print $1}') > $var.sha256"; done && cd -
-        - uses: actions/upload-artifact@v1
+            docker run --rm --name emqtt-${{ matrix.os }}-build -v $(pwd):/emqtt --workdir /emqtt ${BUILDER_IMAGE} /bin/bash -c '
+              git config --global --add safe.directory "${PWD}"
+              .github/workflows/script/build.sh
+            '
+            sudo bash -c '
+              cd _packages
+              for var in $(ls); do echo $(sha256sum $var | awk "{print $1}") > $var.sha256; done
+            '
+        - uses: actions/upload-artifact@v3
           with:
             name: packages
-            path: _packages/.
+            path: _packages/*
 
     build-on-mac:
         runs-on: macos-latest
 
+        strategy:
+          fail-fast: false
+          matrix:
+            otp:
+              - 24
+              - 25
+
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v3
         - name: prepare
           run: |
-            brew install curl zip unzip gnu-sed erlang@22
-            echo "/usr/local/opt/erlang@22/bin" >> $GITHUB_PATH
-            echo "/usr/local/bin" >> $GITHUB_PATH
-        - name: install rebar3
-          run: |
-            curl -Lo /usr/local/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
-            chmod +x /usr/local/bin/rebar3
+            # See https://github.com/actions/setup-python/issues/577
+            # brew update
+            brew install curl zip unzip gnu-sed erlang@${{ matrix.otp }} coreutils
+            echo "$(brew --prefix)/opt/erlang@${{ matrix.otp }}/bin" >> $GITHUB_PATH
+            echo "$(brew --prefix)/opt/unzip/bin" >> $GITHUB_PATH
+            echo "$(brew --prefix)/bin" >> $GITHUB_PATH
         - name: build
           run: |
+            echo "${PATH}"
+            erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
-        - uses: actions/upload-artifact@v1
+        - uses: actions/upload-artifact@v3
           with:
             name: packages-mac
-            path: _packages/.
+            path: _packages/*
 
     release:
         runs-on: ubuntu-latest
 
         needs: [build, build-on-mac]
+        if: ${{ github.event_name == 'release' }}
 
         steps:
-        - uses: actions/checkout@v2
-        - uses: actions/download-artifact@v1
+        - uses: actions/checkout@v3
+        - uses: actions/download-artifact@v3
           with:
             name: packages
             path: _packages
-        - name: get packages
+        - uses: actions/download-artifact@v3
+          with:
+            name: packages-mac
+            path: _packages
+        - name: set aws
+          uses: aws-actions/configure-aws-credentials@v1-node16
+          with:
+            aws-access-key-id: ${{ secrets.AwsAccessKeyId }}
+            aws-secret-access-key: ${{ secrets.AwsSecretAccessKey }}
+            aws-region: us-west-2
+        - name: verify packages
+          working-directory: _packages
           run: |
-            cd _packages && for var in $( ls |grep emqtt |grep -v sha256); do
+            for var in $(ls | grep emqtt | grep -v sha256); do
               echo "$(cat $var.sha256) $var" | sha256sum -c || exit 1
             done
-        - name: set aws
-          if: github.event_name == 'release'
-          run: |
-            curl "https://d1vvhvl2y92vvt.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-            aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-            aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            aws configure set default.region us-west-2
         - name: upload aws
-          if: github.event_name == 'release'
           run: |
             version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
-            aws s3 cp --recursive ./_packages  s3://packages.emqx/emqtt/$version
-            aws cloudfront create-invalidation --distribution-id E170YEULGLT8XB --paths "/emqtt/$version/*"
+            aws s3 cp --recursive ./_packages  s3://packages.emqx.io/emqtt/$version
+            aws cloudfront create-invalidation --distribution-id E3TYD0WSP4S14P --paths "/emqtt/$version/*"
         - name: upload github
-          if: github.event_name == 'release'
-          run: |
-            version=$(echo ${{ github.ref }} | sed -r  "s .*/.*/(.*) \1 g")
-            for var in $(ls _packages) ; do
-                .github/workflows/script/upload_github_release_asset.sh owner=emqx repo=emqtt tag=$version filename=_packages/$var github_api_token=$(echo ${{ secrets.AccessToken }})
-            done
+          uses: softprops/action-gh-release@v1
+          with:
+            files: "_packages/*"

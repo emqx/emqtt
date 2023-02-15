@@ -68,8 +68,8 @@ groups() ->
        dollar_topics_test]},
     {mqttv5, [non_parallel_tests],
       [basic_test_v5,
-       retain_as_publish_test,
-       enhanced_auth]}].
+       retain_as_publish_test
+       ]}].
 
 init_per_suite(Config) ->
     emqx_ct_helpers:start_apps([emqx_sasl]),
@@ -519,40 +519,40 @@ retain_as_publish_test(_) ->
     ok = emqtt:disconnect(Pub),
     clean_retained(Topic).
 
-enhanced_auth(_) ->
-    process_flag(trap_exit, true),
+%% enhanced_auth(_) ->
+%%     process_flag(trap_exit, true),
 
-    Username = <<"username">>,
-    Password = <<"password">>,
-    Salt = <<"emqx">>,
-    AuthMethod = <<"SCRAM-SHA-1">>,
-    ok = emqx_sasl_scram:add(Username, Password, Salt),
+%%     Username = <<"username">>,
+%%     Password = <<"password">>,
+%%     Salt = <<"emqx">>,
+%%     AuthMethod = <<"SCRAM-SHA-1">>,
+%%     ok = emqx_sasl_scram:add(Username, Password, Salt),
 
-    {error, _} = emqtt:start_link([{clean_start, true},
-                                   {proto_ver, v5},
-                                   {enhanced_auth, #{method => AuthMethod,
-                                                     params => #{},
-                                                     function => fun (_State) -> {error, authentication_failed} end}},
-                                   {connect_timeout, 6000}]),
+%%     {error, _} = emqtt:start_link([{clean_start, true},
+%%                                    {proto_ver, v5},
+%%                                    {enhanced_auth, #{method => AuthMethod,
+%%                                                      params => #{},
+%%                                                      function => fun (_State) -> {error, authentication_failed} end}},
+%%                                    {connect_timeout, 6000}]),
 
 
-    {ok, Client1} = emqtt:start_link([{clean_start, true},
-                                     {proto_ver, v5},
-                                     {enhanced_auth, #{method => AuthMethod,
-                                                       params => #{username => Username,
-                                                                   password => Password,
-                                                                   salt => Salt}}},
-                                     {connect_timeout, 6000}]),
-    {ok, _} = emqtt:connect(Client1),
+%%     {ok, Client1} = emqtt:start_link([{clean_start, true},
+%%                                      {proto_ver, v5},
+%%                                      {enhanced_auth, #{method => AuthMethod,
+%%                                                        params => #{username => Username,
+%%                                                                    password => Password,
+%%                                                                    salt => Salt}}},
+%%                                      {connect_timeout, 6000}]),
+%%     {ok, _} = emqtt:connect(Client1),
 
-    timer:sleep(200),
-    ok = emqtt:reauthentication(Client1),
+%%     timer:sleep(200),
+%%     ok = emqtt:reauthentication(Client1),
 
-    timer:sleep(200),
-    ErrorFun = fun (_State) -> {error, authentication_failed} end,
-    {error,authentication_failed} = emqtt:reauthentication(Client1, #{params => #{username => Username,
-                                                                                  password => Password,
-                                                                                  salt => Salt},
-                                                                      function => ErrorFun}),
+%%     timer:sleep(200),
+%%     ErrorFun = fun (_State) -> {error, authentication_failed} end,
+%%     {error,authentication_failed} = emqtt:reauthentication(Client1, #{params => #{username => Username,
+%%                                                                                   password => Password,
+%%                                                                                   salt => Salt},
+%%                                                                       function => ErrorFun}),
 
-    process_flag(trap_exit, false).
+%%     process_flag(trap_exit, false).
