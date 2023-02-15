@@ -2,9 +2,7 @@
 
 CT_NODE_NAME = ct@127.0.0.1
 
-REBAR := $(CURDIR)/rebar3
-
-REBAR_URL := https://s3.amazonaws.com/rebar3/rebar3
+REBAR := rebar3
 
 all: emqtt
 
