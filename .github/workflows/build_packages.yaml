@@ -43,18 +43,23 @@ jobs:
         runs-on: macos-latest
 
         steps:
-        - uses: actions/checkout@v1
+        - uses: actions/checkout@v3
         - name: prepare
           run: |
-            /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             brew install curl zip unzip gnu-sed erlang@23
-            echo "/usr/local/bin:$PATH" >> ~/.bashrc
+            echo "$(brew --prefix)/opt/erlang@${{ matrix.otp }}/bin" >> $GITHUB_PATH
+            echo "$(brew --prefix)/opt/unzip/bin" >> $GITHUB_PATH
+            echo "$(brew --prefix)/bin" >> $GITHUB_PATH
         - name: install rebar3
           run: |
-            curl -Lo /usr/local/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
+            curl -Lo /usr/local/bin/rebar3 https://github.com/erlang/rebar3/releases/download/3.19.0/rebar3
             chmod +x /usr/local/bin/rebar3
         - name: build
           run: |
+            echo "${PATH}"
+            export PATH="/usr/local/opt/erlang@23/bin:$PATH"
+            erl -noshell -eval 'io:format(erlang:system_info(otp_release)), halt(0).'
             .github/workflows/script/build.sh
             pkg=emqtt-macos-$(git describe --tags --always).zip
             openssl dgst -sha256 _packages/$pkg | awk '{print $2}' > _packages/$pkg.sha256
