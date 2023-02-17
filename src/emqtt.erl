@@ -1027,12 +1027,12 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
-    ok = eval_msg_handler(State3, connected, Properties),
     case take_call({connect, Via}, State3) of
         {value, #call{from = From}, State4} ->
             {next_state, connected, State4, [{reply, From, Reply} | Retry]};
         false ->
             %% unkown caller, internally initiated re-connect
+            ok = eval_msg_handler(State3, connected, Properties),
             {next_state, connected, State3, Retry}
     end;
 
