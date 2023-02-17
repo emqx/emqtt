@@ -2071,22 +2071,30 @@ maybe_init_quic_state(emqtt_quic, Old = #state{extra = #{control_stream_sock := 
 maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
                                          reconnect = Re, parse_state = PS} = Old) ->
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
-                                                  , parse_state => PS
+                                                  , conn_parse_state => PS %% set once
                                                   , data_stream_socks => []
                                                   , control_stream_sock => undefined
                                                   , reconnect => ?NEED_RECONNECT(Re)})};
 maybe_init_quic_state(_, Old) ->
     Old.
 
-update_data_streams(#{data_stream_socks := Socks} = Extra, NewSock) ->
-    Extra#{data_stream_socks := [ NewSock | Socks]}.
+update_data_streams(#{ data_stream_socks := Socks
+                     , conn_parse_state := PS
+                     , stream_parse_state := PSS
+                     } = Extra, NewSock) ->
+    Extra#{ data_stream_socks := [ NewSock | Socks ]
+          , stream_parse_state := PSS#{NewSock => PS}
+          }.
 
 maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}
                                          } = OldState, _Sock)
   when Stream =/= undefined andalso Conn =/= undefined ->
     OldState;
-maybe_update_ctrl_sock(emqtt_quic, #state{extra = OldExtra} = OldState, Sock) ->
-    OldState#state{ extra = OldExtra#{control_stream_sock := Sock}
+maybe_update_ctrl_sock(emqtt_quic, #state{ extra = #{conn_parse_state := PS} = OldExtra
+                                         } = OldState, Sock) ->
+    OldState#state{ extra = OldExtra#{ control_stream_sock := Sock
+                                     , stream_parse_state => #{Sock => PS} %% Clone Connection PS
+                                     }
                   , socket = Sock
                   };
 maybe_update_ctrl_sock(_, Old, _) ->
