@@ -47,7 +47,8 @@
              ]).
 
 -type cb_data() :: #{ clientid := binary()
-                    , parse_state := emqtt_frame:parse_state()
+                    , connection_parse_state := emqtt_frame:parse_state()
+                    , stream_parse_state := #{ quic_sock() => emqtt_frame:parse_state() }
                     , data_stream_socks := [quic_sock()]
                     , control_stream_sock := undefined | quic_sock()
                     , stream_opts := map()

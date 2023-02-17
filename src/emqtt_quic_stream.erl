@@ -112,12 +112,13 @@ start_completed(_Stream, #{status := Other } = Prop, S) ->
                         -> cb_ret().
 handle_stream_data(Stream, Bin, _Flags, #{ is_local := true
                                          , control_stream_sock := {quic, Conn, _ControlStream}
-                                         , parse_state := PS} = S) ->
+                                         , stream_parse_state := PSS} = S) ->
     ?LOG(debug, "RECV_Data", #{data => Bin}, S),
     Via = {quic, Conn, Stream},
+    #{ Via := PS } = PSS,
     case parse(Bin, PS, []) of
         {keep_state, NewPS, Packets} ->
-            {keep_state, S#{parse_state := NewPS},
+            {keep_state, S#{stream_parse_state := PSS#{Via := NewPS}},
              [{next_event, cast, {P, Via} }
               || P <- lists:reverse(Packets)]};
         {stop, _} = Stop ->
@@ -144,7 +145,8 @@ stream_closed(Stream, P = #{ is_conn_shutdown := IsConnShutdown
                            , is_closed_remotely := IsRemote
                            , status := Status
                            , error := Code
-                           }, #{ data_stream_socks := _DataStreams,
+                           }, #{ data_stream_socks := DataStreams,
+                                 stream_parse_state := PSS,
                                  control_stream_sock := {quic, Conn, CtrlStream}
                                } = S)
   when is_boolean(IsConnShutdown) andalso
@@ -153,10 +155,13 @@ stream_closed(Stream, P = #{ is_conn_shutdown := IsConnShutdown
        is_boolean(IsRemote) andalso
        is_atom(Status) andalso
        is_integer(Code) ->
-    case lists:member({quic, Conn, Stream}, maps:get(data_stream_socks, S)) of
+    Via = {quic, Conn, Stream},
+    case lists:member(Via, DataStreams) of
         true ->
             %% is data stream
-            keep_state_and_data;
+            {keep_state, S#{ data_stream_socks := lists:delete(Via, DataStreams)
+                           , stream_parse_state := maps:remove(Via, PSS)
+                           }};
         false when Stream == CtrlStream ->
             {stop, normal};
         false ->
