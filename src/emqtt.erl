@@ -878,8 +878,6 @@ merge_opts(Defaults, Options) ->
           lists:usort([Opt | Acc])
       end, Defaults, Options).
 
-check_options(#state{clean_start = true, reconnect = Re}) when ?NEED_RECONNECT(Re) ->
-    error({badarg, "Reconnect mechanism is not allowed with clean_start=true"});
 check_options(State) ->
     State.
 
