@@ -15,8 +15,8 @@
 %%--------------------------------------------------------------------
 -module(emqtt_quic_SUITE).
 
--compile(export_all).
 -compile(nowarn_export_all).
+-compile(export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
@@ -952,8 +952,7 @@ recv_pub(Count, Acc) ->
     end.
 
 all_tc() ->
-    code:add_patha(filename:join(code:lib_dir(emqx), "ebin/")),
-    emqx_common_test_helpers:all(?MODULE).
+    emqtt_test_lib:all(?MODULE).
 
 -spec calc_qos(0|1|2, 0|1|2) -> 0|1|2.
 calc_qos(PubQos, SubQos)->
@@ -976,4 +975,4 @@ calc_pkt_id(2, Id)->
 start_emqx_quic(UdpPort) ->
     emqtt_test_lib:start_emqx(),
     application:ensure_all_started(quicer),
-    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, UdpPort).
+    ok = emqtt_test_lib:ensure_quic_listener(mqtt, UdpPort).

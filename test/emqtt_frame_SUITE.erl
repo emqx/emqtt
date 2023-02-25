@@ -16,8 +16,8 @@
 
 -module(emqtt_frame_SUITE).
 
--compile(export_all).
 -compile(nowarn_export_all).
+-compile(export_all).
 
 -include("emqtt.hrl").
 -include_lib("proper/include/proper.hrl").

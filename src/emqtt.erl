@@ -121,7 +121,8 @@
              , via/0
              ]).
 
--type(host() :: inet:ip_address() | inet:hostname()).
+-type(binary_host() :: binary()).
+-type(host() :: inet:ip_address() | inet:hostname() | binary_host()).
 
 -define(NO_HANDLER, undefined).
 
@@ -780,6 +781,10 @@ init([{ssl_opts, SslOpts} | Opts], State = #state{sock_opts = SockOpts}) ->
     end;
 init([{ws_path, Path} | Opts], State = #state{sock_opts = SockOpts}) ->
     init(Opts, State#state{sock_opts = [{ws_path, Path}|SockOpts]});
+init([{ws_transport_options, TransportOptions} | Opts], State = #state{sock_opts = SockOpts}) ->
+    init(Opts, State#state{sock_opts = [{ws_transport_options, TransportOptions}|SockOpts]});
+init([{ws_headers, Headers} | Opts], State = #state{sock_opts = SockOpts}) ->
+    init(Opts, State#state{sock_opts = [{ws_headers, Headers}|SockOpts]});
 init([{clientid, ClientId} | Opts], State) ->
     init(Opts, State#state{clientid = iolist_to_binary(ClientId)});
 init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
@@ -1897,8 +1902,12 @@ sock_connect(ConnMod, [{Host, Port} | Hosts], SockOpts, Timeout, _LastErr) ->
     end.
 
 hosts(#state{hosts = [], host = Host, port = Port}) ->
-    [{Host, Port}];
-hosts(#state{hosts = Hosts}) -> Hosts.
+    [{host(Host), Port}];
+hosts(#state{hosts = Hosts}) ->
+    [{host(Host), Port} || {Host, Port} <- Hosts].
+
+host(Bin) when is_binary(Bin) -> binary_to_list(Bin);
+host(Host) -> Host.
 
 send_puback(Via, Packet, State) ->
     case send(Via, Packet, State) of

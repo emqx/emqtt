@@ -19,6 +19,9 @@
 -export([ start_emqx/0
         , stop_emqx/0
         , ensure_test_module/1
+        , ensure_listener/4
+        , ensure_quic_listener/2
+        , all/1
         ]).
 
 %% TLS helpers
@@ -32,12 +35,17 @@
         ]
        ).
 
+-spec all(module()) -> list(string()).
+all(Suite) ->
+    ensure_test_module(emqx_common_test_helpers),
+    emqx_common_test_helpers:all(Suite).
+
 -spec start_emqx() -> ok.
 start_emqx() ->
     ensure_test_module(emqx_common_test_helpers),
     ensure_test_module(emqx_ratelimiter_SUITE),
     emqx_common_test_helpers:start_apps([]),
-    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
+    ok = ensure_quic_listener(mqtt, 14567),
     ok.
 
 -spec stop_emqx() -> ok.
@@ -58,6 +66,68 @@ compile_emqx_test_module(M) ->
     OutDir = filename:join([EmqttDir, "test"]),
     {ok, _} = compile:file(MFilename, [{outdir, OutDir}]),
     ok.
+
+-spec ensure_quic_listener(atom(), inet:port_number()) -> ok.
+ensure_quic_listener(Name, BindPort) ->
+    ok = ensure_listener(quic, Name, {0, 0, 0, 0}, BindPort).
+
+-spec ensure_listener(atom(), atom(), inet:ip_address(), inet:port_number()) -> ok.
+ensure_listener(Type, Name, BindAddr, BindPort) ->
+    Type =:= quic andalso application:ensure_all_started(quicer),
+    BaseConf = #{
+                 acceptors => 16,
+                 bind => {BindAddr, BindPort},
+                 enabled => true,
+                 idle_timeout => 15000,
+                 limiter => #{},
+                 max_connections => 1024000,
+                 mountpoint => <<>>,
+                 zone => default,
+                 proxy_protocol => false,
+                 tcp_options => #{active_n => 100}
+                },
+    TypeSpecificConf = listener_conf(Type),
+    Conf = maps:merge(BaseConf, TypeSpecificConf),
+    emqx_config:put([listeners, Type, Name], Conf),
+    case emqx_listeners:start_listener(Type, Name, Conf) of
+        ok -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
+
+listener_conf(quic) ->
+    #{
+      certfile => filename:join(code:lib_dir(emqx), "etc/certs/cert.pem"),
+      ciphers =>
+      [
+       "TLS_AES_256_GCM_SHA384",
+       "TLS_AES_128_GCM_SHA256",
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      keyfile => filename:join(code:lib_dir(emqx), "etc/certs/key.pem")
+     };
+listener_conf(ws) ->
+    #{
+      websocket =>
+      #{check_origin_enable => false,
+        compress => false,
+        deflate_opts =>
+        #{client_context_takeover => takeover,
+          client_max_window_bits => 15,
+          mem_level => 8,
+          server_context_takeover => takeover,
+          server_max_window_bits => 15,
+          strategy => default
+         },
+        fail_if_no_subprotocol => true,
+        idle_timeout => 7200000,
+        max_frame_size => infinity,
+        mqtt_path => "/mqtt",
+        mqtt_piggyback => multiple,
+        proxy_address_header => "x-forwarded-for",
+        proxy_port_header => "x-forwarded-port",
+        supported_subprotocols => ["mqtt","mqtt-v3","mqtt-v3.1.1","mqtt-v5"]}
+     };
+listener_conf(_) -> #{}.
 
 gen_ca(Path, Name) ->
   %% Generate ca.pem and ca.key which will be used to generate certs

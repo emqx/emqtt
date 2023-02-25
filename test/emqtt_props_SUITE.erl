@@ -16,13 +16,13 @@
 
 -module(emqtt_props_SUITE).
 
--compile(export_all).
 -compile(nowarn_export_all).
+-compile(export_all).
 
 -include("emqtt.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
-all() -> emqx_common_test_helpers:all(?MODULE).
+all() -> emqtt_test_lib:all(?MODULE).
 
 init_per_suite(Config) ->
     code:add_patha(filename:join(code:lib_dir(emqx), "ebin/")),
