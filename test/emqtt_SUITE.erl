@@ -58,13 +58,13 @@ all() ->
     , {group, mqttv5}
     , {group, quic}
     , {group, general}
+    , {group, ws}
     ].
 
 groups() ->
     [{general, [],
       [t_connect,
        t_connect_timeout,
-       t_ws_connect,
        t_subscribe,
        t_subscribe_qoe,
        t_publish,
@@ -93,6 +93,9 @@ groups() ->
        t_pause_resume,
        t_init,
        t_connected]},
+    {ws, [],
+        [t_ws_connect,
+         t_ws_connect_binary_host]},
     {mqttv3,[],
       [basic_test_v3]},
     {mqttv4, [],
@@ -201,6 +204,14 @@ t_connect(Config) ->
     {ok, _} = emqtt:ConnFun(C2),
     ct:pal("C2 is connected ~p", [C2]),
     ok= emqtt:disconnect(C2).
+
+t_connect_binary_host(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start_link([{host, <<"127.0.0.1">>}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
+    ct:pal("C is connected ~p", [C]),
+    ok= emqtt:disconnect(C),
 
 t_connect_timeout(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -409,6 +420,11 @@ test_reconnect_immediate_retry(Config) ->
 
 t_ws_connect(_) ->
     {ok, C} = emqtt:start_link([{clean_start, true}, {host,"127.0.0.1"}, {port, 8083}]),
+    {ok, _} = emqtt:ws_connect(C),
+    ok = emqtt:disconnect(C).
+
+t_ws_connect_binary_host(_) ->
+    {ok, C} = emqtt:start_link([{clean_start, true}, {host,<<"127.0.0.1">>}, {port, 8083}]),
     {ok, _} = emqtt:ws_connect(C),
     ok = emqtt:disconnect(C).
 

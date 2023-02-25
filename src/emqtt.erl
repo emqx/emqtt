@@ -1897,8 +1897,12 @@ sock_connect(ConnMod, [{Host, Port} | Hosts], SockOpts, Timeout, _LastErr) ->
     end.
 
 hosts(#state{hosts = [], host = Host, port = Port}) ->
-    [{Host, Port}];
-hosts(#state{hosts = Hosts}) -> Hosts.
+    [{host(Host), Port}];
+hosts(#state{hosts = Hosts}) ->
+    [{host(Host), Port} || {Host, Port} <- Hosts].
+
+host(Bin) when is_binary(Bin) -> binary_to_list(Bin);
+host(Host) -> Host.
 
 send_puback(Via, Packet, State) ->
     case send(Via, Packet, State) of
