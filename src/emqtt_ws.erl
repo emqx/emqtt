@@ -33,16 +33,19 @@
                    protocols => [{<<"mqtt">>, gun_ws_h}]
                   }).
 
--define(WS_HEADERS, [{"cache-control", "no-cache"}]).
+-define(WS_HEADERS, [{<<"cache-control">>, <<"no-cache">>}]).
 
-connect(Host, Port, Opts, Timeout) ->
+connect(Host0, Port, Opts, Timeout) ->
+    Host1 = convert_host(Host0),
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
+    TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
     ConnOpts = #{connect_timeout => Timeout,
                  retry => 3,
-                 retry_timeout => 30000
+                 retry_timeout => 30000,
+                 transport_opts => TransportOptions
                 },
-    case gun:open(Host, Port, ConnOpts) of
+    case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             {ok, _} = gun:await_up(ConnPid, Timeout),
             case upgrade(ConnPid, Opts, Timeout) of
@@ -57,7 +60,8 @@ connect(Host, Port, Opts, Timeout) ->
 upgrade(ConnPid, Opts, Timeout) ->
     %% 2. websocket upgrade
     Path = proplists:get_value(ws_path, Opts, "/mqtt"),
-    StreamRef = gun:ws_upgrade(ConnPid, Path, ?WS_HEADERS, ?WS_OPTS),
+    CustomHeaders = proplists:get_value(ws_headers, Opts, []),
+    StreamRef = gun:ws_upgrade(ConnPid, Path, ?WS_HEADERS ++ CustomHeaders, ?WS_OPTS),
     receive
         {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], Headers} ->
             {ok, Headers};
@@ -84,4 +88,11 @@ send(WsPid, Data) ->
 close(WsPid) ->
     gun:shutdown(WsPid).
 
-
+-spec convert_host(inet:ip_address() | inet:hostname()) -> inet:hostname().
+convert_host(Host) ->
+    case Host of
+        %% `inet:is_ip_address/1` is available since OTP 25
+        Ip4 when is_tuple(Ip4) andalso tuple_size(Ip4) =:= 4 -> inet:ntoa(Host);
+        Ip6 when is_tuple(Ip6) andalso tuple_size(Ip6) =:= 8 -> inet:ntoa(Host);
+        _ -> Host
+    end.

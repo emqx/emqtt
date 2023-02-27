@@ -16,13 +16,13 @@
 
 -module(emqtt_sock_SUITE).
 
--compile(export_all).
 -compile(nowarn_export_all).
+-compile(export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
-all() -> emqx_common_test_helpers:all(?MODULE) ++ [{group, all}].
+all() -> emqtt_test_lib:all(?MODULE) ++ [{group, all}].
 
 groups() ->
     [ {all, [ {group, unknown_ca}

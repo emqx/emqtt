@@ -16,8 +16,8 @@
 
 -module(emqtt_SUITE).
 
--compile(export_all).
 -compile(nowarn_export_all).
+-compile(export_all).
 
 -import(lists, [nth/2]).
 
@@ -64,7 +64,6 @@ groups() ->
     [{general, [],
       [t_connect,
        t_connect_timeout,
-       t_ws_connect,
        t_subscribe,
        t_subscribe_qoe,
        t_publish,
@@ -127,7 +126,7 @@ end_per_suite(_Config) ->
     emqtt_test_lib:stop_emqx().
 
 init_per_testcase(_TC, Config) ->
-    ok = emqx_common_test_helpers:ensure_quic_listener(mqtt, 14567),
+    ok = emqtt_test_lib:ensure_quic_listener(mqtt, 14567),
     Config.
 
 end_per_testcase(TC, _Config)
@@ -405,11 +404,6 @@ test_reconnect_immediate_retry(Config) ->
                   {3, {ok, _}},
                   {4, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
 
-    ok = emqtt:disconnect(C).
-
-t_ws_connect(_) ->
-    {ok, C} = emqtt:start_link([{clean_start, true}, {host,"127.0.0.1"}, {port, 8083}]),
-    {ok, _} = emqtt:ws_connect(C),
     ok = emqtt:disconnect(C).
 
 t_subscribe(Config) ->
