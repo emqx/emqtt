@@ -12,6 +12,11 @@ MQTT client library and command line tools implemented in Erlang that supports M
 $ make
 ```
 
+Optional, you could disable QUIC support if you have problem with compiling
+``` sh
+BUILD_WITHOUT_QUIC=1 make
+```
+
 Once you've compiled successfully you will get a script called `emqtt` in `_build/emqtt/rel/emqtt/bin`. We can see what `emqtt` can do with `--help` option:
 
 ```
