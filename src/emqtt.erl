@@ -1539,9 +1539,17 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
     ?LOG(error, "socket_error", #{error => Error, reason => Reason}, State),
     shutdown(Reason, State);
 
+%% ssl connection is wrapped in a `#ssl_socket{}' record defined in
+%% `emqtt_sock', which is not the same as what `ssl' uses in its
+%% errors.
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
-    ?LOG(error, "socket_error", #{error => Error, reason => Reason}, State),
-    shutdown(Reason, State);
+    ?LOG(error, "connection_error",
+         #{error => Error, reason => Reason}, State),
+    {stop, {shutdown, Reason}, State};
+
+handle_event(info, {Closed, _Sock}, connected, #state{} = State)
+    when ?SOCK_CLOSED(Closed) ->
+    maybe_reconnect(Closed, State);
 
 handle_event(info, {ssl_closed,  {sslsocket,{gen_tcp, Port, tls_connection,undefined}, _}} = Event,
              StateName, #state{socket = {ssl_socket, PortInUse, _}} = State)
