@@ -91,7 +91,8 @@ groups() ->
        t_stop,
        t_pause_resume,
        t_init,
-       t_connected]},
+       t_connected,
+       t_ssl_error]},
     {mqttv3,[],
       [basic_test_v3]},
     {mqttv4, [],
@@ -147,7 +148,7 @@ init_per_group(quic, Config) ->
 init_per_group(_, Config) ->
     case lists:keyfind(conn_fun, 1, Config) of
         false ->
-            merge_config(Config, [{port, 1883}, {conn_fun, connect}]);
+            merge_config(Config, [{port, 1883}, {ssl_port, 8883}, {conn_fun, connect}]);
         _ ->
             Config
     end.
@@ -244,6 +245,30 @@ t_reconnect_disabled(Config) ->
     after 500 ->
             ct:fail(conn_still_alive)
     end.
+
+t_ssl_error(Config) ->
+    ct:timetrap({seconds, 1}),
+    Port = proplists:get_value(ssl_port, Config, 8883),
+    DataDir = cert_dir(Config),
+    emqtt_test_lib:gen_ca(DataDir, "ca"),
+    emqtt_test_lib:gen_ca(DataDir, "ca2"),
+    emqtt_test_lib:gen_host_cert("server", "ca", DataDir, true),
+    emqtt_test_lib:gen_host_cert("client", "ca2", DataDir, true),
+    emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
+                                   #{ verify => verify_peer
+                                    , cacertfile => emqtt_test_lib:ca_cert_name(DataDir, "ca")
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, "server")
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, "server")
+                                    }),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {ssl, true},
+                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
+                                           , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
+                                           ]}
+                               ]),
+    {error, {{shutdown, {tls_alert, {unknown_ca, _}}}, _}} = emqtt:connect(C),
+    ok.
 
 t_reconnect_enabled(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -1327,3 +1352,9 @@ retry_if_errors(Errors, Fun) ->
         false ->
             E
     end.
+
+test_dir(Config) ->
+    filename:dirname(filename:dirname(proplists:get_value(data_dir, Config))).
+
+cert_dir(Config) ->
+    filename:join([test_dir(Config), "certs"]).

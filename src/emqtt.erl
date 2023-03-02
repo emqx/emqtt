@@ -20,6 +20,7 @@
 
 -include("emqtt.hrl").
 -include("logger.hrl").
+-include("emqtt_internal.hrl").
 
 -export([ start_link/0
         , start_link/1
@@ -1372,10 +1373,29 @@ handle_event(info, {Error, Sock, Reason}, connected,
     end,
     next_reconnect(State);
 
+%% ssl connection is wrapped in a `#ssl_socket{}' record defined in
+%% `emqtt_sock', which is not the same as what `ssl' uses in its
+%% errors.
+handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
+             #state{reconnect = Re, socket = #ssl_socket{ssl = SSLSock}} = State)
+    when ?NEED_RECONNECT(Re) ->
+    ?LOG(error, "reconnect_due_to_connection_error",
+         #{error => Error, reason => Reason}, State),
+    ssl:close(SSLSock),
+    next_reconnect(State);
+
 handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
     when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
     ?LOG(error, "connection_error",
          #{error => Error, reason =>Reason}, State),
+    {stop, {shutdown, Reason}, State};
+
+%% ssl connection is wrapped in a `#ssl_socket{}' record defined in
+%% `emqtt_sock', which is not the same as what `ssl' uses in its
+%% errors.
+handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
+    ?LOG(error, "connection_error",
+         #{error => Error, reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)

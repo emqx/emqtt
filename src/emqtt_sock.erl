@@ -27,7 +27,7 @@
         , getstat/2
         ]).
 
--record(ssl_socket, {tcp, ssl}).
+-include("emqtt_internal.hrl").
 
 -type(socket() :: inet:socket() | #ssl_socket{}).
 
