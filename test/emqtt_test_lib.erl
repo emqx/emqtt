@@ -32,6 +32,7 @@
         , ca_cert_name/2
         , key_name/2
         , cert_name/2
+        , set_ssl_options/2
         ]
        ).
 
@@ -206,3 +207,8 @@ maybe_wildcard(Str, true) ->
     "*."++Str;
 maybe_wildcard(Str, false) ->
     Str.
+
+set_ssl_options(ListenerId, Opts) ->
+    {ok, #{type := Type, name := Name}} = emqx_listeners:parse_listener_id(ListenerId),
+    emqx_config:put_listener_conf(Type, Name, [ssl_options], Opts),
+    ok = emqx_listeners:restart_listener(ListenerId).
