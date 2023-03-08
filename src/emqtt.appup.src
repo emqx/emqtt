@@ -1,30 +1,36 @@
 %% -*-: erlang -*-
 {"1.2.3.2",
   [ {"1.2.3.1", [
-     {load_module, emqtt_sock, brutal_purge, soft_purge, []}
+     {load_module, emqtt_sock, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge, []}
     ]},
     {"1.2.3", [
      {load_module, emqtt, brutal_purge, soft_purge, []},
      {load_module, emqtt_frame, brutal_purge, soft_purge, []},
-     {load_module, emqtt_sock, brutal_purge, soft_purge, []}
+     {load_module, emqtt_sock, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge, []}
     ]},
    {<<"1.2.[0-2]">>, [
      {load_module, emqtt_sock, brutal_purge, soft_purge, []},
-     {load_module, emqtt, brutal_purge, soft_purge, []}
+     {load_module, emqtt, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge, []}
     ]}
   ],
   [
    {"1.2.3.1", [
-     {load_module, emqtt_sock, brutal_purge, soft_purge, []}
+     {load_module, emqtt_sock, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge,[]}
     ]},
    {"1.2.3", [
      {load_module, emqtt, brutal_purge, soft_purge, []},
      {load_module, emqtt_frame, brutal_purge, soft_purge, []},
-     {load_module, emqtt_sock, brutal_purge, soft_purge, []}
+     {load_module, emqtt_sock, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge, []}
     ]},
    {<<"1.2.[0-2]">>, [
      {load_module, emqtt_sock, brutal_purge, soft_purge, []},
-     {load_module, emqtt, brutal_purge, soft_purge, []}
+     {load_module, emqtt, brutal_purge, soft_purge, []},
+     {load_module, emqtt_cli, brutal_purge, soft_purge, []}
     ]}
   ]
 }.
