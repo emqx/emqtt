@@ -72,10 +72,12 @@ ssl_upgrade(Host, Sock, SslOpts, Timeout) ->
 
 -spec(send(socket(), iodata()) -> ok | {error, einval | closed}).
 send(Sock, Data) when is_port(Sock) ->
-    try erlang:port_command(Sock, Data) of
-        true -> ok
-    catch
-        error:badarg -> {error, einval}
+    case gen_tcp:send(Sock, Data) of
+        ok ->
+            self() ! {inet_reply, Sock, ok},
+            ok;
+        {error, Reason} ->
+            erlang:error(Reason)
     end;
 send(#ssl_socket{ssl = SslSock}, Data) ->
     ssl:send(SslSock, Data);
