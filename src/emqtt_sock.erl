@@ -142,6 +142,7 @@ default_ciphers(TlsVersions) ->
 
 apply_sni(Opts, Host) ->
     case lists:keyfind(server_name_indication, 1, Opts) of
+        false -> [{server_name_indication, Host}|Opts];
         {_, SNI} when SNI =:= "true" orelse
                       SNI =:= <<"true">> orelse
                       SNI =:= true ->
