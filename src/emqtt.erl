@@ -335,7 +335,7 @@
                          E =:= quic_closed)).
 
 -define(LOG(Level, Msg, Meta, State),
-        ?SLOG(Level, Meta#{msg => Msg, clietntid => State#state.clientid}, #{})).
+        ?SLOG(Level, Meta#{msg => Msg, clientid => State#state.clientid}, #{})).
 
 %%--------------------------------------------------------------------
 %% API
