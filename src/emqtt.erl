@@ -1946,7 +1946,7 @@ send(Via, Msg, State) when is_record(Msg, mqtt_msg) ->
 send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
-    ?LOG(debug, "SEND_Data", #{packet => Packet, socket => Sock}, State),
+    ?LOG(debug, "SEND_Data", #{packet => redact_packet(Packet), socket => Sock}, State),
     case ConnMod:send(Sock, Data) of
         ok  -> {ok, bump_last_packet_id(State)};
         Error -> Error
@@ -2144,3 +2144,9 @@ maybe_new_stream(Def, State) ->
 -spec default_via(#state{}) -> via().
 default_via(#state{socket = Via})->
     Via.
+
+%% @doc avoid sensitive data leakage in the debug log
+redact_packet(#mqtt_packet{variable = #mqtt_packet_connect{} = Conn} = Packet) ->
+    Packet#mqtt_packet{variable = Conn#mqtt_packet_connect{password = <<"******">>}};
+redact_packet(Packet) ->
+    Packet.
