@@ -1,5 +1,8 @@
 # emqtt
 
+![build_packages](https://github.com/emqx/emqtt/actions/workflows/build_packages.yaml/badge.svg)
+![run_test_cases](https://github.com/emqx/emqtt/actions/workflows/run_test_case.yaml/badge.svg)
+
 MQTT client library and command line tools implemented in Erlang that supports MQTT v5.0/3.1.1/3.1.
 
 # Getting started
