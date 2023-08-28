@@ -833,7 +833,7 @@ connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
 connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
     {keep_state, delete_inflight(PubAck, State)};
 
-connected(cast, ?PUBREC_PACKET(PacketId), State = #state{inflight = Inflight}) ->
+connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight = Inflight}) ->
 	NState = case maps:find(PacketId, Inflight) of
 				 {ok, {publish, _Msg, _Ts}} ->
 					 Inflight1 = maps:put(PacketId, {pubrel, PacketId, os:timestamp()}, Inflight),
@@ -848,7 +848,7 @@ connected(cast, ?PUBREC_PACKET(PacketId), State = #state{inflight = Inflight}) -
     send_puback(?PUBREL_PACKET(PacketId), NState);
 
 %%TODO::... if auto_ack is false, should we take PacketId from the map?
-connected(cast, ?PUBREL_PACKET(PacketId),
+connected(cast, ?PUBREL_PACKET(PacketId, _ReasonCode),
           State = #state{awaiting_rel = AwaitingRel, auto_ack = AutoAck}) ->
      case maps:take(PacketId, AwaitingRel) of
          {Packet, AwaitingRel1} ->
