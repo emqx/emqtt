@@ -42,8 +42,8 @@ connect(Host0, Port, Opts, Timeout) ->
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
     TransportOpts = maps:from_list(TransportOptions),
     DefaultOpts = #{connect_timeout => Timeout,
-                       retry => 3,
-                       retry_timeout => 30000},
+                 retry => 3,
+                 retry_timeout => 30000},
     ConnOpts = maps:merge(TransportOpts,DefaultOpts),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
