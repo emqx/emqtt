@@ -92,7 +92,8 @@ groups() ->
        t_pause_resume,
        t_init,
        t_connected,
-       t_ssl_error]},
+       t_ssl_error_client_reject_server,
+       t_ssl_error_server_reject_client]},
     {mqttv3,[],
       [basic_test_v3]},
     {mqttv4, [],
@@ -246,7 +247,32 @@ t_reconnect_disabled(Config) ->
             ct:fail(conn_still_alive)
     end.
 
-t_ssl_error(Config) ->
+t_ssl_error_client_reject_server(Config) ->
+    ct:timetrap({seconds, 1}),
+    Port = proplists:get_value(ssl_port, Config, 8883),
+    DataDir = cert_dir(Config),
+    emqtt_test_lib:gen_ca(DataDir, "ca"),
+    emqtt_test_lib:gen_ca(DataDir, "ca2"),
+    emqtt_test_lib:gen_host_cert("server", "ca", DataDir, true),
+    emqtt_test_lib:gen_host_cert("client", "ca2", DataDir, true),
+    emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
+                                   #{ verify => verify_none
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, "server")
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, "server")
+                                    }),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {ssl, true},
+                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
+                                           , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
+                                           , {cacertfile, emqtt_test_lib:ca_cert_name(DataDir, "client")}
+                                           , {verify, verify_peer}
+                                           ]}
+                               ]),
+    ?assertMatch({error, {tls_alert, {unknown_ca, _}}}, emqtt:connect(C)),
+    ok.
+
+t_ssl_error_server_reject_client(Config) ->
     ct:timetrap({seconds, 1}),
     Port = proplists:get_value(ssl_port, Config, 8883),
     DataDir = cert_dir(Config),
@@ -265,9 +291,11 @@ t_ssl_error(Config) ->
                                 {ssl, true},
                                 {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
                                            , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
+                                           , {verify, verify_none}
                                            ]}
                                ]),
-    {error, {{shutdown, {tls_alert, {unknown_ca, _}}}, _}} = emqtt:connect(C),
+    ?assertMatch({error, {ssl_error, _Sock, {tls_alert, {unknown_ca, _}}}},
+                 emqtt:connect(C)),
     ok.
 
 t_reconnect_enabled(Config) ->

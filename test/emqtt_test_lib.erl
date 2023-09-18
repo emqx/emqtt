@@ -96,16 +96,19 @@ ensure_listener(Type, Name, BindAddr, BindPort) ->
     end.
 
 listener_conf(quic) ->
-    #{
-      certfile => filename:join(code:lib_dir(emqx), "etc/certs/cert.pem"),
+    CertFile = filename:join(code:lib_dir(emqx), "etc/certs/cert.pem"),
+    KeyFile = filename:join(code:lib_dir(emqx), "etc/certs/key.pem"),
+    SslOpts = #{
+      certfile => CertFile,
       ciphers =>
       [
        "TLS_AES_256_GCM_SHA384",
        "TLS_AES_128_GCM_SHA256",
        "TLS_CHACHA20_POLY1305_SHA256"
       ],
-      keyfile => filename:join(code:lib_dir(emqx), "etc/certs/key.pem")
-     };
+      keyfile => KeyFile
+     },
+    #{ssl_options => SslOpts};
 listener_conf(ws) ->
     #{
       websocket =>
