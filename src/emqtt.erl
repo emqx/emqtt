@@ -1073,7 +1073,14 @@ waiting_for_connack(EventType, EventContent, State) ->
         {stop, Reason, NewState} ->
             case take_call({connect, Via}, NewState) of
                 {value, #call{from = From}, _State} ->
-                    Reply = {error, {Reason, EventContent}},
+                    Reply = case Reason of
+                                {shutdown, _ShutdownReason} ->
+                                    %% All _ShutdownReason reasons returned from handle_evernt
+                                    %% are included in EventContext
+                                    {error, EventContent};
+                                _ ->
+                                    {error, {Reason, EventContent}}
+                            end,
                     {stop_and_reply, Reason, [{reply, From, Reply}]};
                 false ->
                     {stop, Reason, NewState}
@@ -1955,7 +1962,8 @@ send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
 run_sock(State = #state{conn_mod = emqtt_quic}) ->
     State;
 run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
-    ConnMod:setopts(Sock, [{active, once}]), State.
+    _ = ConnMod:setopts(Sock, [{active, once}]),
+    State.
 
 %%--------------------------------------------------------------------
 %% Process incomming

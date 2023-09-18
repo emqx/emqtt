@@ -65,9 +65,9 @@ ssl_upgrade(Host, Sock, SslOpts, Timeout) ->
     SslOpts4 = apply_host_check_fun(SslOpts3),
     case ssl:connect(Sock, SslOpts4, Timeout) of
         {ok, SslSock} ->
-            ok = ssl:controlling_process(SslSock, self()),
             {ok, #ssl_socket{tcp = Sock, ssl = SslSock}};
-        {error, Reason} -> {error, Reason}
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -spec(send(socket(), iodata()) -> ok | {error, einval | closed}).
