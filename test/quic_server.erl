@@ -24,37 +24,55 @@ start_link(Port, Opts) ->
 
 quic_server(Port, Opts) ->
     {ok, L} = quicer:listen(Port, Opts),
-    server_loop(L).
-
-server_loop(L) ->
+    spawn_link(fun() -> accepter_loop(L) end),
+    spawn_link(fun() -> accepter_loop(L) end),
     receive
         stop ->
             quicer:close_listener(L),
             ok
-    after 0 ->
-            case quicer:accept(L, [], 30000) of
+    end.
+
+accepter_loop(L) ->
+    case quicer:accept(L, [], 30000) of
+        {ok, Conn} ->
+            case quicer:handshake(Conn, 1000) of
                 {ok, Conn} ->
-                    {ok, Conn} = quicer:handshake(Conn, 1000),
-                    {ok, Stm} = quicer:accept_stream(Conn, [{active, false}]),
-                    %% Assertion
-                    {ok, false} = quicer:getopt(Stm, active),
-                    quicer:setopt(Stm, active, true),
-                    receive
-                        {quic, <<"ping">>, Stm, #{}} ->
-                            quicer:send(Stm, <<"pong">>)
-                    end,
-                    receive
-                        %% graceful shutdown
-                        {quic, peer_send_shutdown, Stm, undefined} ->
-                            quicer:close_connection(Conn);
-                        %% Conn shutdown
-                        {quic, shutdown, Conn, _} ->
-                            ok
-                    end;
-                {error, timeout} ->
+                    server_conn_loop(Conn);
+                _ ->
+                    ct:pal("server handshake failed~n", []),
                     ok
-            end,
-            server_loop(L)
+            end;
+        {error, timeout} ->
+            ct:pal("server accpet conn timeout ~n", []),
+            ok
+    end,
+    accepter_loop(L).
+
+
+server_conn_loop(Conn) ->
+    case quicer:accept_stream(Conn, [{active, false}]) of
+        {ok, Stm} ->
+            %% Assertion
+            {ok, false} = quicer:getopt(Stm, active),
+            server_stream_loop(Conn, Stm);
+        {error, timeout} ->
+            ct:pal("server accpet steam timeout ~n", []),
+            ok
+    end.
+
+server_stream_loop(Conn, Stm) ->
+    quicer:setopt(Stm, active, true),
+    receive
+        {quic, <<"ping">>, Stm, #{}} ->
+            quicer:send(Stm, <<"pong">>)
+    end,
+    receive
+        %% graceful shutdown
+        {quic, peer_send_shutdown, Stm, undefined} ->
+            quicer:close_connection(Conn);
+        %% Conn shutdown
+        {quic, shutdown, Conn, _} ->
+            ok
     end.
 
 stop(Server) ->

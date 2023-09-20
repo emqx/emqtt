@@ -91,6 +91,7 @@ handle_info({quic, Event, Connection, Props}, StateName, #{quic_conn_cb := ConnC
        peer_address_changed =:= Event orelse
        streams_available =:= Event orelse
        peer_needs_streams =:= Event orelse
+       dgram_state_changed =:= Event orelse
        nst_received =:= Event ->
     ConnCB:Event(Connection, Props, CBState#{state_name := StateName});
 handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
