@@ -139,8 +139,8 @@ end_per_group(_, Config) ->
 
 t_quic_sock(Config) ->
     Port = 4567,
-    SslOpts = [ {cert, certfile(Config)}
-              , {key,  keyfile(Config)}
+    SslOpts = [ {certfile, certfile(Config)}
+              , {keyfile,  keyfile(Config)}
               , {idle_timeout_ms, 10000}
               , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
               , {peer_bidi_stream_count, 10}
@@ -176,8 +176,8 @@ t_quic_sock_fail(_Config) ->
 
 t_0_rtt(Config) ->
     Port = 4568,
-    SslOpts = [ {cert, certfile(Config)}
-              , {key,  keyfile(Config)}
+    SslOpts = [ {certfile, certfile(Config)}
+              , {keyfile,  keyfile(Config)}
               , {idle_timeout_ms, 10000}
               , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
               , {peer_bidi_stream_count, 10}
@@ -209,8 +209,8 @@ t_0_rtt(Config) ->
 
 t_0_rtt_fail(Config) ->
     Port = 4569,
-    SslOpts = [ {cert, certfile(Config)}
-              , {key,  keyfile(Config)}
+    SslOpts = [ {certfile, certfile(Config)}
+              , {keyfile,  keyfile(Config)}
               , {idle_timeout_ms, 10000}
               , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
               , {peer_bidi_stream_count, 10}
@@ -231,7 +231,7 @@ t_0_rtt_fail(Config) ->
                                         Ticket
                                 end,
 
-    Error = {error, {not_found, invalid_parameter}},
+    Error = {error, invalid_parameter},
     Error = emqtt_quic:connect("localhost",
                                Port,
                                [{alpn, ["mqtt"]}, {active, false},
