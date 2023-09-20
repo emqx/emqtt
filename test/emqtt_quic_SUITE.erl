@@ -146,6 +146,7 @@ t_quic_sock(Config) ->
               , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
+    process_flag(trap_exit, true),
     Server = quic_server:start_link(Port, SslOpts),
     timer:sleep(500),
     {ok, Sock} = emqtt_quic:connect("localhost",
@@ -157,7 +158,7 @@ t_quic_sock(Config) ->
     quic_server:stop(Server).
 
 t_quic_sock_fail(_Config) ->
-    Port = 4567,
+    Port = 3567,
     Error1 = {error, {transport_down, #{ error => 2,
                                          status => connection_refused}}
              },
@@ -183,6 +184,7 @@ t_0_rtt(Config) ->
               , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
+    process_flag(trap_exit, true),
     Server = quic_server:start_link(Port, SslOpts),
     timer:sleep(500),
     {ok, {quic, Conn, _Stream} = Sock} = emqtt_quic:connect("localhost",
@@ -216,6 +218,7 @@ t_0_rtt_fail(Config) ->
               , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
+    process_flag(trap_exit, true),
     Server = quic_server:start_link(Port, SslOpts),
     timer:sleep(500),
     {ok, {quic, Conn, _Stream} = Sock} = emqtt_quic:connect("localhost",
