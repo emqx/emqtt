@@ -171,7 +171,6 @@
                 | {properties, properties()}
                 | {nst,  binary()}).
 
--type(maybe(T) :: undefined | T).
 -type(topic() :: binary()).
 -type(payload() :: iodata()).
 -type(packet_id() :: 0..16#FFFF).
@@ -223,12 +222,12 @@
           bridge_mode     :: boolean(),
           clientid        :: binary(),
           clean_start     :: boolean(),
-          username        :: maybe(binary()),
+          username        :: binary() | undefined,
           password        :: function(),
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
-          keepalive_timer :: maybe(timer:tref()),
+          keepalive_timer :: timer:tref() | undefined,
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_flag       :: boolean(),
@@ -242,9 +241,9 @@
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
-          ack_timer       :: maybe(timer:tref()),
+          ack_timer       :: timer:tref() | undefined,
           retry_interval  :: pos_integer(),
-          retry_timer     :: maybe(timer:tref()),
+          retry_timer     :: timer:tref() | undefined,
           session_present :: boolean(),
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
@@ -1073,7 +1072,14 @@ waiting_for_connack(EventType, EventContent, State) ->
         {stop, Reason, NewState} ->
             case take_call({connect, Via}, NewState) of
                 {value, #call{from = From}, _State} ->
-                    Reply = {error, {Reason, EventContent}},
+                    Reply = case Reason of
+                                {shutdown, _ShutdownReason} ->
+                                    %% All _ShutdownReason reasons returned from handle_evernt
+                                    %% are included in EventContext
+                                    {error, EventContent};
+                                _ ->
+                                    {error, {Reason, EventContent}}
+                            end,
                     {stop_and_reply, Reason, [{reply, From, Reply}]};
                 false ->
                     {stop, Reason, NewState}
@@ -1955,7 +1961,8 @@ send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
 run_sock(State = #state{conn_mod = emqtt_quic}) ->
     State;
 run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
-    ConnMod:setopts(Sock, [{active, once}]), State.
+    _ = ConnMod:setopts(Sock, [{active, once}]),
+    State.
 
 %%--------------------------------------------------------------------
 %% Process incomming

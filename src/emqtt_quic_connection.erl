@@ -38,6 +38,7 @@
         , peer_needs_streams/3
         , nst_received/3
         , new_stream/3
+        , dgram_state_changed/3
         ]).
 
 -define(LOG(Level, Msg, Meta, State),
@@ -133,6 +134,10 @@ peer_needs_streams(_C, undefined, S) ->
 connected(_Connecion, #{ is_resumed := true }, #{state_name := waiting_for_connack} = _S) ->
     keep_state_and_data;
 connected(_Connecion, _Props, _S) ->
+    keep_state_and_data.
+
+-spec dgram_state_changed(connection_handle(), quicer:datagram_state(), cb_data()) -> cb_ret().
+dgram_state_changed(_C, _State, _S) ->
     keep_state_and_data.
 -else.
 %% BUILD_WITHOUT_QUIC
