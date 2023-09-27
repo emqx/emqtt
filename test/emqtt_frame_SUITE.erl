@@ -64,7 +64,8 @@ groups() ->
       [t_serialize_parse_qos0_publish,
        t_serialize_parse_qos1_publish,
        t_serialize_parse_qos2_publish,
-       t_serialize_parse_publish_v5
+       t_serialize_parse_publish_v5,
+       t_serialize_parse_publish_subscription_ids
       ]},
      {puback, [parallel],
       [t_serialize_parse_puback,
@@ -359,6 +360,21 @@ t_serialize_parse_publish_v5(_) ->
               'Content-Type'             => <<"text/json">>},
     Packet = ?PUBLISH_PACKET(?QOS_1, <<"$share/group/topic">>, 1, Props, <<"payload">>),
     ?assertEqual(Packet, parse_serialize(Packet, #{version => ?MQTT_PROTO_V5})).
+
+t_serialize_parse_publish_subscription_ids(_) ->
+    ?PROPTEST(prop_subscription_identifier).
+
+prop_subscription_identifier() ->
+    ?FORALL(SubId, subscription_identifier(),
+            begin
+                Props = #{'Subscription-Identifier' => SubId},
+                Packet = ?PUBLISH_PACKET(?QOS_1, <<"topic">>, 1, Props, <<"payload">>),
+                equals(Packet, parse_serialize(Packet, #{version => ?MQTT_PROTO_V5}))
+            end).
+
+subscription_identifier() ->
+    Id = integer(1, 16#FFFFFFF),
+    oneof([Id, ?LET(L, list(Id), [Id, Id | L])]).
 
 t_serialize_parse_puback(_) ->
     Packet = ?PUBACK_PACKET(1),

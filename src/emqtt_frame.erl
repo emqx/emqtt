@@ -336,6 +336,9 @@ parse_properties(Bin, ?MQTT_PROTO_V5) ->
     <<PropsBin:Len/binary, Rest1/binary>> = Rest,
     {parse_property(PropsBin, #{}), Rest1}.
 
+parse_property(<<>>, Props = #{'Subscription-Identifier' := Ids})
+  when is_list(Ids) ->
+    maps:update('Subscription-Identifier', lists:reverse(Ids), Props);
 parse_property(<<>>, Props) ->
     Props;
 parse_property(<<16#01, Val, Bin/binary>>, Props) ->
@@ -352,7 +355,13 @@ parse_property(<<16#09, Len:16/big, Val:Len/binary, Bin/binary>>, Props) ->
     parse_property(Bin, Props#{'Correlation-Data' => Val});
 parse_property(<<16#0B, Bin/binary>>, Props) ->
     {Val, Rest} = parse_variable_byte_integer(Bin),
-    parse_property(Rest, Props#{'Subscription-Identifier' => Val});
+    Props1 = maps:update_with('Subscription-Identifier',
+                              fun(Id) when is_integer(Id) ->
+                                      [Val, Id];
+                                 (Ids) when is_list(Ids) ->
+                                      [Val | Ids]
+                              end, Val, Props),
+    parse_property(Rest, Props1);
 parse_property(<<16#11, Val:32/big, Bin/binary>>, Props) ->
     parse_property(Bin, Props#{'Session-Expiry-Interval' => Val});
 parse_property(<<16#12, Bin/binary>>, Props) ->
@@ -619,6 +628,9 @@ serialize_property('Response-Topic', Val) ->
     <<16#08, (serialize_utf8_string(Val))/binary>>;
 serialize_property('Correlation-Data', Val) ->
     <<16#09, (byte_size(Val)):16, Val/binary>>;
+serialize_property('Subscription-Identifier', Ids) when is_list(Ids) ->
+    << <<(serialize_property('Subscription-Identifier', Id))/binary>>
+       || Id <- Ids >>;
 serialize_property('Subscription-Identifier', Val) ->
     <<16#0B, (serialize_variable_byte_integer(Val))/binary>>;
 serialize_property('Session-Expiry-Interval', Val) ->
