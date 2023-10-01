@@ -72,11 +72,7 @@ ssl_upgrade(Host, Sock, SslOpts, Timeout) ->
 
 -spec(send(socket(), iodata()) -> ok | {error, einval | closed}).
 send(Sock, Data) when is_port(Sock) ->
-    try erlang:port_command(Sock, Data) of
-        true -> ok
-    catch
-        error:badarg -> {error, einval}
-    end;
+    send_tcp_data(Sock, Data);
 send(#ssl_socket{ssl = SslSock}, Data) ->
     ssl:send(SslSock, Data);
 send(QuicStream, Data) when is_reference(QuicStream) ->
@@ -86,6 +82,18 @@ send(QuicStream, Data) when is_reference(QuicStream) ->
         Other ->
             Other
     end.
+
+-if(?OTP_RELEASE >= 26).
+send_tcp_data(Sock, Data) ->
+    gen_tcp:send(Sock, Data).
+-else.
+send_tcp_data(Sock, Data) ->
+    try erlang:port_command(Sock, Data) of
+        true -> ok
+    catch
+        error:badarg -> {error, einval}
+    end.
+-endif.
 
 -spec(recv(socket(), non_neg_integer())
       -> {ok, iodata()} | {error, closed | inet:posix()}).
