@@ -37,6 +37,7 @@ jobs:
         - name: Run tests
           run: |
             set -e
+            make dialyzer
             make eunit
             make ct
             make cover

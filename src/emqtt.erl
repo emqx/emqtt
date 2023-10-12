@@ -165,7 +165,7 @@
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
-                | {reconnect, non_neg_integer() | infinity}
+                | {reconnect, reconnect()}
                 | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
@@ -207,27 +207,29 @@
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
+-type reconnect() :: infinity | non_neg_integer().
+-type tref() :: reference().
 
 -record(state, {
           name            :: atom(),
-          owner           :: pid(),
+          owner           :: undefined | pid(),
           msg_handler     :: ?NO_HANDLER | msg_handler(),
           host            :: host(),
           port            :: inet:port_number(),
           hosts           :: [{host(), inet:port_number()}],
           conn_mod        :: conn_mod(),
-          socket          :: inet:socket() | pid() | emqtt_quic:quic_sock(),
+          socket          :: undefined | ssl:sslsocket() | inet:socket() | pid() | emqtt_quic:quic_sock(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
           clientid        :: binary(),
           clean_start     :: boolean(),
           username        :: binary() | undefined,
-          password        :: function(),
+          password        :: undefined | function(),
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
-          keepalive_timer :: timer:tref() | undefined,
+          keepalive_timer :: undefined | tref(),
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_flag       :: boolean(),
@@ -241,17 +243,17 @@
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
-          ack_timer       :: timer:tref() | undefined,
+          ack_timer       :: tref() | undefined,
           retry_interval  :: pos_integer(),
-          retry_timer     :: timer:tref() | undefined,
-          session_present :: boolean(),
+          retry_timer     :: tref() | undefined,
+          session_present :: undefined | boolean(),
           last_packet_id  :: packet_id(),
           low_mem         :: boolean(),
-          parse_state     :: emqtt_frame:parse_state(),
-          reconnect       :: boolean(),
+          parse_state     :: undefined | emqtt_frame:parse_state(),
+          reconnect       :: reconnect(),
           reconnect_timeout :: pos_integer(),
           qoe             :: boolean() | map(),
-          nst             :: binary(), %% quic new session ticket
+          nst             :: undefined | binary(), %% quic new session ticket
           pendings        :: pendings(),
           extra = #{}     :: map() %% extra field for easier to make appup
          }). %% note, always add the new fields at the tail for code_change.
@@ -391,6 +393,17 @@ quic_mqtt_connect(Client) ->
 quic_connect(Client) ->
     call(Client, {connect, emqtt_quic}).
 
+qos_number(?QOS_0) -> ?QOS_0;
+qos_number(qos0) -> ?QOS_0;
+qos_number(at_most_once) -> ?QOS_0;
+qos_number(?QOS_1) -> ?QOS_1;
+qos_number(qos1) -> ?QOS_1;
+qos_number(at_least_once) -> ?QOS_1;
+qos_number(?QOS_2) -> ?QOS_2;
+qos_number(qos2) -> ?QOS_2;
+qos_number(exactly_once) -> ?QOS_2.
+
+
 %% @private
 call(Client, Req) ->
     gen_statem:call(Client, Req, infinity).
@@ -400,15 +413,15 @@ call(Client, Req) ->
 subscribe(Client, Topic) when is_binary(Topic) ->
     subscribe(Client, {Topic, ?QOS_0});
 subscribe(Client, {Topic, QoS}) when is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, {Topic, ?QOS_I(QoS)});
+    subscribe(Client, {Topic, qos_number(QoS)});
 subscribe(Client, {Topic, QoS}) when is_binary(Topic), ?IS_QOS(QoS) ->
-    subscribe(Client, [{Topic, ?QOS_I(QoS)}]);
+    subscribe(Client, [{Topic, QoS}]);
 subscribe(Client, Topics) when is_list(Topics) ->
     subscribe(Client, #{}, lists:map(
                              fun({Topic, QoS}) when is_binary(Topic), is_atom(QoS) ->
-                                 {Topic, [{qos, ?QOS_I(QoS)}]};
+                                 {Topic, [{qos, qos_number(QoS)}]};
                                 ({Topic, QoS}) when is_binary(Topic), ?IS_QOS(QoS) ->
-                                 {Topic, [{qos, ?QOS_I(QoS)}]};
+                                 {Topic, [{qos, qos_number(QoS)}]};
                                 ({Topic, Opts}) when is_binary(Topic), is_list(Opts) ->
                                  {Topic, Opts}
                              end, Topics)).
@@ -418,7 +431,7 @@ subscribe(Client, Topics) when is_list(Topics) ->
                (client(), properties(), [{topic(), qos() | [subopt()]}]) ->
                 subscribe_ret()).
 subscribe(Client, Topic, QoS) when is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, Topic, ?QOS_I(QoS));
+    subscribe(Client, Topic, qos_number(QoS));
 subscribe(Client, Topic, QoS) when is_binary(Topic), ?IS_QOS(QoS) ->
     subscribe(Client, Topic, [{qos, QoS}]);
 subscribe(Client, Topic, Opts) when is_binary(Topic), is_list(Opts) ->
@@ -431,7 +444,7 @@ subscribe(Client, Properties, Topics) when is_map(Properties), is_list(Topics) -
       -> subscribe_ret()).
 subscribe(Client, Properties, Topic, QoS)
     when is_map(Properties), is_binary(Topic), is_atom(QoS) ->
-    subscribe(Client, Properties, Topic, ?QOS_I(QoS));
+    subscribe(Client, Properties, Topic, qos_number(QoS));
 subscribe(Client, Properties, Topic, QoS)
     when is_map(Properties), is_binary(Topic), ?IS_QOS(QoS) ->
     subscribe(Client, Properties, Topic, [{qos, QoS}]);
@@ -461,7 +474,7 @@ parse_subopt([{nl, true} | Opts], Result) ->
 parse_subopt([{nl, false} | Opts], Result) ->
     parse_subopt(Opts, Result#{nl := 0});
 parse_subopt([{qos, QoS} | Opts], Result) ->
-    parse_subopt(Opts, Result#{qos := ?QOS_I(QoS)});
+    parse_subopt(Opts, Result#{qos := qos_number(QoS)});
 parse_subopt([_ | Opts], Result) ->
     parse_subopt(Opts, Result).
 
@@ -473,7 +486,7 @@ publish(Client, Topic, Payload) when is_binary(Topic) ->
 -spec(publish(client(), topic(), payload(), qos() | qos_name() | [pubopt()])
       -> publish_success() | {error, term()}).
 publish(Client, Topic, Payload, QoS) when is_binary(Topic), is_atom(QoS) ->
-    publish(Client, Topic, Payload, [{qos, ?QOS_I(QoS)}]);
+    publish(Client, Topic, Payload, [{qos, qos_number(QoS)}]);
 publish(Client, Topic, Payload, QoS) when is_binary(Topic), ?IS_QOS(QoS) ->
     publish(Client, Topic, Payload, [{qos, QoS}]);
 publish(Client, Topic, Payload, Opts) when is_binary(Topic), is_list(Opts) ->
@@ -490,7 +503,7 @@ publish_via(Client, Via, Topic, Properties, Payload, Opts)
   when is_binary(Topic), is_map(Properties), is_list(Opts) ->
     ok = emqtt_props:validate(Properties),
     Retain = proplists:get_bool(retain, Opts),
-    QoS = ?QOS_I(proplists:get_value(qos, Opts, ?QOS_0)),
+    QoS = qos_number(proplists:get_value(qos, Opts, ?QOS_0)),
     publish_via(Client, Via, #mqtt_msg{qos     = QoS,
                                        retain  = Retain,
                                        topic   = Topic,
@@ -547,7 +560,7 @@ publish_async(Client, Via, Msg = #mqtt_msg{}, Timeout, Callback) ->
 
 -spec(publish_async(client(), via(), topic(), payload(), qos() | qos_name() | [pubopt()], mfas()) -> ok).
 publish_async(Client, Via, Topic, Payload, QoS, Callback) when is_binary(Topic), is_atom(QoS) ->
-    publish_async(Client, Via, Topic, #{}, Payload, [{qos, ?QOS_I(QoS)}], infinity, Callback);
+    publish_async(Client, Via, Topic, #{}, Payload, [{qos, qos_number(QoS)}], infinity, Callback);
 publish_async(Client, Via, Topic, Payload, QoS, Callback) when is_binary(Topic), ?IS_QOS(QoS) ->
     publish_async(Client, Via, Topic, #{}, Payload, [{qos, QoS}], infinity, Callback);
 publish_async(Client, Via, Topic, Payload, Opts, Callback) when is_binary(Topic), is_list(Opts) ->
@@ -566,7 +579,7 @@ publish_async(Client, Via, Topic, Properties, Payload, Opts, Timeout, Callback)
     when is_binary(Topic), is_map(Properties), is_list(Opts) ->
     ok = emqtt_props:validate(Properties),
     Retain = proplists:get_bool(retain, Opts),
-    QoS = ?QOS_I(proplists:get_value(qos, Opts, ?QOS_0)),
+    QoS = qos_number(proplists:get_value(qos, Opts, ?QOS_0)),
     publish_async(Client,
                   Via,
                   #mqtt_msg{qos     = QoS,
@@ -867,7 +880,7 @@ init_will_msg({payload, Payload}, WillMsg) ->
 init_will_msg({retain, Retain}, WillMsg) when is_boolean(Retain) ->
     WillMsg#mqtt_msg{retain = Retain};
 init_will_msg({qos, QoS}, WillMsg) ->
-    WillMsg#mqtt_msg{qos = ?QOS_I(QoS)}.
+    WillMsg#mqtt_msg{qos = qos_number(QoS)}.
 
 init_parse_state(State = #state{proto_ver = Ver, properties = Properties}) ->
     MaxSize = maps:get('Maximum-Packet-Size', Properties, ?MAX_PACKET_SIZE),
@@ -950,7 +963,7 @@ do_connect(ConnMod, #state{sock_opts = SockOpts,
             {error, Reason}
     end.
 
--spec mqtt_connect(state()) -> ok | {error, any()}.
+-spec mqtt_connect(state()) -> {ok, state()} | {error, any()}.
 mqtt_connect(State = #state{clientid    = ClientId,
                             clean_start = CleanStart,
                             bridge_mode = IsBridge,
@@ -1455,16 +1468,7 @@ handle_event(info, {timeout, TRef, retry}, StateName, State0 = #state{retry_time
     {keep_state, State};
 
 handle_event(EventType, EventContent, StateName, State) ->
-    case maybe_upgrade_test_cheat(EventType, EventContent, StateName, State) of
-        skip ->
-            ?LOG(error, "unexpected_event",
-                 #{state => StateName,
-                   event_type => EventType,
-                   event => EventContent}, State),
-            keep_state_and_data;
-        Other ->
-            Other
-    end.
+    maybe_upgrade_test_cheat(EventType, EventContent, StateName, State).
 
 -ifdef(UPGRADE_TEST_CHEAT).
 %% Cheat release manager that I am the target process for code change.
@@ -1476,17 +1480,25 @@ maybe_upgrade_test_cheat(info, {get_child, Ref, From}, _StateName, _State) ->
     From ! {Ref, {self(), ?MODULE}},
     keep_state_and_data;
 maybe_upgrade_test_cheat({call, From}, which_children, _StateName, _State) ->
-    {keep_state_and_data, {reply, From, []}}.
--else.
+    {keep_state_and_data, {reply, From, []}};
 maybe_upgrade_test_cheat(_, _, _, _) ->
-    skip.
+    handle_unknown_event(EventType, EventContent, StateName, State).
+-else.
+maybe_upgrade_test_cheat(EventType, EventContent, StateName, State) ->
+    handle_unknown_event(EventType, EventContent, StateName, State).
 -endif.
 
+handle_unknown_event(EventType, EventContent, StateName, State) ->
+    ?LOG(error, "unexpected_event",
+         #{state => StateName,
+           event_type => EventType,
+           event => EventContent}, State),
+    keep_state_and_data.
 
 %% Mandatory callback functions
 terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket}) ->
     reply_all_inflight_reqs(Reason, State),
-    reply_all_pendings_reqs(Reason, State),
+    ok = reply_all_pendings_reqs(Reason, State),
     case Reason of
         {disconnected, ReasonCode, Properties} ->
             %% backward compatible
@@ -1806,6 +1818,8 @@ deliver(Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = Packet
     ok = eval_msg_handler(State, publish, Msg),
     State.
 
+%% no dialyzer warning because the second clause kept for compatibility
+-dialyzer({nowarn_function, [eval_msg_handler/3]}).
 eval_msg_handler(#state{msg_handler = ?NO_HANDLER,
                         owner = Owner},
                  disconnected, {ReasonCode, Properties}) when is_integer(ReasonCode) ->
@@ -1879,11 +1893,10 @@ reply_all_inflight_reqs(Reason, #state{inflight = Inflight}) ->
 reply_all_pendings_reqs(Reason, #state{pendings = Pendings}) ->
     %% reply error to all pendings caller
     Reqs = maps:get(requests, Pendings),
-    _ = queue_fold(
-          fun(?PUB_REQ(_, _, _, Callback), _) ->
+    lists:foreach(
+          fun(?PUB_REQ(_, _, _, Callback)) ->
                   eval_callback_handler({error, Reason}, Callback)
-          end, ok, Reqs),
-    ok.
+          end, queue:to_list(Reqs)).
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
@@ -2079,7 +2092,7 @@ cancel_timer(undefined) ->
 cancel_timer(Tref) ->
     %% we do not care if the timer is already expired
     %% the expire event will be discarded when not in connected state
-    _ = timer:cancel(Tref),
+    _ = erlang:cancel_timer(Tref),
     ok.
 
 -spec qoe_inject(atom(), state()) -> state().
@@ -2094,13 +2107,6 @@ qoe_inject(Tag, #state{qoe = QoE} = S) when is_map(QoE) ->
 
 now_ts() ->
     erlang:system_time(millisecond).
-
-%% copied queue:fold/3 since it impl otp24+ only
-queue_fold(Fun, Acc0, {R, F}) when is_function(Fun, 2), is_list(R), is_list(F) ->
-    Acc1 = lists:foldl(Fun, Acc0, F),
-    lists:foldr(Fun, Acc1, R);
-queue_fold(Fun, Acc0, Q) ->
-    erlang:error(badarg, [Fun, Acc0, Q]).
 
 -spec maybe_init_quic_state(module(), #state{}) -> #state{}.
 maybe_init_quic_state(emqtt_quic, Old = #state{extra = #{control_stream_sock := {quic, _, _} }}) ->
