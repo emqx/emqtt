@@ -1,4 +1,4 @@
-name: Run test case
+name: Run static checks
 
 on:
     push:
@@ -16,7 +16,6 @@ jobs:
         strategy:
             matrix:
                 builder:
-                  - "5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
                   - "5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
 
         container: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}"
@@ -31,17 +30,5 @@ jobs:
         - name: Run tests
           run: |
             set -e
-            make eunit
-            make ct
-            make cover
-            # @TODO rebar3 tar does not include appup of dep apps
-            # make relup-test
-        - uses: actions/upload-artifact@v3
-          if: always()
-          with:
-            name: logs
-            path: _build/test/logs
-        - uses: actions/upload-artifact@v3
-          with:
-            name: cover
-            path: _build/test/cover
+            make xref
+            make dialyzer
