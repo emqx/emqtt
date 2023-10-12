@@ -2070,11 +2070,15 @@ next_reconnect(#state{retry_timer = RetryTimer,
                                        },
      {state_timeout, Timeout, Reconnect}}.
 
+
+%% we do not care if the timer is already expired
+%% the expire event will be discarded when not in connected state
 cancel_timer(undefined) ->
     ok;
+cancel_timer(Tref) when is_reference(Tref) ->
+    _ = erlang:cancel_timer(Tref),
+    ok;
 cancel_timer(Tref) ->
-    %% we do not care if the timer is already expired
-    %% the expire event will be discarded when not in connected state
     _ = timer:cancel(Tref),
     ok.
 
