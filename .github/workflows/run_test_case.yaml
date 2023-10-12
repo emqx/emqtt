@@ -15,11 +15,13 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
             matrix:
-                builder:
-                  - "5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
-                  - "5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
+                docker_image:
+                  - "ghcr.io/emqx/emqx-builder/5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
+                  - "ghcr.io/emqx/emqx-builder/5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
+                  # TODO: after OTP26 is fixed
+                  # - "public.ecr.aws/docker/library/erlang:26"
 
-        container: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}"
+        container: "${{ matrix.docker_image }}"
 
         steps:
         - name: Checkout
@@ -29,8 +31,15 @@ jobs:
         - name: work around https://github.com/actions/checkout/issues/766
           run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
         - name: Run tests
+          env:
+            DOCKER_IMAGE: "${{ matrix.docker_image }}"
           run: |
             set -e
+            if [[ "${DOCKER_IMAGE}" == *emqx-builder* ]]; then
+              export BUILD_WITHOUT_QUIC=0
+            else
+              export BUILD_WITHOUT_QUIC=1
+            fi
             make eunit
             make ct
             make cover
