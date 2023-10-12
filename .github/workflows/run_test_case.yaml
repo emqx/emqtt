@@ -38,6 +38,7 @@ jobs:
           run: |
             set -e
             make dialyzer
+            make xref
             make eunit
             make ct
             make cover
