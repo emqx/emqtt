@@ -17,7 +17,8 @@ jobs:
             fail-fast: false
             matrix:
               builder:
-                - 5.0-26
+                - 5.0-26:1.13.4-24.3.4.2-1
+                - 5.1-4:1.14.5-25.3.2-2
               os:
                 - ubuntu20.04
                 - ubuntu18.04
@@ -28,11 +29,6 @@ jobs:
                 # The compiler feature "cxx_std_17" is not known to CXX compiler "GNU" version 4.8.5.
                 # - el7
                 - amzn2
-              otp:
-                - 24.3.4.2-1
-                - 25.1.2-2
-              elixir:
-                - 1.13.4
 
         steps:
         - uses: actions/checkout@v3
@@ -40,7 +36,7 @@ jobs:
             fetch-depth: 0
         - name: build emqx packages
           env:
-            BUILDER_IMAGE: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}:${{ matrix.elixir }}-${{ matrix.otp }}-${{ matrix.os }}"
+            BUILDER_IMAGE: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}-${{ matrix.os }}"
           # NOTE
           # Doing it manually instead of just setting `container` for the job because of
           # discrepancies in the images' environments affecting even basic things like

@@ -22,6 +22,7 @@
         , ensure_listener/4
         , ensure_quic_listener/2
         , all/1
+        , has_quic/0
         ]).
 
 %% TLS helpers
@@ -70,7 +71,12 @@ compile_emqx_test_module(M) ->
 
 -spec ensure_quic_listener(atom(), inet:port_number()) -> ok.
 ensure_quic_listener(Name, BindPort) ->
-    ok = ensure_listener(quic, Name, {0, 0, 0, 0}, BindPort).
+    case has_quic() of
+        true ->
+            ok = ensure_listener(quic, Name, {0, 0, 0, 0}, BindPort);
+        _ ->
+            ok
+    end.
 
 -spec ensure_listener(atom(), atom(), inet:ip_address(), inet:port_number()) -> ok.
 ensure_listener(Type, Name, BindAddr, BindPort) ->
@@ -215,3 +221,6 @@ set_ssl_options(ListenerId, Opts) ->
     {ok, #{type := Type, name := Name}} = emqx_listeners:parse_listener_id(ListenerId),
     emqx_config:put_listener_conf(Type, Name, [ssl_options], Opts),
     ok = emqx_listeners:restart_listener(ListenerId).
+
+has_quic() ->
+    false =:= os:getenv("BUILD_WITHOUT_QUIC").

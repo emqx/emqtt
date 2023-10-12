@@ -15,16 +15,18 @@
 %%--------------------------------------------------------------------
 -module(emqtt_quic_SUITE).
 
+
 -compile(nowarn_export_all).
 -compile(export_all).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include_lib("quicer/include/quicer.hrl").
 
 suite() ->
     [{timetrap, {seconds, 30}}].
 
+-ifndef(BUILD_WITHOUT_QUIC).
+-include_lib("quicer/include/quicer.hrl").
 all() ->
     [
      {group, mstream},
@@ -979,3 +981,9 @@ start_emqx_quic(UdpPort) ->
     emqtt_test_lib:start_emqx(),
     application:ensure_all_started(quicer),
     ok = emqtt_test_lib:ensure_quic_listener(mqtt, UdpPort).
+
+-else.
+
+all() ->
+    [].
+-endif. %% BUILD_WITHOUT_QUIC

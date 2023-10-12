@@ -40,11 +40,11 @@ connect(Host0, Port, Opts, Timeout) ->
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
-    TransportOpts = maps:from_list(TransportOptions),
+    TransportOpts = #{transport_opts => TransportOptions},
     DefaultOpts = #{connect_timeout => Timeout,
                  retry => 3,
                  retry_timeout => 30000},
-    ConnOpts = maps:merge(TransportOpts,DefaultOpts),
+    ConnOpts = maps:merge(TransportOpts, DefaultOpts),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             {ok, _} = gun:await_up(ConnPid, Timeout),

@@ -56,8 +56,8 @@ all() ->
     [ {group, mqttv3}
     , {group, mqttv4}
     , {group, mqttv5}
-    , {group, quic}
     , {group, general}
+    | [{group, quic} || emqtt_test_lib:has_quic()]
     ].
 
 groups() ->
@@ -108,13 +108,14 @@ groups() ->
        dollar_topics_test]},
     {mqttv5, [],
       [basic_test_v5,
-       retain_as_publish_test]},
-     {quic, [], [ {group, general}
-                , {group, mqttv3}
-                , {group, mqttv4}
-                , {group, mqttv5}
-                ]
-     }
+       retain_as_publish_test]}
+    | [ {quic, [], [ {group, general}
+                   , {group, mqttv3}
+                   , {group, mqttv4}
+                   , {group, mqttv5}
+                   ]}
+        || emqtt_test_lib:has_quic()
+      ]
     ].
 
 suite() ->
@@ -216,13 +217,12 @@ t_connect_timeout(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, F),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, F),
+    mock_quic_send(F),
 
     ?assertEqual({error, connack_timeout}, emqtt:ConnFun(C)),
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic).
+    unmock_quic().
 
 t_reconnect_disabled(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -387,9 +387,13 @@ t_reconnect_reach_max_attempts(Config) ->
     meck:expect(emqtt_sock, connect, fun(_, _, _, _) -> {error, fake_conn_error} end),
     meck:expect(emqtt_sock, close, fun(_) -> ok end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, connect, fun(_, _, _, _) -> {error, fake_conn_error} end),
-    meck:expect(emqtt_quic, close, fun(_) -> ok end),
+    case emqtt_test_lib:has_quic() of
+        true ->
+            meck:expect(emqtt_quic, connect, fun(_, _, _, _) -> {error, fake_conn_error} end),
+            meck:expect(emqtt_quic, close, fun(_) -> ok end);
+        _ ->
+            ok
+    end,
 
     ok = emqtt_test_lib:stop_emqx(),
 
@@ -405,7 +409,7 @@ t_reconnect_reach_max_attempts(Config) ->
             ct:fail(conn_still_alive)
     end,
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic).
+    unmock_quic().
 
 t_reconnect_immediate_retry(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -433,8 +437,7 @@ test_reconnect_immediate_retry(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> ok end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> ok end),
+    mock_quic_send(fun(_, _) -> ok end),
 
     Parent = self(),
     ok = emqtt:publish_async(C, Topic, <<"inflight1">>, [{qos, 1}],
@@ -448,7 +451,7 @@ test_reconnect_immediate_retry(Config) ->
 
     ok = emqtt_test_lib:stop_emqx(),
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic),
+    unmock_quic(),
 
     ok = emqtt_test_lib:start_emqx(),
 
@@ -547,8 +550,7 @@ t_publish_reply_error(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> {error, closed} end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> {error, closed} end),
+    mock_quic_send(fun(_, _) -> {error, closed} end),
 
     ?assertEqual({error, closed}, emqtt:publish(C, Topic, <<"t_publish">>)),
 
@@ -560,7 +562,7 @@ t_publish_reply_error(Config) ->
     end,
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic).
+    unmock_quic().
 
 t_publish_process_monitor(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -576,8 +578,7 @@ t_publish_process_monitor(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> ok end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> ok end),
+    mock_quic_send(fun(_, _) -> ok end),
 
     %% kill client process
     spawn(fun() -> timer:sleep(1000), exit(C, kill) end),
@@ -585,7 +586,7 @@ t_publish_process_monitor(Config) ->
     ?assertException(exit, killed, emqtt:publish(C, Topic, <<"t_publish">>, ?QOS_1)),
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic).
+    unmock_quic().
 
 t_publish_port_error(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -802,8 +803,7 @@ t_eval_callback_in_order(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> ok end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> ok end),
+    mock_quic_send(fun(_, _) -> ok end),
 
     Parent = self(),
     ok = emqtt:publish_async(C, <<"topic">>, <<"1">>, 0,
@@ -822,13 +822,12 @@ t_eval_callback_in_order(Config) ->
     %% mock the send function to get an sending error
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic),
+    unmock_quic(),
 
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> {error, closed} end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> {error, closed} end),
+    mock_quic_send(fun(_, _) -> {error, closed} end),
 
     ?assertMatch([{1, ok}, %% qos0: treat send as successfully
                   {2, {error, closed}}, %% from inflight
@@ -838,7 +837,7 @@ t_eval_callback_in_order(Config) ->
                   {'EXIT', C, closed}], ?COLLECT_ASYNC_RESULT(C)),
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic).
+    unmock_quic().
 
 t_ack_inflight_and_shoot_cycle(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -859,8 +858,7 @@ t_ack_inflight_and_shoot_cycle(Config) ->
     ok = meck:new(emqtt_sock, [passthrough, no_history]),
     ok = meck:expect(emqtt_sock, send, SendFun),
 
-    ok = meck:new(emqtt_quic, [passthrough, no_history]),
-    ok = meck:expect(emqtt_quic, send, SendFun),
+    mock_quic_send(SendFun),
 
     ok = emqtt:publish_async(C, <<"topic">>, <<"1">>, 1,
                              fun(R) -> Parent ! {publish_async_result, 1, R} end),
@@ -931,7 +929,7 @@ t_ack_inflight_and_shoot_cycle(Config) ->
                  ], CompMsgs2),
 
     ok = meck:unload(emqtt_sock),
-    ok = meck:unload(emqtt_quic),
+    unmock_quic(),
     ok = emqtt:disconnect(C).
 
 t_unsubscribe(Config) ->
@@ -1162,8 +1160,7 @@ retry_interval_test(Config) ->
     meck:new(emqtt_sock, [passthrough, no_history]),
     meck:expect(emqtt_sock, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
 
-    meck:new(emqtt_quic, [passthrough, no_history]),
-    meck:expect(emqtt_quic, send, fun(_, _) -> counters:add(CRef, 1, 1), ok end),
+    mock_quic_send(fun(_, _) -> counters:add(CRef, 1, 1) end),
 
     ok = emqtt:publish_async(Pub, nth(1, ?TOPICS), <<"msg1">>, 1, fun(_) -> ok end),
 
@@ -1180,7 +1177,7 @@ retry_interval_test(Config) ->
     ?assertEqual(5, counters:get(CRef, 1)),
 
     meck:unload(emqtt_sock),
-    meck:unload(emqtt_quic),
+    unmock_quic(),
     ok = emqtt:disconnect(Pub).
 
 will_message_test(Config) ->
@@ -1386,3 +1383,22 @@ test_dir(Config) ->
 
 cert_dir(Config) ->
     filename:join([test_dir(Config), "certs"]).
+
+
+mock_quic_send(F) ->
+    case emqtt_test_lib:has_quic() of
+        true ->
+            meck:new(emqtt_quic, [passthrough, no_history]),
+            meck:expect(emqtt_quic, send, F),
+            ok;
+        false ->
+            ok
+    end.
+
+unmock_quic() ->
+    case emqtt_test_lib:has_quic() of
+        true ->
+            meck:unload(emqtt_quic);
+        false ->
+            ok
+    end.

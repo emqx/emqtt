@@ -14,14 +14,13 @@ jobs:
 
         runs-on: ubuntu-latest
         strategy:
+            fail-fast: false
             matrix:
                 docker_image:
                   - "ghcr.io/emqx/emqx-builder/5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
                   - "ghcr.io/emqx/emqx-builder/5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
-                  # TODO: after OTP26 is fixed
-                  # - "public.ecr.aws/docker/library/erlang:26"
-
-        container: "${{ matrix.docker_image }}"
+                 # TODO: enable this line after port_command is fixed
+                 #- "public.ecr.aws/docker/library/erlang:26"
 
         steps:
         - name: Checkout
@@ -33,18 +32,20 @@ jobs:
         - name: Run tests
           env:
             DOCKER_IMAGE: "${{ matrix.docker_image }}"
+          shell: bash
           run: |
             set -e
-            if [[ "${DOCKER_IMAGE}" == *emqx-builder* ]]; then
-              export BUILD_WITHOUT_QUIC=0
-            else
-              export BUILD_WITHOUT_QUIC=1
-            fi
-            make eunit
-            make ct
-            make cover
+            docker build -t testimage --build-arg BUILD_FROM=${DOCKER_IMAGE} -f Dockerfile.test .
+            docker network create --ipv6 --subnet 2001:0DB8::/112 testnet
+            docker run -d --net testnet --name testcontainer testimage bash -c "sleep 1800"
+            docker exec testcontainer bash -c 'make eunit'
+            docker exec testcontainer bash -c 'make ct'
+            docker exec testcontainer bash -c 'make cover'
             # @TODO rebar3 tar does not include appup of dep apps
-            # make relup-test
+            # docker exec testcontainer bash -c 'make relup-test'
+            # copy the build dir to host working dir for following build steps
+            docker cp testcontainer:/_w/_build .
+            docker rm -f testcontainer
         - uses: actions/upload-artifact@v3
           if: always()
           with:
