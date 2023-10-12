@@ -102,7 +102,7 @@ close(Sock) when is_port(Sock) ->
 close(#ssl_socket{ssl = SslSock}) ->
     ssl:close(SslSock).
 
--spec(setopts(socket(), [gen_tcp:option() | ssl:socketoption()]) -> ok).
+-spec(setopts(socket(), [gen_tcp:option() | ssl:socketoption()]) -> ok | {error, any()}).
 setopts(Sock, Opts) when is_port(Sock) ->
     inet:setopts(Sock, Opts);
 setopts(#ssl_socket{ssl = SslSock}, Opts) ->

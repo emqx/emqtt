@@ -898,9 +898,7 @@ initialized({call, From}, {connect, ConnMod}, State) ->
             {next_state, waiting_for_connack,
              add_call(new_call({connect, Via}, From), NewState),
              {state_timeout, Timeout, Timeout}};
-        {error, Reason} = Error->
-            {stop_and_reply, Reason, [{reply, From, Error}]};
-        {sock_error, Reason} ->
+        {error, Reason} ->
             Error = {error, Reason},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Error}]}
     end;
@@ -926,9 +924,6 @@ initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefi
              add_call(new_call({connect, Via}, From), NewState),
              {reply, From, ok}};
         {error, Reason} = Error->
-            {stop_and_reply, Reason, [{reply, From, Error}]};
-        {sock_error, Reason} ->
-            Error = {error, Reason},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Error}]}
     end;
 initialized({call, From}, {new_data_stream, _StreamOpts} = Via0, State) ->
@@ -952,9 +947,10 @@ do_connect(ConnMod, #state{sock_opts = SockOpts,
             State2 = qoe_inject(handshaked, State1),
             mqtt_connect(run_sock(State2#state{conn_mod = ConnMod, socket = Sock}));
         {error, Reason} ->
-            {sock_error, Reason}
+            {error, Reason}
     end.
 
+-spec mqtt_connect(state()) -> ok | {error, any()}.
 mqtt_connect(State = #state{clientid    = ClientId,
                             clean_start = CleanStart,
                             bridge_mode = IsBridge,
@@ -968,7 +964,8 @@ mqtt_connect(State = #state{clientid    = ClientId,
                             properties  = Properties}) ->
     ?WILL_MSG(WillQoS, WillRetain, WillTopic, WillProps, WillPayload) = WillMsg,
     ConnProps = emqtt_props:filter(?CONNECT, Properties),
-    send(?CONNECT_PACKET(
+    Packet =
+        ?CONNECT_PACKET(
             #mqtt_packet_connect{proto_ver    = ProtoVer,
                                  proto_name   = ProtoName,
                                  is_bridge    = IsBridge,
@@ -983,20 +980,21 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  will_topic   = WillTopic,
                                  will_payload = WillPayload,
                                  username     = Username,
-                                 password     = emqtt_secret:unwrap(Password)}), State).
+                                 password     = emqtt_secret:unwrap(Password)}),
+    send(Packet, State).
 
 reconnect(state_timeout, Reconnect, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State) of
         {ok, #state{connect_timeout = Timeout} = NewState} ->
             {next_state, waiting_for_connack, NewState, {state_timeout, Timeout, Reconnect}};
-        Err ->
+        {error, Reason} ->
             Reconnect1 = case Reconnect of
                                infinity -> infinity;
                                _ -> Reconnect - 1
                            end,
             case Reconnect1 =< 0 of
                 true ->
-                    {stop, {reconnect_error, Err}};
+                    {stop, {reconnect_error, Reason}};
                 false ->
                     #state{reconnect_timeout = ReconnectTimeout} = State,
                     {keep_state_and_data, {state_timeout, ReconnectTimeout, Reconnect1}}
@@ -1952,15 +1950,21 @@ send(Via, Msg, State) when is_record(Msg, mqtt_msg) ->
 send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
     when is_record(Packet, mqtt_packet) ->
     Data = emqtt_frame:serialize(Packet, Ver),
-    ?LOG(debug, "SEND_Data", #{packet => redact_packet(Packet), socket => Sock}, State),
     case ConnMod:send(Sock, Data) of
-        ok  -> {ok, bump_last_packet_id(State)};
-        Error -> Error
+        ok  ->
+            ?LOG(debug, "SEND_Data", #{packet => redact_packet(Packet), socket => Sock}, State),
+            {ok, bump_last_packet_id(State)};
+        {error, Reason} ->
+            ?LOG(debug, "SEND_Data_failed", #{reason => Reason, packet => redact_packet(Packet), socket => Sock}, State),
+            {error, Reason}
     end.
 
 run_sock(State = #state{conn_mod = emqtt_quic}) ->
     State;
 run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
+    %% error is discarded, if socket is already closed,
+    %% so the next 'send' call will return {error, closed} or {error, einval}
+    %% then it should decide if it should shutdown or retry
     _ = ConnMod:setopts(Sock, [{active, once}]),
     State.
 
