@@ -171,10 +171,11 @@ t_tcp_sock(_) ->
 
 t_ssl_sock(Config) ->
     SslOpts = [{certfile, certfile(Config)},
-               {keyfile,  keyfile(Config)}
+               {keyfile, keyfile(Config)},
+               {verify, verify_none}
               ],
     {Server, _} = ssl_server:start_link(4443, SslOpts),
-    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4443, [{ssl_opts, []}], 3000),
+    {ok, Sock} = emqtt_sock:connect("127.0.0.1", 4443, [{ssl_opts, [{verify, verify_none}]}], 3000),
     send_and_recv_with(Sock),
     ok = emqtt_sock:close(Sock),
     ssl_server:stop(Server).
@@ -215,10 +216,10 @@ send_and_recv_with(Sock) ->
 %% Helper functions
 %%--------------------------------------------------------------------
 certfile(Config) ->
-    filename:join([cert_dir(Config), "test.crt"]).
+    filename:join([cert_dir(Config), "localhost.pem"]).
 
 keyfile(Config) ->
-    filename:join([test_dir(Config), "certs", "test.key"]).
+    filename:join([cert_dir(Config), "localhost.key"]).
 
 cert_dir(Config) ->
     filename:join([test_dir(Config), "certs"]).

@@ -251,21 +251,23 @@ t_ssl_error_client_reject_server(Config) ->
     ct:timetrap({seconds, 1}),
     Port = proplists:get_value(ssl_port, Config, 8883),
     DataDir = cert_dir(Config),
-    emqtt_test_lib:gen_ca(DataDir, "ca"),
-    emqtt_test_lib:gen_ca(DataDir, "ca2"),
-    emqtt_test_lib:gen_host_cert("server", "ca", DataDir, true),
-    emqtt_test_lib:gen_host_cert("client", "ca2", DataDir, true),
+    Ns = atom_to_list(?FUNCTION_NAME),
+    F = fun(Name) -> Ns ++ "-" ++ atom_to_list(Name) end,
+    emqtt_test_lib:gen_ca(DataDir, F(ca)),
+    emqtt_test_lib:gen_ca(DataDir, F(ca2)),
+    emqtt_test_lib:gen_host_cert(F(server), F(ca), DataDir, true),
+    emqtt_test_lib:gen_host_cert(F(client), F(ca2), DataDir, true),
     emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
                                    #{ verify => verify_none
-                                    , certfile => emqtt_test_lib:cert_name(DataDir, "server")
-                                    , keyfile => emqtt_test_lib:key_name(DataDir, "server")
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, F(server))
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, F(server))
                                     }),
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {ssl, true},
-                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
-                                           , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
-                                           , {cacertfile, emqtt_test_lib:ca_cert_name(DataDir, "client")}
+                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, F(client))}
+                                           , {keyfile, emqtt_test_lib:key_name(DataDir, F(client))}
+                                           , {cacertfile, emqtt_test_lib:ca_cert_name(DataDir, F(client))}
                                            , {verify, verify_peer}
                                            ]}
                                ]),
@@ -276,21 +278,23 @@ t_ssl_error_server_reject_client(Config) ->
     ct:timetrap({seconds, 1}),
     Port = proplists:get_value(ssl_port, Config, 8883),
     DataDir = cert_dir(Config),
-    emqtt_test_lib:gen_ca(DataDir, "ca"),
-    emqtt_test_lib:gen_ca(DataDir, "ca2"),
-    emqtt_test_lib:gen_host_cert("server", "ca", DataDir, true),
-    emqtt_test_lib:gen_host_cert("client", "ca2", DataDir, true),
+    Ns = atom_to_list(?FUNCTION_NAME),
+    F = fun(Name) -> Ns ++ "-" ++ atom_to_list(Name) end,
+    emqtt_test_lib:gen_ca(DataDir, F(ca)),
+    emqtt_test_lib:gen_ca(DataDir, F(ca2)),
+    emqtt_test_lib:gen_host_cert(F(server), F(ca), DataDir, true),
+    emqtt_test_lib:gen_host_cert(F(client), F(ca2), DataDir, true),
     emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
                                    #{ verify => verify_peer
-                                    , cacertfile => emqtt_test_lib:ca_cert_name(DataDir, "ca")
-                                    , certfile => emqtt_test_lib:cert_name(DataDir, "server")
-                                    , keyfile => emqtt_test_lib:key_name(DataDir, "server")
+                                    , cacertfile => emqtt_test_lib:ca_cert_name(DataDir, F(ca))
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, F(server))
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, F(server))
                                     }),
     process_flag(trap_exit, true),
     {ok, C} = emqtt:start_link([{port, Port},
                                 {ssl, true},
-                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
-                                           , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
+                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, F(client))}
+                                           , {keyfile, emqtt_test_lib:key_name(DataDir, F(client))}
                                            , {verify, verify_none}
                                            ]}
                                ]),
