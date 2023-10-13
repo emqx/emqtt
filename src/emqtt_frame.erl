@@ -44,7 +44,7 @@
                      max_size => 1..?MAX_PACKET_SIZE,
                      version  => version()}).
 
--opaque(parse_state() :: {none, options()} | cont_fun()).
+-type(parse_state() :: {none, options()} | cont_fun()).
 
 -type(parse_result() :: {more, cont_fun()}
                       | {ok, #mqtt_packet{}, binary(), parse_state()}).
@@ -66,11 +66,11 @@
 %% Init Parse State
 %%--------------------------------------------------------------------
 
--spec(initial_parse_state() -> {none, options()}).
+-spec(initial_parse_state() -> parse_state()).
 initial_parse_state() ->
     initial_parse_state(#{}).
 
--spec(initial_parse_state(options()) -> {none, options()}).
+-spec(initial_parse_state(options()) -> parse_state()).
 initial_parse_state(Options) when is_map(Options) ->
     ?none(merge_opts(Options)).
 
@@ -524,8 +524,8 @@ serialize_variable(#mqtt_packet_connect{
                   serialize_binary_data(WillPayload)];
          false -> <<>>
      end,
-     serialize_utf8_string(Username, true),
-     serialize_utf8_string(Password, true)];
+     serialize_utf8_string(Username, <<>>),
+     serialize_utf8_string(Password, <<>>)];
 
 serialize_variable(#mqtt_packet_connack{ack_flags   = AckFlags,
                                         reason_code = ReasonCode,
@@ -702,11 +702,9 @@ serialize_utf8_pair({Name, Value}) ->
 serialize_binary_data(Bin) ->
     [<<(byte_size(Bin)):16/big-unsigned-integer>>, Bin].
 
-serialize_utf8_string(undefined, false) ->
-    error(utf8_string_undefined);
-serialize_utf8_string(undefined, true) ->
-    <<>>;
-serialize_utf8_string(String, _AllowNull) ->
+serialize_utf8_string(undefined, DefaultValue) ->
+    DefaultValue;
+serialize_utf8_string(String, _DefaultValue) ->
     serialize_utf8_string(String).
 
 serialize_utf8_string(String) ->

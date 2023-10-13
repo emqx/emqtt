@@ -4,6 +4,8 @@ REBAR ?= $(or $(shell which rebar3 2>/dev/null),$(CURDIR)/rebar3)
 
 REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.19.0/rebar3
 
+export REBAR_GIT_CLONE_OPTIONS += --depth=1
+
 all: emqtt
 
 $(REBAR):

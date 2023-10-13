@@ -14,18 +14,13 @@ jobs:
 
         runs-on: ubuntu-latest
         strategy:
+            fail-fast: false
             matrix:
-                builder:
-                  - 5.0-26
-                os:
-                  - ubuntu20.04
-                otp:
-                  - 24.3.4.2-1
-                  - 25.1.2-2
-                elixir:
-                  - 1.13.4
-
-        container: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}:${{ matrix.elixir }}-${{ matrix.otp }}-${{ matrix.os }}"
+                docker_image:
+                  - "ghcr.io/emqx/emqx-builder/5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
+                  - "ghcr.io/emqx/emqx-builder/5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
+                 # TODO: enable this line after port_command is fixed
+                 #- "public.ecr.aws/docker/library/erlang:26"
 
         steps:
         - name: Checkout
@@ -35,13 +30,22 @@ jobs:
         - name: work around https://github.com/actions/checkout/issues/766
           run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
         - name: Run tests
+          env:
+            DOCKER_IMAGE: "${{ matrix.docker_image }}"
+          shell: bash
           run: |
             set -e
-            make eunit
-            make ct
-            make cover
+            docker build -t testimage --build-arg BUILD_FROM=${DOCKER_IMAGE} -f Dockerfile.test .
+            docker network create --ipv6 --subnet 2001:0DB8::/112 testnet
+            docker run -d --net testnet --name testcontainer testimage bash -c "sleep 1800"
+            docker exec testcontainer bash -c 'make eunit'
+            docker exec testcontainer bash -c 'make ct'
+            docker exec testcontainer bash -c 'make cover'
             # @TODO rebar3 tar does not include appup of dep apps
-            # make relup-test
+            # docker exec testcontainer bash -c 'make relup-test'
+            # copy the build dir to host working dir for following build steps
+            docker cp testcontainer:/_w/_build .
+            docker rm -f testcontainer
         - uses: actions/upload-artifact@v3
           if: always()
           with:

@@ -25,21 +25,13 @@
 
 -include_lib("common_test/include/ct.hrl").
 
--define(HOSTS,
-        [{ip4,
-          [
-           <<"127.0.0.1">>,
-           "127.0.0.1",
-           {127, 0, 0, 1}
-          ]},
-         {ip6,
-          [
-           "::1",
-           <<"::1">>,
-           {0, 0, 0, 0, 0, 0, 0, 1}
-          ]}]).
+-define(ALL_IF_IP6, {0, 0, 0, 0, 0, 0, 0, 0}).
+-define(LOCALHOST_IP6, {0, 0, 0, 0, 0, 0, 0, 1}).
 
--define(LOOPBACK_IP6, {0, 0, 0, 0, 0, 0, 0, 1}).
+-define(HOSTS,
+        [{ip4, [<<"127.0.0.1">>, "127.0.0.1", {127, 0, 0, 1} ]},
+         {ip6, ["localhost"]}
+        ]).
 
 -define(PORTS, #{
                 {ip4, connect} =>      {1883,  []},
@@ -53,24 +45,30 @@
                 {ip6, quic_connect} => {34567, []}
                }).
 
+
 all() ->
-    [ {group, ip6}
-    , {group, ip4}
-    ].
+    [{group, ip4}] ++
+    [{group, ip6} || is_ip6_available()].
 
-
-connect_groups() -> [
-                     {group, connect},
-                     {group, ws_connect},
-                     {group, quic_connect}
-                    ].
+connect_groups() ->
+    [{group, connect},
+     {group, ws_connect}
+    ] ++
+    [{group, quic_connect} || emqtt_test_lib:has_quic()].
 
 groups() ->
-    [{ip6, [], connect_groups()},
-     {ip4, [], connect_groups()},
+    [{ip4, [], connect_groups()},
      {connect, [], [t_connect]},
-     {ws_connect, [], [t_connect]},
-     {quic_connect, [], [t_connect]}].
+     {ws_connect, [], [t_connect]}
+    ] ++
+    ip6_group() ++
+    quic_group().
+
+ip6_group() ->
+     [{ip6, [], connect_groups()} || is_ip6_available()].
+
+quic_group() ->
+    [{quic_connect, [], [t_connect]} || emqtt_test_lib:has_quic()].
 
 suite() ->
     [{timetrap, {seconds, 15}}].
@@ -85,15 +83,15 @@ end_per_suite(_Config) ->
 init_per_group(ip4, Config) ->
     [{ip_type, ip4} | Config];
 init_per_group(ip6, Config) ->
-    case os:getenv("CI") of
+    ok = emqtt_test_lib:ensure_listener(tcp, mqtt_ip6, ?ALL_IF_IP6, 21883),
+    ok = emqtt_test_lib:ensure_listener(ws, mqtt_ip6, ?ALL_IF_IP6, 28083),
+    case emqtt_test_lib:has_quic() of
+        true ->
+            ok = emqtt_test_lib:ensure_listener(quic, mqtt_ip6, ?ALL_IF_IP6, 34567);
         false ->
-            ok = emqtt_test_lib:ensure_listener(tcp, mqtt_ip6, ?LOOPBACK_IP6, 21883),
-            ok = emqtt_test_lib:ensure_listener(ws, mqtt_ip6, ?LOOPBACK_IP6, 28083),
-            ok = emqtt_test_lib:ensure_listener(quic, mqtt_ip6, ?LOOPBACK_IP6, 34567),
-            [{ip_type, ip6} | Config];
-        _ ->
-            {skip, "Github runners do not support ipv6"}
-    end;
+            ok
+    end,
+    [{ip_type, ip6} | Config];
 init_per_group(connect, Config) ->
     [{conn_fun, connect} | Config];
 init_per_group(ws_connect, Config) ->
@@ -111,12 +109,26 @@ t_connect(Config) ->
     {Port, Opts} = maps:get({IpType, ConnFun}, ?PORTS),
     lists:foreach(
       fun(Host) ->
-        ct:pal("Connecting to ~p:~p via ~p", [Host, Port, ConnFun]),
+        ct:pal("Connecting to ~p at port ~p via ~p", [Host, Port, ConnFun]),
         {ok, C} = emqtt:start_link([{host, Host}, {port, Port}] ++ Opts),
         {ok, _} = emqtt:ConnFun(C),
-        ct:pal("Connected to ~p:~p via ~p", [Host, Port, ConnFun]),
+        ct:pal("Connected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
         ok= emqtt:disconnect(C)
       end,
       Hosts).
 
+is_ip6_available() ->
+    is_ip6_available(30000).
 
+is_ip6_available(Port) ->
+    Opts = [inet6, {ip, {0,0,0,0,0,0,0,0}}],
+    case gen_tcp:listen(Port, Opts) of
+        {ok, Sock} ->
+            gen_tcp:close(Sock),
+            true;
+        {error, eaddrinuse} ->
+            is_ip6_available(Port + 1);
+        {error, Reason} ->
+            ct:pal("Cannot listen on IPv6: ~p", [Reason]),
+            false
+    end.

@@ -1,0 +1,34 @@
+name: Run static checks
+
+on:
+    push:
+    pull_request:
+    release:
+        types:
+            - published
+            - prereleased
+
+jobs:
+
+    run_test_case:
+
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                builder:
+                  - "5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
+
+        container: "ghcr.io/emqx/emqx-builder/${{ matrix.builder }}"
+
+        steps:
+        - name: Checkout
+          uses: actions/checkout@v3
+          with:
+            submodules: recursive
+        - name: work around https://github.com/actions/checkout/issues/766
+          run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        - name: Run tests
+          run: |
+            set -e
+            make xref
+            make dialyzer
