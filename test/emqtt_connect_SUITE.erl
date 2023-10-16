@@ -39,7 +39,7 @@
                 {ip4, quic_connect} => {14567, []},
                 {ip6, connect} =>      {21883, [{tcp_opts, [{tcp_module, inet6_tcp}]}]},
                 {ip6, ws_connect} =>   {28083,
-                                        [{ws_transport_options, [{tcp_module, inet6_tcp}]},
+                                        [{ws_transport_options, [{protocols, [http]}, {tcp_opts, [inet6]}]},
                                          {ws_headers, [{<<"host">>, <<"[::1]:28083">>}]}
                                         ]},
                 {ip6, quic_connect} => {34567, []}
