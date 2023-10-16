@@ -99,6 +99,9 @@ groups() ->
     ].
 
 init_per_suite(Config) ->
+    DataDir = filename:join([test_dir(Config), "certs"]),
+    emqtt_test_lib:gen_ca(DataDir, "quic_ca"),
+    emqtt_test_lib:gen_host_cert("quic", "quic_ca", DataDir),
     UdpPort = 14567,
     start_emqx_quic(UdpPort),
     [{port, UdpPort}, {pub_qos, 0}, {sub_qos, 0} | Config].
@@ -934,10 +937,10 @@ send_and_recv_with(Sock) ->
 
 
 certfile(Config) ->
-    filename:join([test_dir(Config), "certs", "test.crt"]).
+    filename:join([test_dir(Config), "certs", "quic.pem"]).
 
 keyfile(Config) ->
-    filename:join([test_dir(Config), "certs", "test.key"]).
+    filename:join([test_dir(Config), "certs", "quic.key"]).
 
 test_dir(Config) ->
     filename:dirname(filename:dirname(proplists:get_value(data_dir, Config))).
