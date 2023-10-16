@@ -57,13 +57,14 @@ connect(Host, Port, SockOpts, Timeout) ->
             {error, Reason}
     end.
 
-ssl_upgrade(Host, Sock, SslOpts, Timeout) ->
-    TlsVersions = proplists:get_value(versions, SslOpts, []),
-    Ciphers = proplists:get_value(ciphers, SslOpts, default_ciphers(TlsVersions)),
-    SslOpts2 = merge_opts(SslOpts, [{ciphers, Ciphers}]),
-    SslOpts3 = apply_sni(SslOpts2, Host),
-    SslOpts4 = apply_host_check_fun(SslOpts3),
-    case ssl:connect(Sock, SslOpts4, Timeout) of
+ssl_upgrade(Host, Sock, SslOpts0, Timeout) ->
+    TlsVersions = proplists:get_value(versions, SslOpts0, []),
+    Ciphers = proplists:get_value(ciphers, SslOpts0, default_ciphers(TlsVersions)),
+    SslOpts1 = merge_opts(SslOpts0, [{ciphers, Ciphers}]),
+    SslOpts2 = apply_sni(SslOpts1, Host),
+    SslOpts3 = apply_host_check_fun(SslOpts2),
+    SslOpts = maybe_drop_incompatible_options(TlsVersions, SslOpts3),
+    case ssl:connect(Sock, SslOpts, Timeout) of
         {ok, SslSock} ->
             {ok, #ssl_socket{tcp = Sock, ssl = SslSock}};
         {error, Reason} ->
@@ -168,3 +169,9 @@ apply_host_check_fun(Opts) ->
                               public_key:pkix_verify_hostname_match_fun(https)}]},
             [DefHostCheck | Opts]
     end.
+
+maybe_drop_incompatible_options(['tlsv1.3'], SslOpts) ->
+    Incompatible = [reuse_sessions, secure_renegotiate],
+    lists:filter(fun({K, _V}) -> not lists:member(K, Incompatible) end, SslOpts);
+maybe_drop_incompatible_options(_, SslOpts) ->
+    SslOpts.

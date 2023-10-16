@@ -24,7 +24,7 @@
 start_link(Port, SslOpts) ->
     _ = ssl:start(),
     {ok, LSock} = ssl:listen(Port, [{active, false}|SslOpts]),
-    Pid = spawn_link(?MODULE, ssl_accept, [LSock]),
+    Pid = proc_lib:spawn_link(?MODULE, ssl_accept, [LSock]),
     {Pid, LSock}.
 
 ssl_accept(LSock) ->
