@@ -40,11 +40,11 @@ connect(Host0, Port, Opts, Timeout) ->
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
-    TransportOpts = #{transport_opts => TransportOptions},
+    Opts1 = opts(TransportOptions, #{}),
     DefaultOpts = #{connect_timeout => Timeout,
                  retry => 3,
                  retry_timeout => 30000},
-    ConnOpts = maps:merge(TransportOpts, DefaultOpts),
+    ConnOpts = maps:merge(Opts1, DefaultOpts),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             {ok, _} = gun:await_up(ConnPid, Timeout),
@@ -54,6 +54,34 @@ connect(Host0, Port, Opts, Timeout) ->
             end;
         Error -> Error
     end.
+
+%% Translate the gun 2.x style options to 1.3 style
+%%
+%% 1.3 style:
+%%  protocols       => [http | http2],
+%%  transport       => tcp | tls | ssl,
+%%  transport_opts  => [gen_tcp:connect_option()] | [ssl:connect_option()],
+%%  ws_opts         => ws_opts()
+%%
+%% 2.x style:
+%%  protocols => protocols(),
+%%  transport => tcp | tls | ssl,
+%%  tcp_opts  => [gen_tcp:connect_option()],
+%%  tls_opts  => [ssl:tls_client_option()],
+%%  ws_opts   => ws_opts()
+%%
+%% in 1.3, TCP and TSL optiosn are merged in transport_opts
+opts([], Acc) -> Acc;
+opts([{tls_opts, TLS} | More], Acc) ->
+    opts(More, add_transport_opts(Acc, TLS));
+opts([{tcp_opts, TCP} | More], Acc) ->
+    opts(More, add_transport_opts(Acc, TCP));
+opts([{Name, Value} | More], Acc) ->
+    opts(More, Acc#{Name => Value}).
+
+add_transport_opts(Acc, New) ->
+    Old = maps:get(transport_opts, Acc, []),
+    Acc#{transport_opts => Old ++ New}.
 
 -spec(upgrade(pid(), list(), timeout())
       -> {ok, Headers :: list()} | {error, Reason :: term()}).
