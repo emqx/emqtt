@@ -1,3 +1,7 @@
+# 1.9.2
+
+- Discard session_present flag from CONNACK. This flag is not used.
+
 # 1.9.1
 
 - Removed 'maybe' type.
