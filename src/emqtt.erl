@@ -151,7 +151,7 @@
                 | {clientid, iodata()}
                 | {clean_start, boolean()}
                 | {username, iodata()}
-                | {password, iodata()}
+                | {password, iodata() | emqtt_secret:t(binary())}
                 | {proto_ver, v3 | v4 | v5}
                 | {keepalive, non_neg_integer()}
                 | {max_inflight, pos_integer()}
@@ -225,7 +225,7 @@
           clientid        :: binary(),
           clean_start     :: boolean(),
           username        :: binary() | undefined,
-          password        :: undefined | function(),
+          password        :: undefined | emqtt_secret:t(binary()),
           proto_ver       :: version(),
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
@@ -804,6 +804,8 @@ init([{clean_start, CleanStart} | Opts], State) when is_boolean(CleanStart) ->
     init(Opts, State#state{clean_start = CleanStart});
 init([{username, Username} | Opts], State) ->
     init(Opts, State#state{username = iolist_to_binary(Username)});
+init([{password, Secret} | Opts], State) when is_function(Secret, 0) ->
+    init(Opts, State#state{password = Secret});
 init([{password, Password} | Opts], State) ->
     init(Opts, State#state{password = emqtt_secret:wrap(iolist_to_binary(Password))});
 init([{keepalive, Secs} | Opts], State) ->

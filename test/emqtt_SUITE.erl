@@ -91,6 +91,7 @@ groups() ->
        t_stop,
        t_pause_resume,
        t_init,
+       t_init_external_secret,
        t_connected,
        t_ssl_error_client_reject_server,
        t_ssl_error_server_reject_client]},
@@ -1082,6 +1083,19 @@ t_init(Config) ->
                                  {will_props, #{}}]),
     {ok, _} = emqtt:ConnFun(C3),
     ok = emqtt:disconnect(C3).
+
+t_init_external_secret(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    Secret = fun() -> <<"password">> end,
+    {ok, C} = emqtt:start_link([{host, {127,0,0,1}},
+                                {port, Port},
+                                {clientid, <<"test">>},
+                                {username, <<"username">>},
+                                {password, Secret},
+                                {proto_ver, v3}]),
+    {ok, _} = emqtt:ConnFun(C),
+    ok = emqtt:disconnect(C).
 
 t_initialized(_) ->
     error('TODO').

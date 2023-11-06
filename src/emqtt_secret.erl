@@ -21,15 +21,21 @@
 %% API:
 -export([wrap/1, unwrap/1]).
 
+-export_type([t/1]).
+
+-type t(T) :: fun(() -> T).
+
 %%================================================================================
 %% API funcions
 %%================================================================================
 
+-spec wrap(T) -> t(T).
 wrap(Term) ->
     fun() ->
         Term
     end.
 
+-spec unwrap(t(T) | T) -> T.
 unwrap(Term) when is_function(Term, 0) ->
     %% Handle potentially nested funs
     unwrap(Term());
