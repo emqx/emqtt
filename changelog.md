@@ -1,3 +1,7 @@
+# 1.9.2
+
+- Allow external wrapped secrets as passwords.
+
 # 1.9.1
 
 - Removed 'maybe' type.
