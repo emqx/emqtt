@@ -1055,12 +1055,13 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
 waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
                                            _SessPresent,
                                            Properties), Via},
-                    State = #state{proto_ver = ProtoVer, socket = Via}) ->
+                    State = #state{proto_ver = ProtoVer, socket = Via, reconnect = Re}) ->
     Reason = reason_code_name(ReasonCode, ProtoVer),
     case take_call({connect, Via}, State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, {Reason, Properties}},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Reply}]};
+        false when ?NEED_RECONNECT(Re) -> next_reconnect(State);
         false -> {stop, connack_error}
     end;
 
