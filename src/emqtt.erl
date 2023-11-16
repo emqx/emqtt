@@ -1421,17 +1421,24 @@ handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{sock
          #{error => Error, reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
-handle_event(info, {Closed, Sock}, connected, #state{socket = SockInuse} = State)
-    when SockInuse =/= Sock andalso (Closed =:= tcp_closed orelse Closed =:= ssl_closed) ->
-    ?LOG(debug, "ignore_sock_close", #{event => Closed}, State),
+handle_event(info, {ssl_closed,  {sslsocket,{gen_tcp, Port, tls_connection,undefined}, _}} = Event,
+             StateName, #state{socket = {ssl_socket, PortInUse, _}} = State)
+  when PortInUse =/= Port ->
+    ?LOG(debug, "ignore_sock_close", #{event => Event, state => StateName}, State),
     keep_state_and_data;
+handle_event(info, {tcp_closed, Sock} = Event, StateName, #state{socket = SockInuse} = State)
+    when SockInuse =/= Sock ->
+    ?LOG(debug, "ignore_sock_close", #{event => Event, state => StateName}, State),
+    keep_state_and_data;
+
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
     next_reconnect(State);
 
-handle_event(info, {Closed, _Sock}, _StateName, State)
+handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
-    ?LOG(debug, "socket_closed", #{event => Closed}, State),
+    ?LOG(debug, "socket_closed", #{event => Closed, state => StateName, sock => Sock,
+                                   inuse => State#state.socket}, State),
     {stop, {shutdown, Closed}, State};
 
 handle_event(info, {'EXIT', Owner, Reason}, _, State = #state{owner = Owner}) ->
