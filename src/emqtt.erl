@@ -1390,11 +1390,6 @@ handle_event(info, {Error, Sock, Reason}, connected,
     when ?SOCK_ERROR(Error) andalso ?NEED_RECONNECT(Re) ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    case Error of
-        tcp_error -> gen_tcp:close(Sock);
-        ssl_error -> ssl:close(Sock);
-        _ -> ok %% already down
-    end,
     next_reconnect(State);
 
 %% ssl connection is wrapped in a `#ssl_socket{}' record defined in
@@ -1405,7 +1400,6 @@ handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
     when ?NEED_RECONNECT(Re) ->
     ?LOG(error, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    ssl:close(SSLSock),
     next_reconnect(State);
 
 handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
@@ -1434,7 +1428,7 @@ handle_event(info, {tcp_closed, Sock} = Event, StateName, #state{socket = SockIn
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
-    next_reconnect(State);
+    next_reconnect(State#state{socket = undefined});
 
 handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
@@ -1524,10 +1518,7 @@ terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket
         _ ->
             ok = eval_msg_handler(State, disconnected, Reason)
     end,
-    case Socket =:= undefined of
-        true -> ok;
-        _ -> ConnMod:close(Socket)
-    end.
+    ok = close_socket(ConnMod, Socket).
 
 %% Downgrade
 code_change({down, _OldVsn}, OldState, OldData, _Extra) ->
@@ -1593,7 +1584,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, Via0,  _ExpireAt, Callback), State
             maybe_shoot(NState);
         {error, Reason} ->
             eval_callback_handler({error, Reason}, Callback),
-            shutdown(Reason, State)
+            maybe_shutdown(Reason, State)
     end;
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
       State0 = #state{last_packet_id = PacketId, inflight = Inflight})
@@ -1611,7 +1602,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
             maybe_shoot(State1);
         {error, Reason} ->
             eval_callback_handler({error, Reason}, Callback),
-            shutdown(Reason, State)
+            maybe_shutdown(Reason, State)
     end.
 
 is_pendings_empty(_Pendings = #{count := Cnt}) ->
@@ -1799,7 +1790,7 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
         NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
         {keep_state, ensure_retry_timer(NState)}
     catch error : Reason ->
-              shutdown(Reason, State)
+              maybe_shutdown(Reason, State)
     end.
 
 retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(_Via, Msg, _, ExpireAt, Callback)} | More],
@@ -1895,8 +1886,10 @@ apply_callback_function({M, F, A}, Result)
        is_list(A) ->
     erlang:apply(M, F, A ++ [Result]).
 
-shutdown(Reason, State) ->
-    {stop, Reason, State}.
+maybe_shutdown(_Reason, #state{reconnect = Re} = State) when ?NEED_RECONNECT(Re) ->
+    next_reconnect(State);
+maybe_shutdown(Reason, State) ->
+    {stop, {shutdown, Reason}, State}.
 
 reply_all_inflight_reqs(Reason, #state{inflight = Inflight}) ->
     %% reply error to all pendings caller
@@ -2094,8 +2087,11 @@ next_reconnect(#state{retry_timer = RetryTimer,
                       keepalive_timer = KeepAliveTimer,
                       sock_opts = OldSockOpts,
                       reconnect = Reconnect,
-                      reconnect_timeout = Timeout
+                      reconnect_timeout = Timeout,
+                      socket = OldSocket,
+                      conn_mod = ConnMod
                      } = State) ->
+    ok = close_socket(ConnMod, OldSocket),
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
     {next_state, reconnect, State#state{socket = undefined,
@@ -2104,6 +2100,12 @@ next_reconnect(#state{retry_timer = RetryTimer,
                                         keepalive_timer = undefined
                                        },
      {state_timeout, Timeout, Reconnect}}.
+
+close_socket(_, undefined) ->
+    ok;
+close_socket(ConnMod, Socket) ->
+    _ = ConnMod:close(Socket),
+    ok.
 
 cancel_timer(undefined) ->
     ok;
