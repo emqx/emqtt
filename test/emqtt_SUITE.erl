@@ -885,11 +885,11 @@ t_eval_callback_in_order(Config) ->
     mock_quic_send(fun(_, _) -> {error, closed} end),
 
     ?assertMatch([{1, ok}, %% qos0: treat send as successfully
-                  {2, {error, closed}}, %% from inflight
-                  {3, {error, closed}},
-                  {4, {error, closed}}, %% from pending request queue
-                  {5, {error, closed}},
-                  {'EXIT', C, closed}], ?COLLECT_ASYNC_RESULT(C)),
+                  {2, {error, {shutdown, closed}}}, %% from inflight
+                  {3, {error, {shutdown, closed}}},
+                  {4, {error, {shutdown, closed}}}, %% from pending request queue
+                  {5, {error, {shutdown, closed}}},
+                  {'EXIT', C, {shutdown, closed}}], ?COLLECT_ASYNC_RESULT(C)),
 
     meck:unload(emqtt_sock),
     unmock_quic().
