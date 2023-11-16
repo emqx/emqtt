@@ -1276,7 +1276,11 @@ connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
         false ->
             keep_state_and_data
     end;
-
+connected(cast, {?DISCONNECT_PACKET(_ReasonCode), _Via},
+          #state{reconnect = Re, conn_mod = ConnMod, socket = Sock} = State)
+    when ?NEED_RECONNECT(Re) ->
+    ConnMod:close(Sock),
+    next_reconnect(State);
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
@@ -1417,6 +1421,10 @@ handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{sock
          #{error => Error, reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
+handle_event(info, {Closed, Sock}, connected, #state{socket = SockInuse} = State)
+    when SockInuse =/= Sock andalso (Closed =:= tcp_closed orelse Closed =:= ssl_closed) ->
+    ?LOG(debug, "ignore_sock_close", #{event => Closed}, State),
+    keep_state_and_data;
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
     next_reconnect(State);

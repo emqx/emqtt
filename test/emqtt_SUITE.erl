@@ -83,6 +83,7 @@ groups() ->
        t_pubcomp,
        t_reconnect_disabled,
        t_reconnect_enabled,
+       t_reconnect_enabled_server_disconnect,
        t_reconnect_stop,
        t_reconnect_reach_max_attempts,
        t_reconnect_immediate_retry,
@@ -346,6 +347,55 @@ t_reconnect_enabled(Config) ->
                  }
                ], receive_messages(1))
     end.
+
+t_reconnect_enabled_server_disconnect(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    ClientId = atom_to_binary(?FUNCTION_NAME),
+    Topic = ClientId,
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{clientid, ClientId},
+                                {port, Port},
+                                {reconnect, true},
+                                {clean_start, false},
+                                {reconnect_timeout, 1}]), % 1 sec
+    {ok, _} = emqtt:ConnFun(C),
+    MRef = erlang:monitor(process, C),
+    %% ok = emqx_mgmt:kickout_client(ClientId),
+    ok = emqx_cm:kick_session(ClientId),
+    receive
+        {'DOWN', MRef, process, C, _Info} ->
+            ct:fail(conn_dead)
+    after 100 ->
+            ok
+    end,
+    connected = retry_if_errors([reconnect, waiting_for_connack],
+                                fun() ->
+                                        {StateName, _Data} = sys:get_state(C),
+                                        StateName
+                                end),
+    receive
+        {connected, _}  -> ct:pal("Old client is reconnected")
+    after 1500 ->
+        ct:fail("reconnected timeout")
+    end,
+    {ok, _, [0]} = emqtt:subscribe(C, Topic),
+    {ok, C2} = emqtt:start_link([{port, Port}, {reconnect, true}, {clean_start, false}]),
+    [{Topic, #{qos := 0}}] = emqtt:subscriptions(C),
+    {ok, _} = emqtt:ConnFun(C2),
+    {ok, _} = emqtt:publish(C2, Topic, <<"t_reconnect_enabled">>, [{qos, 1}]),
+    Via = proplists:get_value(socket, emqtt:info(C)),
+    ?assertEqual(
+       [#{client_pid => C,
+          dup => false,packet_id => undefined,
+          payload => <<"t_reconnect_enabled">>,
+          properties => undefined,qos => 0,
+          retain => false,
+          topic => ClientId,
+          via => Via
+         }
+       ], receive_messages(1)),
+    emqtt:stop(C).
 
 t_reconnect_stop(Config) ->
     ConnFun = ?config(conn_fun, Config),
