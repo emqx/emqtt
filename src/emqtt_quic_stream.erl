@@ -137,6 +137,9 @@ passive(Stream, undefined, _S)->
     keep_state_and_data.
 
 -spec stream_closed(stream_handle(), stream_closed_props(), cb_data()) -> cb_ret().
+stream_closed(CtrlStream, #{ is_conn_shutdown := _ },
+              #{reconnect := true, control_stream_sock := {quic, Conn, CtrlStream}}) ->
+    {keep_state_and_data, {next_event, info, {quic_closed, Conn}}};
 stream_closed(_Stream, #{ is_conn_shutdown := _ }, #{reconnect := true}) ->
     keep_state_and_data;
 stream_closed(Stream, P = #{ is_conn_shutdown := IsConnShutdown
