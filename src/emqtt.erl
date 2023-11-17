@@ -1073,11 +1073,12 @@ waiting_for_connack({call, _From}, Event, _State) when Event =/= stop ->
 waiting_for_connack(info, ?PUB_REQ(_Msg, _Via, _ExpireAt, _Callback), _State) ->
     {keep_state_and_data, postpone};
 
-waiting_for_connack(state_timeout, _Timeout, State) ->
+waiting_for_connack(state_timeout, _Timeout, #state{reconnect = Re} = State) ->
     case take_call({connect, default_via(State)}, State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, connack_timeout},
             {stop_and_reply, connack_timeout, [{reply, From, Reply}]};
+        false when ?NEED_RECONNECT(Re) -> next_reconnect(State);
         false -> {stop, connack_timeout}
     end;
 
@@ -1442,14 +1443,13 @@ handle_event(info, {Closed, Sock}, StateName, State)
 
 handle_event(info, {'EXIT', Owner, Reason}, _, State = #state{owner = Owner}) ->
     ?LOG(debug, "EXIT_from_owner", #{reason => Reason}, State),
-    {stop, {shutdown, Reason}, State};
+    {stop, {shutdown, {owner, Owner, Reason}}, State};
 
 handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
     keep_state_and_data;
-
 handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     ?LOG(error, "tcp_error", #{ reason => Reason}, State),
-    {stop, {shutdown, Reason}, State};
+    maybe_shutdown(Reason, State);
 
 %% QUIC messages
 handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} = State) ->
