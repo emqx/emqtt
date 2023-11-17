@@ -1443,7 +1443,7 @@ handle_event(info, {Closed, _Sock}, waiting_for_connack, #state{ reconnect = Re}
 
 handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
-    ?LOG(error, "socket_closed", #{event => Closed, state => StateName, sock => Sock,
+    ?LOG(debug, "socket_closed", #{event => Closed, state => StateName, sock => Sock,
                                    inuse => State#state.socket}, State),
     {stop, {shutdown, Closed}, State};
 
@@ -1970,7 +1970,7 @@ host(Host) -> Host.
 send_puback(Via, Packet, State) ->
     case send(Via, Packet, State) of
         {ok, NewState}  -> {keep_state, NewState};
-        {error, Reason} -> {stop, {shutdown, Reason}}
+        {error, Reason} -> maybe_shutdown(Reason, State)
     end.
 
 send(Msg, State) ->
