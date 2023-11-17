@@ -1132,7 +1132,7 @@ connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
                                 maps:put(Topic, Opts, Acc)
                             end, Subscriptions, Topics),
             {keep_state, ensure_ack_timer(add_call(Call,NewState#state{subscriptions = Subscriptions1}))};
-        Error = {error, Reason} when ?NEED_RECONNECT(Re) ->
+        Error = {error, _Reason} when ?NEED_RECONNECT(Re) ->
             next_reconnect(State, [{reply, From, Error}]);
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
