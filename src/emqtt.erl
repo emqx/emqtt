@@ -1301,15 +1301,19 @@ connected(info, {timeout, TRef, keepalive},
         true ->
             case send(?PACKET(?PINGREQ), State) of
                 {ok, NewState} ->
-                    {ok, [{send_oct, Val}]} = ConnMod:getstat(Sock, [send_oct]),
-                    put(send_oct, Val),
-                    {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
-                Error -> {stop, Error}
+                    case ConnMod:getstat(Sock, [send_oct]) of
+                        {ok, [{send_oct, Val}]} ->
+                            put(send_oct, Val),
+                            {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
+                        {error, Reason} ->
+                            maybe_shutdown(Reason, State)
+                    end;
+                {error, Reason} -> maybe_shutdown(Reason, State)
             end;
         false ->
             {keep_state, ensure_keepalive_timer(State), [hibernate]};
         {error, Reason} ->
-            {stop, Reason}
+            maybe_shutdown(Reason, State)
     end;
 
 connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
