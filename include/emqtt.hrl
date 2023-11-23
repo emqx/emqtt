@@ -359,11 +359,7 @@
                  payload  = Payload
                 }).
 
--define(PUBACK_PACKET(PacketId),
-    #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBACK},
-                 variable = #mqtt_packet_puback{packet_id   = PacketId,
-                                                reason_code = 0}
-                }).
+-define(PUBACK_PACKET(PacketId), ?PUBACK_PACKET(PacketId, 0)).
 
 -define(PUBACK_PACKET(PacketId, ReasonCode),
     #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBACK},
@@ -378,11 +374,7 @@
                                                 properties  = Properties}
                 }).
 
--define(PUBREC_PACKET(PacketId),
-        #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREC},
-                     variable = #mqtt_packet_puback{packet_id   = PacketId,
-                                                    reason_code = 0}
-                    }).
+-define(PUBREC_PACKET(PacketId), ?PUBREC_PACKET(PacketId, 0)).
 
 -define(PUBREC_PACKET(PacketId, ReasonCode),
         #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREC},
@@ -397,12 +389,7 @@
                                                 properties  = Properties}
                 }).
 
--define(PUBREL_PACKET(PacketId),
-    #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREL,
-                                                qos  = ?QOS_1},
-                 variable = #mqtt_packet_puback{packet_id   = PacketId,
-                                                reason_code = 0}
-                }).
+-define(PUBREL_PACKET(PacketId), ?PUBREL_PACKET(PacketId, 0)).
 
 -define(PUBREL_PACKET(PacketId, ReasonCode),
     #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBREL,
@@ -419,11 +406,7 @@
                                                 properties  = Properties}
                 }).
 
--define(PUBCOMP_PACKET(PacketId),
-    #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBCOMP},
-                 variable = #mqtt_packet_puback{packet_id   = PacketId,
-                                                reason_code = 0}
-                }).
+-define(PUBCOMP_PACKET(PacketId), ?PUBCOMP_PACKET(PacketId, 0)).
 
 -define(PUBCOMP_PACKET(PacketId, ReasonCode),
     #mqtt_packet{header   = #mqtt_packet_header{type = ?PUBCOMP},

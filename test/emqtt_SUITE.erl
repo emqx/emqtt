@@ -94,6 +94,7 @@ groups() ->
        t_init,
        t_init_external_secret,
        t_connected,
+       t_qos2_flow_autoack_never,
        t_ssl_error_client_reject_server,
        t_ssl_error_server_reject_client]},
     {mqttv3,[],
@@ -1161,6 +1162,50 @@ t_connected(Config) ->
     Clientid = gen_statem:call(C, clientid),
     [ ?assertMatch(Clientid, Value) || {Key, Value} <- emqtt:info(C), Key =:= clientid].
 
+t_qos2_flow_autoack_never(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    ClientId = atom_to_binary(?FUNCTION_NAME),
+    Topic = nth(1, ?TOPICS),
+    {ok, C1} = emqtt:start_link([
+        {port, Port},
+        {clientid, ClientId},
+        {clean_start, true},
+        {auto_ack, never}
+    ]),
+    {ok, _} = emqtt:ConnFun(C1),
+    {ok, _, [2]} = emqtt:subscribe(C1, Topic, qos2),
+    {ok, _} = emqtt:publish(C1, Topic, <<"qos 2">>, 2),
+    #{packet_id := PktId} = receive
+        {publish, Msg} ->
+            ?assertMatch(#{packet_id := _, payload := <<"qos 2">>, qos := 2}, Msg),
+            Msg
+    after 100 ->
+        ct:fail("No message received")
+    end,
+    ok = emqtt:pubrec(C1, PktId, ?RC_SUCCESS),
+    receive
+        {pubrel, PubRel} ->
+            ?assertMatch(#{packet_id := PktId, reason_code := ?RC_SUCCESS}, PubRel)
+    after 100 ->
+        ct:fail("No pubrel received")
+    end,
+    ok = emqtt:pubcomp(C1, PktId, ?RC_SUCCESS),
+    ok = emqtt:disconnect(C1),
+    {ok, C2} = emqtt:start_link([
+        {port, Port},
+        {clientid, ClientId},
+        {clean_start, false},
+        {auto_ack, never}
+    ]),
+    {ok, _} = emqtt:ConnFun(C2),
+    receive
+        Anything ->
+            ct:fail("Unexpected message: ~p", [Anything])
+    after 100 ->
+        ok = emqtt:disconnect(C2)
+    end.
+        
 t_inflight_full(_) ->
     error('TODO').
 
