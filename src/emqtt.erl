@@ -132,6 +132,7 @@
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
 -type(msg_handler() :: #{publish := fun((emqx_types:message()) -> any()) | mfas(),
+                         pubrel := fun((_PubRel :: map()) -> any()) | mfas(),
                          connected := fun((_Properties :: term()) -> any()) | mfas(),
                          disconnected := fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
@@ -161,7 +162,7 @@
                 | {will_retain, boolean()}
                 | {will_qos, qos()}
                 | {will_props, properties()}
-                | {auto_ack, boolean()}
+                | {auto_ack, boolean() | never}
                 | {ack_timeout, pos_integer()}
                 | {force_ping, boolean()}
                 | {low_mem, boolean()}
@@ -241,7 +242,7 @@
                                inflight_publish() | inflight_pubrel()
                               ),
           awaiting_rel    :: map(),
-          auto_ack        :: boolean(),
+          auto_ack        :: boolean() | never,
           ack_timeout     :: pos_integer(),
           ack_timer       :: tref() | undefined,
           retry_interval  :: pos_integer(),
@@ -846,7 +847,7 @@ init([{max_inflight, I} | Opts], State) when is_integer(I) ->
     init(Opts, State#state{inflight = emqtt_inflight:new(I)});
 init([auto_ack | Opts], State) ->
     init(Opts, State#state{auto_ack = true});
-init([{auto_ack, AutoAck} | Opts], State) when is_boolean(AutoAck) ->
+init([{auto_ack, AutoAck} | Opts], State) when is_atom(AutoAck) ->
     init(Opts, State#state{auto_ack = AutoAck});
 init([{retry_interval, I} | Opts], State) ->
     init(Opts, State#state{retry_interval = timer:seconds(I)});
@@ -1207,10 +1208,10 @@ connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId), Via}, State) ->
      {keep_state, deliver(Via, packet_to_msg(Packet), State)};
 
 connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_1, _PacketId), Via}, State) ->
-    publish_process(Via, ?QOS_1, Packet, State);
+    publish_qos1(Via, Packet, State);
 
 connected(cast, {Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), Via}, State) ->
-    publish_process(Via, ?QOS_2, Packet, State);
+    publish_qos2(Via, Packet, State);
 
 connected(cast, {?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, Via}, State) ->
     maybe_shoot(ack_inflight(Via, PubAck, State));
@@ -1218,20 +1219,8 @@ connected(cast, {?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, V
 connected(cast, {?PUBREC_PACKET(PacketId, _ReasonCode, _Properties) = PubRec, Via}, State) ->
     send_puback(Via, ?PUBREL_PACKET(PacketId), ack_inflight(Via, PubRec, State));
 
-%%TODO::... if auto_ack is false, should we take PacketId from the map?
-connected(cast, {?PUBREL_PACKET(PacketId), Via},
-          State = #state{awaiting_rel = AwaitingRel, auto_ack = AutoAck}) ->
-     case maps:take({PacketId, Via}, AwaitingRel) of
-         {Packet, AwaitingRel1} ->
-             NewState = deliver(Via, packet_to_msg(Packet), State#state{awaiting_rel = AwaitingRel1}),
-             case AutoAck of
-                 true  -> send_puback(Via, ?PUBCOMP_PACKET(PacketId), NewState);
-                 false -> {keep_state, NewState}
-             end;
-         error ->
-             ?LOG(warning, "unexpected_PUBREL", #{packet_id => PacketId}, State),
-             keep_state_and_data
-     end;
+connected(cast, {?PUBREL_PACKET(_PacketId) = PubRel, Via}, State) ->
+    process_pubrel(Via, PubRel, State);
 
 connected(cast, {?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp, Via}, State) ->
     maybe_shoot(ack_inflight(Via, PubComp, State));
@@ -1714,21 +1703,64 @@ assign_id(?NO_CLIENT_ID, Props) ->
 assign_id(Id, _Props) ->
     Id.
 
-publish_process(Via, ?QOS_1, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
-                State0 = #state{auto_ack = AutoAck}) ->
+publish_qos1(Via, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
+             State0 = #state{auto_ack = AutoAck}) ->
     State = deliver(Via, packet_to_msg(Packet), State0),
     case AutoAck of
-        true  -> send_puback(Via, ?PUBACK_PACKET(PacketId), State);
-        false -> {keep_state, State}
-    end;
-publish_process(Via, ?QOS_2, Packet = ?PUBLISH_PACKET(?QOS_2, PacketId),
-    State = #state{awaiting_rel = AwaitingRel}) ->
-    case send_puback(Via, ?PUBREC_PACKET(PacketId), State) of
-        {keep_state, NewState} ->
-            AwaitingRel1 = maps:put({PacketId, Via}, Packet, AwaitingRel),
-            {keep_state, NewState#state{awaiting_rel = AwaitingRel1}};
-        Stop -> Stop
+        true ->
+            send_puback(Via, ?PUBACK_PACKET(PacketId), State);
+        _Otherwise ->
+            %% AutoAck = false | never
+            {keep_state, State}
     end.
+
+publish_qos2(Via, Packet = ?PUBLISH_PACKET(?QOS_2),
+             State0 = #state{auto_ack = never}) ->
+    %% AutoAck = never
+    %% Deliver the message, user is responsible for the whole QoS 2 flow.
+    State = deliver(Via, packet_to_msg(Packet), State0),
+    {keep_state, State};
+publish_qos2(Via, Packet = ?PUBLISH_PACKET(?QOS_2, PacketId),
+             State0 = #state{awaiting_rel = AwaitingRel}) ->
+    %% AutoAck = true | false
+    %% Respond with a PUBREC first, then wait for a PUBREL.
+    case send_puback(Via, ?PUBREC_PACKET(PacketId), State0) of
+        {keep_state, State} ->
+            AwaitingRel1 = maps:put({PacketId, Via}, Packet, AwaitingRel),
+            {keep_state, State#state{awaiting_rel = AwaitingRel1}};
+        Stop ->
+            Stop
+    end.
+
+process_pubrel(Via, Packet, State0 = #state{auto_ack = never}) ->
+    %% AutoAck = never
+    %% Deliver the PUBREL, user is responsible for the rest of QoS 2 flow.
+    State = deliver(Via, packet_to_pubrel(Packet, Via), State0),
+    {keep_state, State};
+process_pubrel(Via, ?PUBREL_PACKET(PacketId, _ReasonCode = 0),
+               State0 = #state{awaiting_rel = AwaitingRel, auto_ack = AutoAck}) ->
+    %% AutoAck = true | false
+    %% Deliver the initial message, then respond with a PUBCOMP.
+    case maps:take({PacketId, Via}, AwaitingRel) of
+        {Packet, AwaitingRel1} ->
+            State = deliver(Via, packet_to_msg(Packet), State0#state{awaiting_rel = AwaitingRel1}),
+            case AutoAck of
+                true  -> send_puback(Via, ?PUBCOMP_PACKET(PacketId), State);
+                false -> {keep_state, State}
+            end;
+        error ->
+            ?LOG(warning, "unexpected_PUBREL", #{packet_id => PacketId}, State0),
+            keep_state_and_data
+    end;
+process_pubrel(Via, ?PUBREL_PACKET(PacketId, ReasonCode), State) ->
+    %% AutoAck = true | false
+    %% User does not expect unsuccesful PUBREL, so just log it.
+    ?LOG(warning, "unsuccessful_PUBREL", 
+      #{packet_id => PacketId,
+        reason_code => ReasonCode,
+        reason_code_name => reason_code_name(ReasonCode),
+        via => Via}, State),
+    keep_state_and_data.
 
 ensure_keepalive_timer(State = ?PROPERTY('Server-Keep-Alive', Secs)) ->
     ensure_keepalive_timer(timer:seconds(Secs), State#state{keepalive = Secs});
@@ -1835,6 +1867,9 @@ deliver(Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = Packet
             via => Via,
             client_pid => self()},
     ok = eval_msg_handler(State, publish, Msg),
+    State;
+deliver(_Via, {pubrel, Msg}, State) ->
+    ok = eval_msg_handler(State, pubrel, Msg),
     State.
 
 %% no dialyzer warning because the second clause kept for compatibility
@@ -1940,6 +1975,12 @@ msg_to_packet(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = Packe
                                                  packet_id  = PacketId,
                                                  properties = Props},
                  payload  = Payload}.
+
+packet_to_pubrel(?PUBREL_PACKET(PacketId, ReasonCode, Props), Via) ->
+    {pubrel, #{packet_id => PacketId,
+               reason_code => ReasonCode,
+               properties => Props,
+               via => Via}}.
 
 %%--------------------------------------------------------------------
 %% Socket Connect/Send
