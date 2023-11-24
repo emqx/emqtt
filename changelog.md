@@ -1,3 +1,19 @@
+# 1.9.6
+
+- Add `{auto_ack, never}` option fully disabling automatic QoS2 flow.
+
+# 1.9.5
+
+- Fix compilation warning.
+
+# 1.9.4
+
+- Respect reconnect option more robustly, attempting to reconnect in more cases.
+
+# 1.9.3
+
+- Attempt to reconnect when server sends a `DISCONNECT` packet, if reconnects are enabled.
+
 # 1.9.2
 
 - Allow external wrapped secrets as passwords.
