@@ -79,7 +79,7 @@ peer_send_aborted(Stream, ErrorCode, #{is_unidir := true, is_local := false} = _
 
 -spec peer_send_shutdown(stream_handle(), undefined, cb_data()) -> cb_ret().
 peer_send_shutdown(Stream, undefined, _S) ->
-    ok = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0),
     keep_state_and_data.
 
 -spec send_complete(stream_handle(), boolean(), cb_data()) -> cb_ret().
