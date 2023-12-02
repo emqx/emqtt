@@ -263,7 +263,7 @@
           qos = ?QOS_0   :: emqtt:qos(),
           retain = false :: boolean(),
           dup = false    :: boolean(),
-          packet_id      :: emqtt:packet_id(),
+          packet_id      :: undefined | emqtt:packet_id(),
           topic          :: emqtt:topic(),
           props          :: emqtt:properties() | undefined,
           payload        :: binary()

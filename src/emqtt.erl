@@ -120,6 +120,9 @@
              , mqtt_msg/0
              , client/0
              , via/0
+             , qos/0
+             , packet_id/0
+             , topic/0
              ]).
 
 -type(binary_host() :: binary()).
@@ -248,7 +251,7 @@
           retry_interval  :: pos_integer(),
           retry_timer     :: tref() | undefined,
           session_present :: undefined | boolean(),
-          last_packet_id  :: packet_id(),
+          last_packet_id  :: undefined | packet_id(),
           low_mem         :: boolean(),
           parse_state     :: undefined | emqtt_frame:parse_state(),
           reconnect       :: reconnect(),
@@ -723,7 +726,7 @@ init([Options]) ->
                           force_ping      = false,
                           paused          = false,
                           will_flag       = false,
-                          will_msg        = #mqtt_msg{payload = <<>>},
+                          will_msg        = #mqtt_msg{topic = <<>>, payload = <<>>},
                           pending_calls   = [],
                           subscriptions   = #{},
                           inflight        = emqtt_inflight:new(infinity),

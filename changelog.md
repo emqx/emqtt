@@ -1,3 +1,7 @@
+# 1.9.7
+
+- Export emqtt:qos/0, emqtt:topic/0 and emqtt:packet_id/0 as public types.
+
 # 1.9.6
 
 - Add `{auto_ack, never}` option fully disabling automatic QoS2 flow.
