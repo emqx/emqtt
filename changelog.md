@@ -1,6 +1,16 @@
-# 1.9.7
+# 1.10.0
 
 - Export emqtt:qos/0, emqtt:topic/0 and emqtt:packet_id/0 as public types.
+- Release packages on OTP 26
+  - Stopped releasing on
+    - EL 8
+    - Ubuntu 18
+    - Debian 10
+  - Newly supported distros
+    - EL 9
+    - Debian 12
+    - Ubuntu 22
+    - Amazon Linux 2023
 
 # 1.9.6
 
