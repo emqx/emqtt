@@ -120,6 +120,9 @@
              , mqtt_msg/0
              , client/0
              , via/0
+             , qos/0
+             , packet_id/0
+             , topic/0
              ]).
 
 -type(binary_host() :: binary()).
@@ -233,8 +236,7 @@
           keepalive_timer :: undefined | tref(),
           force_ping      :: boolean(),
           paused          :: boolean(),
-          will_flag       :: boolean(),
-          will_msg        :: mqtt_msg(),
+          will_msg        :: undefined | mqtt_msg(),
           properties      :: properties(),
           pending_calls   :: list(),
           subscriptions   :: map(),
@@ -248,7 +250,7 @@
           retry_interval  :: pos_integer(),
           retry_timer     :: tref() | undefined,
           session_present :: undefined | boolean(),
-          last_packet_id  :: packet_id(),
+          last_packet_id  :: undefined | packet_id(),
           low_mem         :: boolean(),
           parse_state     :: undefined | emqtt_frame:parse_state(),
           reconnect       :: reconnect(),
@@ -722,8 +724,7 @@ init([Options]) ->
                           keepalive       = ?DEFAULT_KEEPALIVE,
                           force_ping      = false,
                           paused          = false,
-                          will_flag       = false,
-                          will_msg        = #mqtt_msg{payload = <<>>},
+                          will_msg        = undefined,
                           pending_calls   = [],
                           subscriptions   = #{},
                           inflight        = emqtt_inflight:new(infinity),
@@ -822,7 +823,7 @@ init([{proto_ver, v5} | Opts], State) ->
                            proto_name = <<"MQTT">>});
 init([{will_topic, Topic} | Opts], State = #state{will_msg = WillMsg}) ->
     WillMsg1 = init_will_msg({topic, Topic}, WillMsg),
-    init(Opts, State#state{will_flag = true, will_msg = WillMsg1});
+    init(Opts, State#state{will_msg = WillMsg1});
 init([{will_props, Properties} | Opts], State = #state{will_msg = WillMsg}) ->
     init(Opts, State#state{will_msg = init_will_msg({props, Properties}, WillMsg)});
 init([{will_payload, Payload} | Opts], State = #state{will_msg = WillMsg}) ->
@@ -874,6 +875,18 @@ init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQo
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
+maybe_no_will(#mqtt_msg{topic = T} = W) when is_binary(T) andalso T =/= <<>> ->
+    W;
+maybe_no_will(_) ->
+    undefined.
+
+ensure_will_msg(undefined) ->
+    #mqtt_msg{topic = <<>>, payload = <<>>};
+ensure_will_msg(Will) ->
+    Will.
+
+init_will_msg(Input, undefined) ->
+    init_will_msg(Input, ensure_will_msg(undefined));
 init_will_msg({topic, Topic}, WillMsg) ->
     WillMsg#mqtt_msg{topic = iolist_to_binary(Topic)};
 init_will_msg({props, Props}, WillMsg) ->
@@ -885,11 +898,11 @@ init_will_msg({retain, Retain}, WillMsg) when is_boolean(Retain) ->
 init_will_msg({qos, QoS}, WillMsg) ->
     WillMsg#mqtt_msg{qos = qos_number(QoS)}.
 
-init_parse_state(State = #state{proto_ver = Ver, properties = Properties}) ->
+init_parse_state(State = #state{proto_ver = Ver, properties = Properties, will_msg = WillMsg}) ->
     MaxSize = maps:get('Maximum-Packet-Size', Properties, ?MAX_PACKET_SIZE),
     ParseState = emqtt_frame:initial_parse_state(
 		   #{max_size => MaxSize, version => Ver}),
-    State#state{parse_state = ParseState}.
+    State#state{parse_state = ParseState, will_msg = maybe_no_will(WillMsg)}.
 
 merge_opts(Defaults, Options) ->
     lists:foldl(
@@ -975,10 +988,9 @@ mqtt_connect(State = #state{clientid    = ClientId,
                             proto_ver   = ProtoVer,
                             proto_name  = ProtoName,
                             keepalive   = KeepAlive,
-                            will_flag   = WillFlag,
                             will_msg    = WillMsg,
                             properties  = Properties}) ->
-    ?WILL_MSG(WillQoS, WillRetain, WillTopic, WillProps, WillPayload) = WillMsg,
+    ?WILL_MSG(WillQoS, WillRetain, WillTopic, WillProps, WillPayload) = ensure_will_msg(WillMsg),
     ConnProps = emqtt_props:filter(?CONNECT, Properties),
     Packet =
         ?CONNECT_PACKET(
@@ -986,7 +998,7 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  proto_name   = ProtoName,
                                  is_bridge    = IsBridge,
                                  clean_start  = CleanStart,
-                                 will_flag    = WillFlag,
+                                 will_flag    = (WillMsg =/= undefined),
                                  will_qos     = WillQoS,
                                  will_retain  = WillRetain,
                                  keepalive    = KeepAlive,

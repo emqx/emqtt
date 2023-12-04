@@ -17,9 +17,8 @@ jobs:
             fail-fast: false
             matrix:
                 docker_image:
-                  - "ghcr.io/emqx/emqx-builder/5.0-26:1.13.4-24.3.4.2-1-ubuntu20.04"
-                  - "ghcr.io/emqx/emqx-builder/5.1-4:1.14.5-25.3.2-2-ubuntu20.04"
-                  - "public.ecr.aws/docker/library/erlang:26"
+                  - "ghcr.io/emqx/emqx-builder/5.1-4:1.14.5-25.3.2-2-ubuntu22.04"
+                  - "ghcr.io/emqx/emqx-builder/5.2-7:1.15.7-26.1.2-1-ubuntu22.04"
 
         steps:
         - name: Checkout
@@ -36,12 +35,7 @@ jobs:
             set -e
             docker build -t testimage --build-arg BUILD_FROM=${DOCKER_IMAGE} -f Dockerfile.test .
             docker network create --ipv6 --subnet 2001:0DB8::/112 testnet
-            # TODO: stable QUIC tests in OTP 26
-            if [[ "${DOCKER_IMAGE}" == *erlang:26* ]]; then
-              docker run -d --net testnet --name testcontainer -e BUILD_WITHOUT_QUIC=1 testimage bash -c "tail -f /dev/null"
-            else
-              docker run -d --net testnet --name testcontainer testimage bash -c "tail -f /dev/null"
-            fi
+            docker run -d --net testnet --name testcontainer testimage bash -c "tail -f /dev/null"
             docker exec testcontainer bash -c 'make eunit'
             docker exec testcontainer bash -c 'make ct'
             docker exec testcontainer bash -c 'make cover'
