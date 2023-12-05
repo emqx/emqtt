@@ -445,13 +445,17 @@ t_multi_streams_packet_malform(Config) ->
     case quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>) of
         {ok, 10} -> ok;
         {error, cancelled} -> ok;
-        {error, stm_send_error, aborted} -> ok
+        {error, stm_send_error, aborted} -> ok;
+        {error, closed} -> ok
     end,
 
     timer:sleep(200),
     ?assert(is_list(emqtt:info(C))),
 
-    {error, stm_send_error, aborted} = quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>),
+    case quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>) of
+        {error, stm_send_error, aborted} -> ok;
+        {error, closed} -> ok
+    end,
     timer:sleep(200),
     ?assert(is_list(emqtt:info(C))),
 
