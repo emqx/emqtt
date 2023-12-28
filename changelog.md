@@ -1,5 +1,7 @@
 # 1.11.0
 
+- Add `connect` command which only establishes connection,
+  but does not publish or subscribe.
 - Add `--log-level` option to CLI.
 - Add timestamp to CLI logs.
 - Exit with non-zero code when CLI stops due to error.

@@ -84,6 +84,8 @@
           "Log level: debug | info | warning | error"}
         ]).
 
+-define(CONNECT_OPTS, ?CONN_SHORT_OPTS ++ ?HELP_OPT ++ ?CONN_LONG_OPTS).
+
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
         [{topic, $t, "topic", string,
           "mqtt topic on which to publish the message"},
@@ -115,12 +117,15 @@
           "'size' to print payload size, 'as-string' to print payload as string"}
         ]).
 
+main(["connect" | Argv]) ->
+    {ok, {Opts, _Args}} = getopt:parse(?CONNECT_OPTS, Argv),
+    ok = maybe_help(connect, Opts),
+    main(connect, Opts);
 main(["sub" | Argv]) ->
     {ok, {Opts, _Args}} = getopt:parse(?SUB_OPTS, Argv),
     ok = maybe_help(sub, Opts),
     ok = check_required_args(sub, [topic], Opts),
     main(sub, Opts);
-
 main(["pub" | Argv]) ->
     {ok, {Opts, _Args}} = getopt:parse(?PUB_OPTS, Argv),
     ok = maybe_help(pub, Opts),
@@ -136,9 +141,9 @@ main(["pub" | Argv]) ->
     main(pub, Opts);
 
 main(_Argv) ->
-    io:format("Usage: ~s pub | sub [--help]~n", [?CMD_NAME]).
+    io:format("Usage: ~s pub | sub | connect [--help]~n", [?CMD_NAME]).
 
-main(PubSub, Opts0) ->
+main(PubSubOrJustConnect, Opts0) ->
     _ = process_flag(trap_exit, true),
     application:ensure_all_started(quicer),
     application:ensure_all_started(emqtt),
@@ -160,8 +165,11 @@ main(PubSub, Opts0) ->
               end,
     case ConnRet of
         {ok, Properties} ->
-            log("Sent CONNECT~n", []),
-            case PubSub of
+            log("Connected:~n~p~n", [Properties]),
+            case PubSubOrJustConnect of
+                connect ->
+                    %% only connect, keep running
+                    receive_loop(Client, Print);
                 pub ->
                     publish(Client, NOpts, proplists:get_value(repeat, Opts)),
                     disconnect(Client);
@@ -226,20 +234,21 @@ disconnect(Client) ->
             log_halt("Failed to send DISCONNECT due to: ~p~n", [Reason])
     end.
 
-maybe_help(PubSub, Opts) ->
+maybe_help(PubSubOrConnect, Opts) ->
     case proplists:get_value(help, Opts) of
         true ->
-            usage(PubSub),
+            usage(PubSubOrConnect),
             halt(0);
         _ -> ok
     end.
 
-usage(PubSub) ->
-    Opts = case PubSub of
+usage(PubSubOrConnect) ->
+    Opts = case PubSubOrConnect of
                pub -> ?PUB_OPTS;
-               sub -> ?SUB_OPTS
+               sub -> ?SUB_OPTS;
+               connect -> ?CONNECT_OPTS
            end,
-    getopt:usage(Opts, ?CMD_NAME ++ " " ++ atom_to_list(PubSub)).
+    getopt:usage(Opts, ?CMD_NAME ++ " " ++ atom_to_list(PubSubOrConnect)).
 
 check_required_args(PubSub, Keys, Opts) ->
     lists:foreach(fun(Key) ->
@@ -415,5 +424,4 @@ log_halt(Fmt, Args) ->
 
 ts() ->
     SystemTime = erlang:system_time(millisecond),
-    Offset = erlang:time_offset(),
     calendar:system_time_to_rfc3339(SystemTime, [{unit, millisecond}, {time_designator, $T}]).
