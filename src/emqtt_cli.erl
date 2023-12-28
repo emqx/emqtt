@@ -129,8 +129,7 @@ main(["pub" | Argv]) ->
     File = get_value(file, Opts),
     case {Payload, File} of
         {undefined, undefined} ->
-            io:format("Error: missing --payload or --file~n"),
-            halt(1);
+            log_halt("Error: missing --payload or --file~n", []);
         _ ->
             ok
     end,
@@ -161,11 +160,11 @@ main(PubSub, Opts0) ->
               end,
     case ConnRet of
         {ok, Properties} ->
-            io:format("Client ~s sent CONNECT~n", [get_value(clientid, NOpts)]),
+            log("Sent CONNECT~n", []),
             case PubSub of
                 pub ->
                     publish(Client, NOpts, proplists:get_value(repeat, Opts)),
-                    disconnect(Client, NOpts);
+                    disconnect(Client);
                 sub ->
                     subscribe(Client, NOpts),
                     KeepAlive = maps:get('Server-Keep-Alive', Properties, get_value(keepalive, NOpts)) * 1000,
@@ -173,8 +172,7 @@ main(PubSub, Opts0) ->
                     receive_loop(Client, Print)
             end;
         {error, Reason} ->
-            io:format("Client ~s failed to sent CONNECT due to: ~p~n", [get_value(clientid, NOpts), Reason]),
-            halt(1)
+            log_halt("Failed to send CONNECT due to: ~p~n", [Reason])
     end.
 
 publish(Client, Opts, 1) ->
@@ -194,8 +192,7 @@ do_publish(Client, Opts) ->
             case file:read_file(File) of
                 {ok, Bin} -> do_publish(Client, Opts, Bin);
                 {error, Reason} ->
-                    io:format("Error: failed_to_read ~s:~nreason=~p", [File, Reason]),
-                    halt(1)
+                    log_halt("Failed to read ~s:~nreason: ~p", [File, Reason])
             end;
         Bin ->
             do_publish(Client, Opts, Bin)
@@ -204,34 +201,29 @@ do_publish(Client, Opts) ->
 do_publish(Client, Opts, Payload) ->
     case emqtt:publish(Client, get_value(topic, Opts), Payload, Opts) of
         {error, Reason} ->
-            io:format("Client ~s failed to sent PUBLISH due to ~p~n", [get_value(clientid, Opts), Reason]);
+            log_halt("Failed to send PUBLISH due to: ~p~n", [Reason]);
         _ ->
-            io:format("Client ~s sent PUBLISH (Q~p, R~p, D0, Topic=~s, Payload=...(~p bytes))~n",
-                      [get_value(clientid, Opts),
-                       get_value(qos, Opts),
-                       i(get_value(retain, Opts)),
-                       get_value(topic, Opts),
-                       iolist_size(Payload)])
+            log("Sent PUBLISH (Q~p, R~p, D0, Topic=~s, Payload=...(~p bytes))~n",
+                [get_value(qos, Opts), i(get_value(retain, Opts)),
+                 get_value(topic, Opts), iolist_size(Payload)])
     end.
 
 subscribe(Client, Opts) ->
     case emqtt:subscribe(Client, get_value(topic, Opts), Opts) of
         {ok, _, [ReasonCode]} when 0 =< ReasonCode andalso ReasonCode =< 2 ->
-            io:format("Client ~s subscribed to ~s~n", [get_value(clientid, Opts), get_value(topic, Opts)]);
+            log("Subscribed to: ~s~n", [get_value(topic, Opts)]);
         {ok, _, [ReasonCode]} ->
-            io:format("Client ~s failed to subscribe to ~s due to ~s~n", [get_value(clientid, Opts),
-                                                                          get_value(topic, Opts),
-                                                                          emqtt:reason_code_name(ReasonCode)]);
+            log_halt("Failed to subscribe to ~s due to: ~s~n", [get_value(topic, Opts), emqtt:reason_code_name(ReasonCode)]);
         {error, Reason} ->
-            io:format("Client ~s failed to send SUBSCRIBE due to ~p~n", [get_value(clientid, Opts), Reason])
+            log_halt("Failed to send SUBSCRIBE due to: ~p~n", [Reason])
     end.
 
-disconnect(Client, Opts) ->
+disconnect(Client) ->
     case emqtt:disconnect(Client) of
         ok ->
-            io:format("Client ~s sent DISCONNECT~n", [get_value(clientid, Opts)]);
+            log("Sent DISCONNECT~n", []);
         {error, Reason} ->
-            io:format("Client ~s failed to send DISCONNECT due to ~p~n", [get_value(clientid, Opts), Reason])
+            log_halt("Failed to send DISCONNECT due to: ~p~n", [Reason])
     end.
 
 maybe_help(PubSub, Opts) ->
@@ -253,7 +245,7 @@ check_required_args(PubSub, Keys, Opts) ->
     lists:foreach(fun(Key) ->
         case lists:keyfind(Key, 1, Opts) of
             false ->
-                io:format("Error: '~s' required~n", [Key]),
+                log("Error: '~s' required~n", [Key]),
                 usage(PubSub),
                 halt(1);
             _ -> ok
@@ -369,8 +361,12 @@ enrich_opts(Opts) ->
 
 enrich_clientid_opt(Opts) ->
     case lists:keyfind(clientid, 1, Opts) of
-        false -> [{clientid, emqtt:random_client_id()} | Opts];
-        _ -> Opts
+        false ->
+            ClientId = emqtt:random_client_id(),
+            log("Generated clientid: ~s~n", [ClientId]),
+            [{clientid, ClientId} | Opts];
+        _ ->
+            Opts
     end.
 
 enrich_port_opt(Opts) ->
@@ -393,13 +389,11 @@ pipeline([Fun|More], Input) ->
 receive_loop(Client, Print) ->
     receive
         {'EXIT', Client, Reason} ->
-            io:format("Client down: ~p~n", [Reason]),
-            %% Reason is never 'normal', so, always halt with 1
-            halt(1);
+            log_halt("Client down: ~p~n", [Reason]);
         {publish, #{payload := Payload}} ->
             case Print of
-                "size" -> io:format("received ~p bytes~n", [size(Payload)]);
-                _ -> io:format("~s~n", [Payload])
+                "size" -> log("Received ~p bytes~n", [size(Payload)]);
+                _ -> log("~s~n", [Payload])
             end,
             receive_loop(Client, Print);
         ping ->
@@ -411,3 +405,10 @@ receive_loop(Client, Print) ->
 
 i(true)  -> 1;
 i(false) -> 0.
+
+log(Fmt, Args) ->
+    io:format(Fmt, Args).
+
+log_halt(Fmt, Args) ->
+    log(Fmt, Args),
+    halt(1).
