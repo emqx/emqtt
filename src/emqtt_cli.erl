@@ -79,7 +79,9 @@
           "certificate is issued"},
          {verify, undefined, "verify", {boolean, false},
           "TLS verify option, default: false "
-         }
+         },
+         {log_level, undefined, "log-level", {atom, warning},
+          "Log level: debug | info | warning | error"}
         ]).
 
 -define(PUB_OPTS, ?CONN_SHORT_OPTS ++
@@ -143,6 +145,12 @@ main(PubSub, Opts0) ->
     Print = proplists:get_value(print, Opts0),
     Opts = proplists:delete(print, Opts0),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
+    case proplists:get_value(log_level, Opts0) of
+        undefined ->
+            ok;
+        Level ->
+            logger:set_primary_config(level, Level)
+    end,
     {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case {proplists:get_bool(enable_websocket, NOpts),
                     proplists:get_bool(enable_quic, NOpts)} of
