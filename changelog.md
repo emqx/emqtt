@@ -1,3 +1,11 @@
+# 1.11.0
+
+- Add `connect` command which only establishes connection,
+  but does not publish or subscribe.
+- Add `--log-level` option to CLI.
+- Add timestamp to CLI logs.
+- Exit with non-zero code when CLI stops due to error.
+
 # 1.10.0
 
 - Export emqtt:qos/0, emqtt:topic/0 and emqtt:packet_id/0 as public types.

@@ -84,7 +84,7 @@ ensure_listener(Type, Name, BindAddr, BindPort) ->
     BaseConf = #{
                  acceptors => 16,
                  bind => {BindAddr, BindPort},
-                 enabled => true,
+                 enable => true,
                  idle_timeout => 15000,
                  limiter => #{},
                  max_connections => 1024000,
