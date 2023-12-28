@@ -140,6 +140,7 @@ main(_Argv) ->
     io:format("Usage: ~s pub | sub [--help]~n", [?CMD_NAME]).
 
 main(PubSub, Opts0) ->
+    _ = process_flag(trap_exit, true),
     application:ensure_all_started(quicer),
     application:ensure_all_started(emqtt),
     Print = proplists:get_value(print, Opts0),
@@ -172,7 +173,8 @@ main(PubSub, Opts0) ->
                     receive_loop(Client, Print)
             end;
         {error, Reason} ->
-            io:format("Client ~s failed to sent CONNECT due to ~p~n", [get_value(clientid, NOpts), Reason])
+            io:format("Client ~s failed to sent CONNECT due to: ~p~n", [get_value(clientid, NOpts), Reason]),
+            halt(1)
     end.
 
 publish(Client, Opts, 1) ->
@@ -390,6 +392,10 @@ pipeline([Fun|More], Input) ->
 
 receive_loop(Client, Print) ->
     receive
+        {'EXIT', Client, Reason} ->
+            io:format("Client down: ~p~n", [Reason]),
+            %% Reason is never 'normal', so, always halt with 1
+            halt(1);
         {publish, #{payload := Payload}} ->
             case Print of
                 "size" -> io:format("received ~p bytes~n", [size(Payload)]);
