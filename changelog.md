@@ -1,6 +1,8 @@
 # 1.11.0
 
 - Add `--log-level` option to CLI.
+- Add timestamp to CLI logs.
+- Exit with non-zero code when CLI stops due to error.
 
 # 1.10.0
 

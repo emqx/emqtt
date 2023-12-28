@@ -407,8 +407,13 @@ i(true)  -> 1;
 i(false) -> 0.
 
 log(Fmt, Args) ->
-    io:format(Fmt, Args).
+    io:format("~s " ++ Fmt, [ts() | Args]).
 
 log_halt(Fmt, Args) ->
     log(Fmt, Args),
     halt(1).
+
+ts() ->
+    SystemTime = erlang:system_time(millisecond),
+    Offset = erlang:time_offset(),
+    calendar:system_time_to_rfc3339(SystemTime, [{unit, millisecond}, {time_designator, $T}]).
