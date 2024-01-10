@@ -80,6 +80,10 @@
          {verify, undefined, "verify", {boolean, false},
           "TLS verify option, default: false "
          },
+         {reconnect, undefined, "reconnect", integer,
+          "Reconnect when connection lost, give up after N retries"},
+         {'session-expiry-interval', undefined, "session-expiry-interval", integer,
+          "Session expiry interval in seconds"},
          {log_level, undefined, "log-level", {atom, warning},
           "Log level: debug | info | warning | error"}
         ]).
@@ -353,6 +357,13 @@ parse_cmd_opts([{verify, IsVerify} | Opts], Acc) ->
             false -> verify_none
         end,
     parse_cmd_opts(Opts, maybe_append(ssl_opts, {verify, V}, Acc));
+parse_cmd_opts([{reconnect, Retries} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{reconnect, Retries} | Acc]);
+parse_cmd_opts([{'session-expiry-interval', Secs} | Opts], Acc) ->
+    Prop = proplists:get_value(properties, Acc, #{}),
+    NewProp = Prop#{'Session-Expiry-Interval' => timer:seconds(Secs)},
+    NewAcc = lists:keystore(properties, 1, Acc, {properties, NewProp}),
+    parse_cmd_opts(Opts, NewAcc);
 parse_cmd_opts([_ | Opts], Acc) ->
     parse_cmd_opts(Opts, Acc).
 
