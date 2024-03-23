@@ -62,7 +62,8 @@ all() ->
 
 groups() ->
     [{general, [],
-      [t_connect,
+      [t_start_no_link,
+       t_connect,
        t_connect_timeout,
        t_subscribe,
        t_subscribe_qoe,
@@ -184,6 +185,16 @@ clean_retained(Topic) ->
 
 t_props(_) ->
     ok = emqtt_props:validate(#{'Payload-Format-Indicator' => 0}).
+
+t_start_no_link(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    {ok, C} = emqtt:start([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C),
+    {links, Links} = process_info(self(), links),
+    ?assertNot(lists:member(C, Links)),
+    emqtt:stop(C),
+    ok.
 
 t_connect(Config) ->
     ConnFun = ?config(conn_fun, Config),
