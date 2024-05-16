@@ -1038,7 +1038,7 @@ reconnect(_EventType, _, _State) ->
 waiting_for_connack(cast, #mqtt_packet{} = P, State) ->
     waiting_for_connack(cast, {P, default_via(State)}, State);
 waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
-                                          SessPresent,
+                                          SessPresentFlag,
                                           Properties), Via},
                     State = #state{properties = AllProps,
                                    clientid = ClientId,
@@ -1052,7 +1052,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     Reply = {ok, Properties},
     State1 = State#state{clientid = assign_id(ClientId, AllProps1),
                          properties = AllProps1,
-                          session_present = SessPresent},
+                         session_present = flag_to_bool(SessPresentFlag)},
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
@@ -1066,7 +1066,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     end;
 
 waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
-                                           _SessPresent,
+                                           _SessPresentFlag,
                                            Properties), Via},
                     State = #state{proto_ver = ProtoVer, socket = Via, reconnect = Re}) ->
     Reason = reason_code_name(ReasonCode, ProtoVer),
@@ -2255,3 +2255,6 @@ redact_packet(#mqtt_packet{variable = #mqtt_packet_connect{} = Conn} = Packet) -
     Packet#mqtt_packet{variable = Conn#mqtt_packet_connect{password = <<"******">>}};
 redact_packet(Packet) ->
     Packet.
+
+flag_to_bool(0) -> false;
+flag_to_bool(1) -> true.
