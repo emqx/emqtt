@@ -60,14 +60,14 @@ call(Vin0, Func0, Arg1, Arg2, Arg3, Arg4, Arg5) ->
 do_call(Vin0, Func0, Args) ->
     Vin = bin(Vin0),
     Func = bin(Func0),
-    Topic = bin(["funr/", Vin, "/", Func]),
+    Topic = bin(["funr/call/", Vin, "/", Func]),
     Payload = bin(io_lib:format("~0p", [Args])),
     Opts = [{qos, qos()}],
     case emqtt:publish(?NAME, Topic, Payload, Opts) of
         {error, Reason} ->
             io:format("Failed to send PUBLISH function call reason: ~p~n", [Reason]);
         _ ->
-            log_g("Sent PUBLISH to Topic=~s Payload=~s~n", [Topic, Payload])
+            log_g("Sent PUBLISH to Topic='~s' Payload='~s'~n", [Topic, Payload])
     end.
 
 bin(A) when is_atom(A) ->
@@ -83,9 +83,10 @@ init() ->
 help() ->
     log_y("  > help().                     :: Print this help info~n"
           "  > set_qos(0|1|2).             :: Set QoS for the publishing messages~n"
-          "  > wake(Vin).                  :: Emulate a wake-up signal, wakup signal is published to funr/wake/Vin~n"
+          "  > wake(Vin).                  :: Emulate a wake-up signal. Signal is published to 'funr/wake/Vin'~n"
           "                                   EMQX should trigger an HTTP POST towards the wakeup-service.~n"
-          "  > call(Vin, Func, Arg1, ...). :: Emulate a function call from funr to device identified by Vin~n"
+          "  > call(Vin, Func, Arg1, ...). :: Emulate a function call from funr to device at topic 'funr/call/Vin/FunctionName'~n"
+          "                                   Expecting the device to subscribe topic 'funr/call/${client_attrs.vin}'~n"
           , []).
 
 set_qos(QoS) ->
@@ -113,12 +114,12 @@ do_init() ->
     {ok, Pid} = emqtt:start_link(Opts),
     %% Small delay to ensure eshell is booted before print
     timer:sleep(100),
-    ConnStr = io_lib:format("~s:~p with username=~s password=~s clientid=~s", 
+    ConnStr = io_lib:format("~s:~p with username='~s' password='~s' clientid='~s'",
                             [Host, Port, Username, Password, ClientId]),
     unlink(Pid),
     case emqtt:connect(Pid) of
         {ok, _} ->
-            log_g("~nConnected to ~s~n", [ConnStr]);
+            log_g("~nConnected to ~s~n~n", [ConnStr]);
         {error, Reason} ->
             log_r("~nFailed to connect ~s~n", [ConnStr]),
             log_r("Reason: ~p~n", [Reason]),
@@ -157,7 +158,7 @@ wake(Vin) ->
         {error, Reason} ->
             io:format("Failed to send PUBLISH wake-up signal reason: ~p~n", [Reason]);
         _ ->
-            log_g("Sent PUBLISH to Topic=~s Payload=~s~n", [Topic, Payload])
+            log_g("Sent PUBLISH to Topic='~s' Payload='~s'~n", [Topic, Payload])
     end.
 
 qos() ->
