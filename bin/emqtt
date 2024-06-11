@@ -11,7 +11,11 @@ ERTS_PATH=$RUNNER_ROOT_DIR/erts-$ERTS_VSN/bin
 if [ "$1" = "funr" ]; then
     # ensure dir
     cd -P -- "$(dirname -- "$0")/.."
-    erl +B -pa lib/*/ebin -eval "user_default:init()" -- "$@"
+    if [ "$2" = "help" ]; then
+        erl +B -pa lib/*/ebin -eval "user_default:help(), halt(0)" | grep -v Erlang/OTP
+    else
+        erl +B -pa lib/*/ebin -eval "user_default:init()" -- "$@"
+    fi
 else
     exec ${ERTS_PATH}/escript ${RUNNER_BIN_DIR}/emqtt_cli "$@"
 fi
