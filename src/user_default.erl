@@ -184,9 +184,9 @@ qos() ->
     end.
 
 con(H, P, U, Pwd, ClientId) ->
-    do_init([{h, H},
+    do_init([{h, bin(H)},
              {p, P},
-             {u, U},
-             {'P', Pwd},
-             {'C', ClientId}
+             {u, bin(U)},
+             {'P', bin(Pwd)},
+             {'C', bin(ClientId)}
             ]).
