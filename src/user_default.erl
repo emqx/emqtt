@@ -22,7 +22,8 @@
 
 -export([set_qos/1]).
 
--export([call/2,
+-export([con/5,
+         call/2,
          call/3,
          call/4,
          call/5,
@@ -82,6 +83,7 @@ init() ->
 
 help() ->
     log_y("  > help().                     :: Print this help info~n"
+          "  > con(H, P, U, Pwd, Cid).     :: Connect EMQX if the -h arg is missing from start.~n"
           "  > set_qos(0|1|2).             :: Set QoS for the publishing messages~n"
           "  > wake(Vin).                  :: Emulate a wake-up signal. Signal is published to 'funr/wake/Vin'~n"
           "                                   EMQX should trigger an HTTP POST towards the wakeup-service.~n"
@@ -97,7 +99,17 @@ do_init() ->
     Owner = whereis(init),
     ets:give_away(Ets, Owner, Ets),
     Args = init:get_arguments(),
-    Host = arg(h, Args, "localhost"),
+    Host = arg(h, Args, undefined),
+    case Host of
+        undefined ->
+            help();
+        _ ->
+            do_init(Args)
+    end.
+
+do_init(Args) ->
+    Owner = whereis(init),
+    Host = arg(h, Args, undefined),
     Port = int(arg(p, Args, 1883)),
     Username = arg(u, Args, <<>>),
     Password = arg('P', Args, <<>>),
@@ -131,6 +143,8 @@ do_init() ->
 arg(Key, InitArgs, Default) ->
     case proplists:get_value(Key, InitArgs) of
         [Value] ->
+            Value;
+        Value ->
             Value;
         undefined ->
             Default
@@ -168,3 +182,11 @@ qos() ->
         [] ->
             0
     end.
+
+con(H, P, U, Pwd, ClientId) ->
+    do_init([{h, H},
+             {p, P},
+             {u, U},
+             {'P', Pwd},
+             {'C', ClientId}
+            ]).
