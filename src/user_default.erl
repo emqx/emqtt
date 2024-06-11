@@ -144,10 +144,10 @@ arg(Key, InitArgs, Default) ->
     case proplists:get_value(Key, InitArgs) of
         [Value] ->
             Value;
-        Value ->
-            Value;
         undefined ->
-            Default
+            Default;
+        Value ->
+            Value
     end.
 
 int(I) when is_list(I) ->
