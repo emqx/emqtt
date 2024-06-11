@@ -8,4 +8,10 @@ ERTS_VSN="{{ erts_vsn }}"
 
 ERTS_PATH=$RUNNER_ROOT_DIR/erts-$ERTS_VSN/bin
 
-exec ${ERTS_PATH}/escript ${RUNNER_BIN_DIR}/emqtt_cli "$@"
+if [ "$1" = "funr" ]; then
+    # ensure dir
+    cd -P -- "$(dirname -- "$0")/.."
+    erl +B -pa lib/*/ebin -eval "user_default:init()" -- "$@"
+else
+    exec ${ERTS_PATH}/escript ${RUNNER_BIN_DIR}/emqtt_cli "$@"
+fi
