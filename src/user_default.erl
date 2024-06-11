@@ -27,7 +27,8 @@
          call/4,
          call/5,
          call/6,
-         call/7
+         call/7,
+         wake/1
         ]).
 
 -define(ETS, funr).
@@ -61,13 +62,12 @@ do_call(Vin0, Func0, Args) ->
     Func = bin(Func0),
     Topic = bin(["funr/", Vin, "/", Func]),
     Payload = bin(io_lib:format("~0p", [Args])),
-    [{qos, QoS}] = ets:lookup(?ETS, qos),
-    Opts = [{qos, QoS}],
+    Opts = [{qos, qos()}],
     case emqtt:publish(?NAME, Topic, Payload, Opts) of
         {error, Reason} ->
-            io:format("Failed to send PUBLISH due to: ~p~n", [Reason]);
+            io:format("Failed to send PUBLISH function call reason: ~p~n", [Reason]);
         _ ->
-            log_g("Sent PUBLISH to Topic=~s with Payload=~s~n", [Topic, Payload])
+            log_g("Sent PUBLISH to Topic=~s Payload=~s~n", [Topic, Payload])
     end.
 
 bin(A) when is_atom(A) ->
@@ -81,9 +81,12 @@ init() ->
     spawn_link(fun do_init/0).
 
 help() ->
-    log_y("  > help().                               :: Print this help info~n"
-          "  > set_qos(0|1|2).                       :: Set QoS for the publishing messages~n"
-          "  > call(Vin, FuncName, Arg1, Arg2, ...). :: Emulate a function call from funr to device identified by Vin~n", []).
+    log_y("  > help().                     :: Print this help info~n"
+          "  > set_qos(0|1|2).             :: Set QoS for the publishing messages~n"
+          "  > wake(Vin).                  :: Emulate a wake-up signal, wakup signal is published to funr/wake/Vin~n"
+          "                                   EMQX should trigger an HTTP POST towards the wakeup-service.~n"
+          "  > call(Vin, Func, Arg1, ...). :: Emulate a function call from funr to device identified by Vin~n"
+          , []).
 
 set_qos(QoS) ->
     ets:insert(?ETS, {qos, QoS}).
@@ -146,3 +149,21 @@ log_g(Fmt, Args) ->
 log_y(Fmt, Args) ->
     io:format(?YELLOW ++ Fmt ++ ?RESET, Args).
 
+wake(Vin) ->
+    Opts = [{qos, qos()}],
+    Topic = bin(["funr/wake/", bin(Vin)]),
+    Payload = <<"Wake Up!!!">>,
+    case emqtt:publish(?NAME, Topic, Payload, Opts) of
+        {error, Reason} ->
+            io:format("Failed to send PUBLISH wake-up signal reason: ~p~n", [Reason]);
+        _ ->
+            log_g("Sent PUBLISH to Topic=~s Payload=~s~n", [Topic, Payload])
+    end.
+
+qos() ->
+    case ets:lookup(?ETS, qos) of
+        [{qos, QoS}] ->
+            QoS;
+        [] ->
+            0
+    end.
