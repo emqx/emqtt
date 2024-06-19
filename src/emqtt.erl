@@ -1490,11 +1490,17 @@ put_max_retry_count(N) when is_integer(N) ->
 
 get_max_retry_count() ->
     Default = 3,
-    erlang:get(max_retry_count, Default).
+    case erlang:get(max_retry_count) of
+        undefined -> Default;
+        Value     -> Value
+    end.
 
 put_message_expiry_time(T) when is_integer(T) ->
     erlang:put(default_message_expiry_time, T).
 
 get_message_expiry_time() ->
     Default = timer:seconds(30),
-    erlang:get(default_message_expiry_time, Default).
+    case erlang:get(default_message_expiry_time) of
+        undefined -> Default;
+        Value     -> Value
+    end.
