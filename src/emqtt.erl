@@ -785,7 +785,8 @@ connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
             Now = now_ts(),
             Meta = #{first_sent_at => Now, last_sent_at => Now, retry_count => 0},
             Inflight1 = maps:put(PacketId, {publish, Msg1, Meta}, Inflight),
-            State1 = ensure_expiry_timer(ensure_retry_timer(NewState#state{inflight = Inflight1})),
+            ensure_expiry_timer(),
+            State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
             Actions = [{reply, From, {ok, PacketId}}],
             case is_inflight_full(State1) of
                 true -> {next_state, inflight_full, State1, Actions};
@@ -972,7 +973,8 @@ connected(info, {timeout, _TRef, expiry}, State = #state{inflight = Inflight}) -
             {keep_state, State};
         false ->
             State1 = expiry_inflight_msgs(now_ts(), State),
-            ensure_expiry_timer(State1)
+            ensure_expiry_timer(),
+            State1
     end;
 
 connected(EventType, EventContent, Data) ->
@@ -1243,25 +1245,6 @@ ensure_ack_timer(State = #state{ack_timer     = undefined,
                                 pending_calls = Calls}) when length(Calls) > 0 ->
     State#state{ack_timer = erlang:start_timer(Timeout, self(), ack)};
 ensure_ack_timer(State) -> State.
-
-ensure_expiry_timer(State) ->
-    Interval = get_message_expiry_interval() + 1000,
-    case erlang:get(expiry_timer) of
-        undefined ->
-            TRef = erlang:start_timer(Interval, self(), expiry),
-            erlang:put(expiry_timer, TRef);
-        _TRef ->
-            ok
-    end,
-    State.
-
-clean_expiry_timer() ->
-    case erlang:get(expiry_timer) of
-        undefined -> ok;
-        TRef ->
-            erlang:cancel_timer(TRef),
-            erlang:erase(expiry_timer)
-    end.
 
 ensure_retry_timer(State = #state{retry_interval = Interval}) ->
     do_ensure_retry_timer(Interval, State).
@@ -1543,4 +1526,22 @@ get_message_expiry_interval() ->
     case erlang:get(message_expiry_interval) of
         undefined -> Default;
         Value     -> Value
+    end.
+
+ensure_expiry_timer() ->
+    Interval = get_message_expiry_interval() + 1000,
+    case erlang:get(expiry_timer) of
+        undefined ->
+            TRef = erlang:start_timer(Interval, self(), expiry),
+            erlang:put(expiry_timer, TRef);
+        _TRef ->
+            ok
+    end.
+
+clean_expiry_timer() ->
+    case erlang:get(expiry_timer) of
+        undefined -> ok;
+        TRef ->
+            erlang:cancel_timer(TRef),
+            erlang:erase(expiry_timer)
     end.
