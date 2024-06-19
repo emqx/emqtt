@@ -974,7 +974,7 @@ connected(info, {timeout, _TRef, expiry}, State = #state{inflight = Inflight}) -
         false ->
             State1 = expiry_inflight_msgs(now_ts(), State),
             ensure_expiry_timer(),
-            State1
+            {keep_state, State1}
     end;
 
 connected(EventType, EventContent, Data) ->
