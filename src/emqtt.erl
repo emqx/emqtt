@@ -1132,7 +1132,7 @@ expiry_inflight_msgs(Now, State = #state{inflight = Inflight}) ->
         0 -> State;
         _ ->
             ExpiredMsgs1 = lists:sort(
-                fun({_, _, #{last_sent_at := Ts1}}, {_, _, #{last_sent_at := Ts2}}) ->
+                fun({_, {_, _, #{last_sent_at := Ts1}}}, {_, {_, _, #{last_sent_at := Ts2}}}) ->
                     Ts1 < Ts2
                 end, maps:to_list(ExpiredMsgs)
             ),
