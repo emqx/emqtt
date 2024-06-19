@@ -128,6 +128,8 @@
                 | {keepalive, non_neg_integer()}
                 | {max_inflight, pos_integer()}
                 | {retry_interval, timeout()}
+                | {max_retry_count, non_neg_integer()}
+                | {default_message_expiry_time, non_neg_integer()}
                 | {will_topic, iodata()}
                 | {will_payload, iodata()}
                 | {will_retain, boolean()}
@@ -165,6 +167,11 @@
 
 -type(client() :: pid() | atom()).
 
+-type(msg_inflight_meta() ::  #{ first_sent_at := erlang:timestamp(),
+                                 last_sent_at := erlang:timestamp(),
+                                 retry_count := non_neg_integer()
+                               }).
+
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
 -record(state, {
@@ -195,7 +202,7 @@
           pending_calls   :: list(),
           subscriptions   :: map(),
           max_inflight    :: infinity | pos_integer(),
-          inflight        :: #{packet_id() => term()},
+          inflight        :: #{packet_id() => {publish | pubrel, term(), msg_inflight_meta()}},
           awaiting_rel    :: map(),
           auto_ack        :: boolean(),
           ack_timeout     :: pos_integer(),
@@ -219,11 +226,11 @@
 
 -define(WILL_MSG(QoS, Retain, Topic, Props, Payload),
         #mqtt_msg{qos = QoS,
-		  retain = Retain,
-		  topic = Topic,
-		  props = Props,
-		  payload = Payload
-		 }).
+                  retain = Retain,
+                  topic = Topic,
+                  props = Props,
+                  payload = Payload
+                 }).
 
 -define(NO_CLIENT_ID, <<>>).
 
@@ -590,6 +597,12 @@ init([{auto_ack, AutoAck} | Opts], State) when is_boolean(AutoAck) ->
     init(Opts, State#state{auto_ack = AutoAck});
 init([{retry_interval, I} | Opts], State) ->
     init(Opts, State#state{retry_interval = timer:seconds(I)});
+init([{max_retry_count, N} | Opts], State) when is_integer(N) ->
+    put_max_retry_count(N),
+    init(Opts, State);
+init([{default_message_expiry_time, T} | Opts], State) when is_integer(T) ->
+    put_message_expiry_time(timer:seconds(T)),
+    init(Opts, State);
 init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
 init([_Opt | Opts], State) ->
@@ -609,7 +622,7 @@ init_will_msg({qos, QoS}, WillMsg) ->
 init_parse_state(State = #state{proto_ver = Ver, properties = Properties}) ->
     MaxSize = maps:get('Maximum-Packet-Size', Properties, ?MAX_PACKET_SIZE),
     ParseState = emqtt_frame:initial_parse_state(
-		   #{max_size => MaxSize, version => Ver}),
+                   #{max_size => MaxSize, version => Ver}),
     State#state{parse_state = ParseState}.
 
 merge_opts(Defaults, Options) ->
@@ -763,12 +776,15 @@ connected({call, From}, {publish, Msg = #mqtt_msg{qos = ?QOS_0}}, State) ->
     end;
 
 connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
-          State = #state{inflight = Inflight, last_packet_id = PacketId})
+          State = #state{inflight = Inflight0, last_packet_id = PacketId})
     when (QoS =:= ?QOS_1); (QoS =:= ?QOS_2) ->
+    Inflight = maybe_upgrade_inflight_data_structure(Inflight0),
     Msg1 = Msg#mqtt_msg{packet_id = PacketId},
     case send(Msg1, State) of
         {ok, NewState} ->
-            Inflight1 = maps:put(PacketId, {publish, Msg1, os:timestamp()}, Inflight),
+            Now = os:timestamp(),
+            Meta = #{first_sent_at => Now, last_sent_at => Now, retry_count => 0},
+            Inflight1 = maps:put(PacketId, {publish, Msg1, Meta}, Inflight),
             State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
             Actions = [{reply, From, {ok, PacketId}}],
             case is_inflight_full(State1) of
@@ -833,18 +849,24 @@ connected(cast, Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
 connected(cast, ?PUBACK_PACKET(_PacketId, _ReasonCode, _Properties) = PubAck, State) ->
     {keep_state, delete_inflight(PubAck, State)};
 
-connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight = Inflight}) ->
-	NState = case maps:find(PacketId, Inflight) of
-				 {ok, {publish, _Msg, _Ts}} ->
-					 Inflight1 = maps:put(PacketId, {pubrel, PacketId, os:timestamp()}, Inflight),
-					 State#state{inflight = Inflight1};
-				 {ok, {pubrel, _Ref, _Ts}} ->
-					 ?LOG(notice, "Duplicated PUBREC Packet: ~p", [PacketId], State),
-					 State;
-				 error ->
-					 ?LOG(warning, "Unexpected PUBREC Packet: ~p", [PacketId], State),
-					 State
-			 end,
+connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight = Inflight0}) ->
+    Inflight = maybe_upgrade_inflight_data_structure(Inflight0),
+    NState = case maps:find(PacketId, Inflight) of
+                 {ok, {publish, _Msg, _Meta}} ->
+                     Now = os:timestamp(),
+                     Meta = #{first_sent_at => Now,
+                              last_sent_at => Now,
+                              retry_count => 0
+                             },
+                     Inflight1 = maps:put(PacketId, {pubrel, PacketId, Meta}, Inflight),
+                     State#state{inflight = Inflight1};
+                 {ok, {pubrel, _Ref, _Ts}} ->
+                     ?LOG(notice, "Duplicated PUBREC Packet: ~p", [PacketId], State),
+                     State;
+                 error ->
+                     ?LOG(warning, "Unexpected PUBREC Packet: ~p", [PacketId], State),
+                     State
+        end,
     send_puback(?PUBREL_PACKET(PacketId), NState);
 
 %%TODO::... if auto_ack is false, should we take PacketId from the map?
@@ -936,10 +958,11 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
     {keep_state, ensure_ack_timer(NewState)};
 
 connected(info, {timeout, TRef, retry}, State = #state{retry_timer = TRef,
-                                                       inflight    = Inflight}) ->
-	case maps:size(Inflight) == 0 of
+                                                       inflight    = Inflight0}) ->
+    Inflight = maybe_upgrade_inflight_data_structure(Inflight0),
+    case maps:size(Inflight) == 0 of
         true  -> {keep_state, State#state{retry_timer = undefined}};
-        false -> retry_send(State)
+        false -> retry_send(State#state{retry_timer = undefined})
     end;
 
 connected(EventType, EventContent, Data) ->
@@ -977,7 +1000,7 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
 handle_event(info, {Error, _Sock, Reason}, _StateName, State)
     when Error =:= tcp_error; Error =:= ssl_error ->
     ?LOG(error, "The connection error occured ~p, reason:~p",
-	 [Error, Reason], State),
+    [Error, Reason], State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1036,6 +1059,26 @@ should_ping(ConnMod, Sock) ->
             Error
     end.
 
+%% Since in 1.2.3.3 to 1.2.3.4 upgrade, we modified the data structure stored in the inflight.
+%% We need to execute the following func to upgrade the data structure for the code hot upgrading.
+maybe_upgrade_inflight_data_structure(Inflight) ->
+    Iter = maps:iterator(Inflight),
+    case maps:next(Iter) of
+        none ->
+            Inflight;
+        {_Key, {_Type, _Msg, Meta}, _Iter1} when is_map(Meta) ->
+            Inflight;
+        {_, {_, _, OsTimestamp}, _Iter1} when is_tuple(OsTimestamp) ->
+            maps:map(
+                fun(_Key, {Type, Msg, Ts}) ->
+                    Meta = #{first_sent_at => Ts,
+                             last_sent_at  => Ts,
+                             retry_count   => 0
+                            },
+                    {Type, Msg, Meta}
+                end, Iter)
+    end.
+
 is_inflight_full(#state{max_inflight = infinity}) ->
     false;
 is_inflight_full(#state{max_inflight = MaxLimit, inflight = Inflight}) ->
@@ -1043,8 +1086,8 @@ is_inflight_full(#state{max_inflight = MaxLimit, inflight = Inflight}) ->
 
 delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
                 State = #state{inflight = Inflight}) ->
-	case maps:find(PacketId, Inflight) of
-        {ok, {publish, #mqtt_msg{packet_id = PacketId}, _Ts}} ->
+    case maps:find(PacketId, Inflight) of
+        {ok, {publish, #mqtt_msg{packet_id = PacketId}, _Meta}} ->
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
@@ -1056,7 +1099,7 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
 delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
                 State = #state{inflight = Inflight}) ->
     case maps:find(PacketId, Inflight) of
-        {ok, {pubrel, _PacketId, _Ts}} ->
+        {ok, {pubrel, _PacketId, _Meta}} ->
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
@@ -1072,6 +1115,50 @@ delete_inflight_when_full(Packet, State) ->
         true -> {keep_state, State1};
         false -> {next_state, connected, State1}
     end.
+
+expiry_inflight_msgs(Now, State = #state{inflight = Inflight}) ->
+    ExpiryTime = get_message_expiry_time(),
+    Fun = fun(PacketId, {Type, Msg, Meta}, Acc) ->
+              SentAt = maps:get(first_sent_at, Meta),
+              case timer:now_diff(Now, SentAt) div 1000 of
+                  Diff when Diff >= ExpiryTime ->
+                      Acc#{PacketId => {Type, Msg, Meta}};
+                  _ ->
+                      Acc
+              end
+          end,
+    ExpiredMsgs = maps:fold(Fun, Inflight, #{}),
+    case maps:size(ExpiredMsgs) of
+        0 -> State;
+        _ ->
+            ExpiredMsgs1 = lists:sort(
+                fun({_, _, #{last_sent_at := Ts1}}, {_, _, #{last_sent_at := Ts2}}) ->
+                    Ts1 < Ts2
+                end, maps:to_list(ExpiredMsgs)
+            ),
+            delete_expired_inflight_msgs(ExpiredMsgs1, State)
+    end.
+
+delete_expired_inflight_msgs([], State) ->
+    State;
+delete_expired_inflight_msgs(
+  [{PacketId, {Type, Msg, _Meta}} | Msgs],
+  State = #state{inflight = Inflight}
+) ->
+    case Type of
+        publish ->
+            #mqtt_msg{topic = Topic} = Msg,
+            ?LOG(warning, "Message ~p expired, topic: ~ts", [PacketId, Topic], State);
+        pubrel ->
+            ?LOG(warning, "Pubrel ~p expired", [PacketId], State)
+    end,
+    ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
+                                           %% Treat 16#FF as internal error
+                                           reason_code => 16#FF,
+                                           reason_code_name => expired,
+                                           properties  => #{}}),
+    State1 = State#state{inflight = maps:remove(PacketId, Inflight)},
+    delete_expired_inflight_msgs(Msgs, State1).
 
 assign_id(?NO_CLIENT_ID, Props) ->
     case maps:find('Assigned-Client-Identifier', Props) of
@@ -1151,36 +1238,45 @@ do_ensure_retry_timer(_Interval, State) ->
     State.
 
 retry_send(State = #state{inflight = Inflight}) ->
-    SortFun = fun({_, _, Ts1}, {_, _, Ts2}) -> Ts1 < Ts2 end,
+    SortFun = fun({_, _, #{last_sent_at := Ts1}}, {_, _, #{last_sent_at := Ts2}}) -> Ts1 < Ts2 end,
     Msgs = lists:sort(SortFun, maps:values(Inflight)),
-    retry_send(Msgs, os:timestamp(), State ).
+    retry_send(Msgs, os:timestamp(), State).
 
-retry_send([], _Now, State) ->
-    {keep_state, ensure_retry_timer(State)};
-retry_send([{Type, Msg, Ts} | Msgs], Now, State = #state{retry_interval = Interval}) ->
+retry_send([], Now, State) ->
+    State1 = expiry_inflight_msgs(Now, State),
+    {keep_state, ensure_retry_timer(State1)};
+retry_send([{Type, Msg, Meta} | Msgs], Now, State = #state{retry_interval = Interval}) ->
+    Ts = maps:get(last_sent_at, Meta),
+    Tried = maps:get(retry_count, Meta),
     Diff = timer:now_diff(Now, Ts) div 1000, %% micro -> ms
-    case (Diff >= Interval) of
-        true  -> case retry_send(Type, Msg, Now, State) of
+    case {Tried >= get_max_retry_count(), (Diff >= Interval)} of
+        {true, _} ->
+            retry_send(Msgs, Now, State);
+        {false, true} -> case retry_send(Type, Msg, Meta, Now, State) of
                      {ok, NewState} -> retry_send(Msgs, Now, NewState);
                      {error, Error} -> {stop, Error}
                  end;
-        false -> {keep_state, do_ensure_retry_timer(Interval - Diff, State)}
+        {false, false} -> {keep_state, do_ensure_retry_timer(Interval - Diff, State)}
     end.
 
 retry_send(publish, Msg = #mqtt_msg{qos = QoS, packet_id = PacketId},
-           Now, State = #state{inflight = Inflight}) ->
+           Meta, Now, State = #state{inflight = Inflight}) ->
     Msg1 = Msg#mqtt_msg{dup = (QoS =:= ?QOS_1)},
     case send(Msg1, State) of
         {ok, NewState} ->
-            Inflight1 = maps:put(PacketId, {publish, Msg1, Now}, Inflight),
+            RetryCount = maps:get(retry_count, Meta),
+            Meta1 = Meta#{last_sent_at => Now, retry_count => RetryCount + 1},
+            Inflight1 = maps:put(PacketId, {publish, Msg1, Meta1}, Inflight),
             {ok, NewState#state{inflight = Inflight1}};
         Error = {error, _Reason} ->
             Error
     end;
-retry_send(pubrel, PacketId, Now, State = #state{inflight = Inflight}) ->
+retry_send(pubrel, PacketId, Meta, Now, State = #state{inflight = Inflight}) ->
     case send(?PUBREL_PACKET(PacketId), State) of
         {ok, NewState} ->
-            Inflight1 = maps:put(PacketId, {pubrel, PacketId, Now}, Inflight),
+            RetryCount = maps:get(retry_count, Meta),
+            Meta1 = Meta#{last_sent_at => Now, retry_count => RetryCount + 1},
+            Inflight1 = maps:put(PacketId, {pubrel, PacketId, Meta1}, Inflight),
             {ok, NewState#state{inflight = Inflight1}};
         Error = {error, _Reason} ->
             Error
@@ -1380,3 +1476,25 @@ reason_code_name(16#A0) -> maximum_connect_time;
 reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
+
+%%--------------------------------------------------------------------
+%% Process Dictionary
+
+%% Added for 1.2.3.4
+%%
+%% Due to compatibility issues, we can't directly modify the structure of the state to store
+%% these newly added configurations. So we put `max_retry_count` and `default_message_expiry_time`
+%% into the process dictionary temporarily.
+put_max_retry_count(N) when is_integer(N) ->
+    erlang:put(max_retry_count, N).
+
+get_max_retry_count() ->
+    Default = 3,
+    erlang:get(max_retry_count, Default).
+
+put_message_expiry_time(T) when is_integer(T) ->
+    erlang:put(default_message_expiry_time, T).
+
+get_message_expiry_time() ->
+    Default = timer:seconds(30),
+    erlang:get(default_message_expiry_time, Default).
