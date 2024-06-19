@@ -129,7 +129,7 @@
                 | {max_inflight, pos_integer()}
                 | {retry_interval, timeout()}
                 | {max_retry_count, non_neg_integer()}
-                | {default_message_expiry_time, non_neg_integer()}
+                | {message_expiry_interval, non_neg_integer()}
                 | {will_topic, iodata()}
                 | {will_payload, iodata()}
                 | {will_retain, boolean()}
@@ -167,8 +167,8 @@
 
 -type(client() :: pid() | atom()).
 
--type(msg_inflight_meta() ::  #{ first_sent_at := erlang:timestamp(),
-                                 last_sent_at := erlang:timestamp(),
+-type(msg_inflight_meta() ::  #{ first_sent_at := pos_integer(),
+                                 last_sent_at := pos_integer(),
                                  retry_count := non_neg_integer()
                                }).
 
@@ -600,8 +600,8 @@ init([{retry_interval, I} | Opts], State) ->
 init([{max_retry_count, N} | Opts], State) when is_integer(N) ->
     put_max_retry_count(N),
     init(Opts, State);
-init([{default_message_expiry_time, T} | Opts], State) when is_integer(T) ->
-    put_message_expiry_time(timer:seconds(T)),
+init([{message_expiry_interval, T} | Opts], State) when is_integer(T) ->
+    put_message_expiry_interval(timer:seconds(T)),
     init(Opts, State);
 init([{bridge_mode, Mode} | Opts], State) when is_boolean(Mode) ->
     init(Opts, State#state{bridge_mode = Mode});
@@ -782,10 +782,10 @@ connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
     Msg1 = Msg#mqtt_msg{packet_id = PacketId},
     case send(Msg1, State) of
         {ok, NewState} ->
-            Now = os:timestamp(),
+            Now = now_ts(),
             Meta = #{first_sent_at => Now, last_sent_at => Now, retry_count => 0},
             Inflight1 = maps:put(PacketId, {publish, Msg1, Meta}, Inflight),
-            State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
+            State1 = ensure_expiry_timer(ensure_retry_timer(NewState#state{inflight = Inflight1})),
             Actions = [{reply, From, {ok, PacketId}}],
             case is_inflight_full(State1) of
                 true -> {next_state, inflight_full, State1, Actions};
@@ -853,7 +853,7 @@ connected(cast, ?PUBREC_PACKET(PacketId, _ReasonCode), State = #state{inflight =
     Inflight = maybe_upgrade_inflight_data_structure(Inflight0),
     NState = case maps:find(PacketId, Inflight) of
                  {ok, {publish, _Msg, _Meta}} ->
-                     Now = os:timestamp(),
+                     Now = now_ts(),
                      Meta = #{first_sent_at => Now,
                               last_sent_at => Now,
                               retry_count => 0
@@ -965,6 +965,16 @@ connected(info, {timeout, TRef, retry}, State = #state{retry_timer = TRef,
         false -> retry_send(State#state{retry_timer = undefined})
     end;
 
+connected(info, {timeout, _TRef, expiry}, State = #state{inflight = Inflight}) ->
+    clean_expiry_timer(),
+    case maps:size(Inflight) == 0 of
+        true  ->
+            {keep_state, State};
+        false ->
+            State1 = expiry_inflight_msgs(now_ts(), State),
+            ensure_expiry_timer(State1)
+    end;
+
 connected(EventType, EventContent, Data) ->
     handle_event(EventType, EventContent, connected, Data).
 
@@ -1071,8 +1081,9 @@ maybe_upgrade_inflight_data_structure(Inflight) ->
         {_, {_, _, OsTimestamp}, _Iter1} when is_tuple(OsTimestamp) ->
             maps:map(
                 fun(_Key, {Type, Msg, Ts}) ->
-                    Meta = #{first_sent_at => Ts,
-                             last_sent_at  => Ts,
+                    Ms = timestamp_to_ms(Ts),
+                    Meta = #{first_sent_at => Ms,
+                             last_sent_at  => Ms,
                              retry_count   => 0
                             },
                     {Type, Msg, Meta}
@@ -1117,10 +1128,10 @@ delete_inflight_when_full(Packet, State) ->
     end.
 
 expiry_inflight_msgs(Now, State = #state{inflight = Inflight}) ->
-    ExpiryTime = get_message_expiry_time(),
     Fun = fun(PacketId, {Type, Msg, Meta}, Acc) ->
               SentAt = maps:get(first_sent_at, Meta),
-              case timer:now_diff(Now, SentAt) div 1000 of
+              ExpiryTime = message_expiry_interval({Type, Msg, Meta}),
+              case Now - SentAt of
                   Diff when Diff >= ExpiryTime ->
                       Acc#{PacketId => {Type, Msg, Meta}};
                   _ ->
@@ -1138,6 +1149,11 @@ expiry_inflight_msgs(Now, State = #state{inflight = Inflight}) ->
             ),
             delete_expired_inflight_msgs(ExpiredMsgs1, State)
     end.
+
+message_expiry_interval({publish, #mqtt_msg{props = Props}, _Meta}) when is_map(Props) ->
+    maps:get('Message-Expiry-Interval', Props, get_message_expiry_interval());
+message_expiry_interval(_) ->
+    get_message_expiry_interval().
 
 delete_expired_inflight_msgs([], State) ->
     State;
@@ -1228,6 +1244,25 @@ ensure_ack_timer(State = #state{ack_timer     = undefined,
     State#state{ack_timer = erlang:start_timer(Timeout, self(), ack)};
 ensure_ack_timer(State) -> State.
 
+ensure_expiry_timer(State) ->
+    Interval = get_message_expiry_interval() + 1000,
+    case erlang:get(expiry_timer) of
+        undefined ->
+            TRef = erlang:start_timer(Interval, self(), expiry),
+            erlang:put(expiry_timer, TRef);
+        _TRef ->
+            ok
+    end,
+    State.
+
+clean_expiry_timer() ->
+    case erlang:get(expiry_timer) of
+        undefined -> ok;
+        TRef ->
+            erlang:cancel_timer(TRef),
+            erlang:erase(expiry_timer)
+    end.
+
 ensure_retry_timer(State = #state{retry_interval = Interval}) ->
     do_ensure_retry_timer(Interval, State).
 
@@ -1240,15 +1275,14 @@ do_ensure_retry_timer(_Interval, State) ->
 retry_send(State = #state{inflight = Inflight}) ->
     SortFun = fun({_, _, #{last_sent_at := Ts1}}, {_, _, #{last_sent_at := Ts2}}) -> Ts1 < Ts2 end,
     Msgs = lists:sort(SortFun, maps:values(Inflight)),
-    retry_send(Msgs, os:timestamp(), State).
+    retry_send(Msgs, now_ts(), State).
 
-retry_send([], Now, State) ->
-    State1 = expiry_inflight_msgs(Now, State),
-    {keep_state, ensure_retry_timer(State1)};
+retry_send([], _Now, State) ->
+    {keep_state, ensure_retry_timer(State)};
 retry_send([{Type, Msg, Meta} | Msgs], Now, State = #state{retry_interval = Interval}) ->
     Ts = maps:get(last_sent_at, Meta),
     Tried = maps:get(retry_count, Meta),
-    Diff = timer:now_diff(Now, Ts) div 1000, %% micro -> ms
+    Diff = Now - Ts,
     case {Tried >= get_max_retry_count(), (Diff >= Interval)} of
         {true, _} ->
             retry_send(Msgs, Now, State);
@@ -1290,6 +1324,12 @@ deliver(#mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = PacketId,
             client_pid => self()},
     ok = eval_msg_handler(State, publish, Msg),
     State.
+
+now_ts() ->
+    erlang:system_time(millisecond).
+
+timestamp_to_ms(Ts) ->
+    timer:now_diff(Ts, {0, 0, 0}) div 1000.
 
 eval_msg_handler(#state{msg_handler = ?NO_MSG_HDLR,
                         owner = Owner},
@@ -1483,7 +1523,7 @@ reason_code_name(_Code) -> unknown_error.
 %% Added for 1.2.3.4
 %%
 %% Due to compatibility issues, we can't directly modify the structure of the state to store
-%% these newly added configurations. So we put `max_retry_count` and `default_message_expiry_time`
+%% these newly added configurations. So we put `max_retry_count` and `message_expiry_interval`
 %% into the process dictionary temporarily.
 put_max_retry_count(N) when is_integer(N) ->
     erlang:put(max_retry_count, N).
@@ -1495,12 +1535,12 @@ get_max_retry_count() ->
         Value     -> Value
     end.
 
-put_message_expiry_time(T) when is_integer(T) ->
-    erlang:put(default_message_expiry_time, T).
+put_message_expiry_interval(T) when is_integer(T) ->
+    erlang:put(message_expiry_interval, T).
 
-get_message_expiry_time() ->
+get_message_expiry_interval() ->
     Default = timer:seconds(30),
-    case erlang:get(default_message_expiry_time) of
+    case erlang:get(message_expiry_interval) of
         undefined -> Default;
         Value     -> Value
     end.
