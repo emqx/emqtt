@@ -790,6 +790,7 @@ connected({call, From}, {publish, Msg = #mqtt_msg{qos = QoS}},
             Meta = #{first_sent_at => Now, last_sent_at => Now, retry_count => 0},
             Inflight1 = maps:put(PacketId, {publish, Msg1, Meta}, Inflight),
             ensure_delivery_timer(),
+            set_inflight_cnt(maps:size(Inflight1)),
             State1 = ensure_retry_timer(NewState#state{inflight = Inflight1}),
             Actions = [{reply, From, {ok, PacketId}}],
             case is_inflight_full(State1) of
@@ -1111,7 +1112,9 @@ delete_inflight(?PUBACK_PACKET(PacketId, ReasonCode, Properties),
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
-            State#state{inflight = maps:remove(PacketId, Inflight)};
+            Inflight1 = maps:remove(PacketId, Inflight),
+            set_inflight_cnt(maps:size(Inflight1)),
+            State#state{inflight = Inflight1};
         error ->
             ?LOG(warning, "Unexpected PUBACK: ~p", [PacketId], State),
             State
@@ -1123,7 +1126,9 @@ delete_inflight(?PUBCOMP_PACKET(PacketId, ReasonCode, Properties),
             ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                                    reason_code => ReasonCode,
                                                    properties  => Properties}),
-            State#state{inflight = maps:remove(PacketId, Inflight)};
+            Inflight1 = maps:remove(PacketId, Inflight),
+            set_inflight_cnt(maps:size(Inflight1)),
+            State#state{inflight = Inflight1};
         error ->
             ?LOG(warning, "Unexpected PUBCOMP Packet: ~p", [PacketId], State),
             State
@@ -1178,7 +1183,9 @@ delete_expired_inflight_msgs(
                                            reason_code_name => expired,
                                            properties  => #{}}),
     inc_delivery_timeout(),
-    State1 = State#state{inflight = maps:remove(PacketId, Inflight)},
+    Inflight1 = maps:remove(PacketId, Inflight),
+    set_inflight_cnt(maps:size(Inflight1)),
+    State1 = State#state{inflight = Inflight1},
     delete_expired_inflight_msgs(Msgs, State1).
 
 assign_id(?NO_CLIENT_ID, Props) ->
@@ -1550,7 +1557,9 @@ clean_delivery_timer() ->
     end.
 
 collect_stats() ->
-    #{delivery_timeout => get_stats_delivery_timeout()}.
+    #{delivery_timeout => get_stats_delivery_timeout(),
+      inflight_cnt => get_inflight_cnt()
+     }.
 
 get_stats_delivery_timeout() ->
     case erlang:get(delivery_timeout) of
@@ -1560,3 +1569,12 @@ get_stats_delivery_timeout() ->
 
 inc_delivery_timeout() ->
     erlang:put(delivery_timeout, get_stats_delivery_timeout() + 1).
+
+set_inflight_cnt(Count) when is_integer(Count) ->
+    erlang:put(inflight_cnt, Count).
+
+get_inflight_cnt() ->
+    case erlang:get(inflight_cnt) of
+        undefined -> 0;
+        Value -> Value
+    end.
