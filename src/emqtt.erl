@@ -1019,8 +1019,7 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
 
 handle_event(info, {Error, _Sock, Reason}, _StateName, State)
     when Error =:= tcp_error; Error =:= ssl_error ->
-    ?LOG(error, "The connection error occured ~p, reason:~p",
-    [Error, Reason], State),
+    ?LOG(error, "Connection error ~p, reason:~p", [Error, Reason], State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {Closed, _Sock}, _StateName, State)
@@ -1173,9 +1172,9 @@ delete_expired_inflight_msgs(
     case Type of
         publish ->
             #mqtt_msg{topic = Topic} = Msg,
-            ?LOG(warning, "Message ~p expired, topic: ~ts", [PacketId, Topic], State);
+            ?LOG(info, "Message ~p expired, topic: ~ts", [PacketId, Topic], State);
         pubrel ->
-            ?LOG(warning, "Pubrel ~p expired", [PacketId], State)
+            ?LOG(info, "Pubrel ~p expired", [PacketId], State)
     end,
     ok = eval_msg_handler(State, puback, #{packet_id   => PacketId,
                                            %% Treat 16#FF as internal error
@@ -1522,7 +1521,7 @@ put_max_retry_count(N) when is_integer(N) ->
     erlang:put(max_retry_count, N).
 
 get_max_retry_count() ->
-    Default = 0,
+    Default = 3,
     case erlang:get(max_retry_count) of
         undefined -> Default;
         Value     -> Value
