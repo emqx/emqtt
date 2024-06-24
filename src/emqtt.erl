@@ -1522,7 +1522,7 @@ put_max_retry_count(N) when is_integer(N) ->
     erlang:put(max_retry_count, N).
 
 get_max_retry_count() ->
-    Default = 3,
+    Default = 0,
     case erlang:get(max_retry_count) of
         undefined -> Default;
         Value     -> Value
