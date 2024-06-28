@@ -28,8 +28,11 @@
         , update/3
         , delete/2
         , size/1
+        , capacity/1
         , is_full/1
         , is_empty/1
+        , limit/2
+        , trim_overflow/1
         , foreach/2
         , map/2
         , to_retry_list/2
@@ -37,10 +40,12 @@
 
 -type(inflight() :: inflight(req())).
 
--type(inflight(Req) :: #{max_inflight := pos_integer() | infinity,
+-type(inflight(Req) :: #{max_inflight := maximum() | {maximum(), _Limit :: maximum()},
                          sent := sent(Req),
                          seq := seq_no()
                         }).
+
+-type(maximum() :: infinity | pos_integer()).
 
 -type(sent(Req) :: #{id() => {seq_no(), Req}}).
 
@@ -64,11 +69,11 @@ empty(Inflight) ->
     Inflight#{sent := #{}, seq := 1}.
 
 -spec(insert(id(), req(), inflight()) -> error | {ok, inflight()}).
-insert(Id, Req, Inflight = #{max_inflight := Max, sent := Sent, seq := Seq}) ->
-    case maps:size(Sent) >= Max of
-        true ->
+insert(Id, Req, Inflight = #{max_inflight := MI, sent := Sent, seq := Seq}) ->
+    case capacity(MI, Sent) of
+        C when C =< 0 ->
             error;
-        false ->
+        _ ->
             {ok, Inflight#{sent := maps:put(Id, {Seq, Req}, Sent),
                        seq := Seq + 1}}
     end.
@@ -94,10 +99,54 @@ size(#{sent := Sent}) ->
     maps:size(Sent).
 
 -spec(is_full(inflight()) -> boolean()).
-is_full(#{max_inflight := infinity}) ->
-    false;
-is_full(#{max_inflight := Max, sent := Sent}) ->
-    maps:size(Sent) >= Max.
+is_full(Inflight) ->
+    Capacity = capacity(Inflight),
+    Capacity =/= infinity andalso Capacity =< 0.
+
+-spec(limit(_Limit :: pos_integer() | infinity, inflight()) -> inflight()).
+limit(Limit, Inflight = #{max_inflight := {MI, _LimitWas}}) ->
+    Inflight#{max_inflight := {MI, Limit}};
+limit(Limit, Inflight = #{max_inflight := MI}) ->
+    Inflight#{max_inflight := {MI, Limit}}.
+
+-spec(capacity(inflight()) -> integer()).
+capacity(#{max_inflight := MI, sent := Sent}) ->
+    capacity(MI, Sent).
+
+capacity({MI, Limit}, Sent) ->
+    capacity(min(MI, Limit), Sent);
+capacity(infinity, _Sent) ->
+    infinity;
+capacity(Max, Sent) ->
+    Max - maps:size(Sent).
+
+-spec(trim_overflow(inflight()) -> {_Overflow :: [{id(), req()}], inflight()}).
+trim_overflow(Inflight = #{max_inflight := MI, sent := Sent}) ->
+    case capacity(MI, Sent) of
+        Negative when Negative < 0 ->
+            {Overflow, Sent1} = trim_overflow(Sent, -Negative),
+            {Overflow, Inflight#{sent := Sent1}};
+        _ ->
+            {[], Inflight}
+    end.
+
+trim_overflow(Sent, Overflow) ->
+    Reqs = take_requests(maps:iterator(Sent), Overflow),
+    Sent1 = lists:foldl(fun delete_request/2, Sent, Reqs),
+    {Reqs, Sent1}.
+
+delete_request({Id, _Req}, Sent) ->
+    maps:remove(Id, Sent).
+
+take_requests(_It, 0) ->
+    [];
+take_requests(It, N) ->
+    case maps:next(It) of
+        {Id, {_SeqNo, Req}, It1} ->
+            [{Id, Req} | take_requests(It1, N - 1)];
+        none ->
+            []
+    end.
 
 -spec(is_empty(inflight()) -> boolean()).
 is_empty(#{sent := Sent}) ->
@@ -186,6 +235,43 @@ size_full_empty_test() ->
 
     false = emqtt_inflight:is_full(emqtt_inflight:new(infinity)),
     true = emqtt_inflight:is_empty(emqtt_inflight:new(infinity)).
+
+limit_full_empty_test() ->
+    Inflight = emqtt_inflight:new(10),
+    0 = emqtt_inflight:size(Inflight),
+    true = emqtt_inflight:is_empty(Inflight),
+    false = emqtt_inflight:is_full(Inflight),
+
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
+    1 = emqtt_inflight:size(Inflight1),
+    false = emqtt_inflight:is_empty(Inflight1),
+    false = emqtt_inflight:is_full(Inflight1),
+    
+    Inflight2 = emqtt_inflight:limit(1, Inflight1),
+    false = emqtt_inflight:is_empty(Inflight2),
+    true = emqtt_inflight:is_full(Inflight2),
+    error = emqtt_inflight:insert(2, req2, Inflight2),
+    
+    Inflight3 = emqtt_inflight:limit(infinity, Inflight2),
+    false = emqtt_inflight:is_full(Inflight3),
+    {ok, Inflight4} = emqtt_inflight:insert(2, req2, Inflight3),
+    8 = emqtt_inflight:capacity(Inflight4).
+
+limit_trim_test() ->
+    Inflight = emqtt_inflight:new(infinity),
+    false = emqtt_inflight:is_full(Inflight),
+
+    {ok, Inflight1} = emqtt_inflight:insert(1, req1, Inflight),
+    {ok, Inflight2} = emqtt_inflight:insert(2, req2, Inflight1),
+    {ok, Inflight3} = emqtt_inflight:insert(3, req3, Inflight2),
+    {ok, Inflight4} = emqtt_inflight:insert(4, req4, Inflight3),
+    Inflight5 = emqtt_inflight:limit(2, Inflight4),
+    true = emqtt_inflight:is_full(Inflight5),
+    -2 = emqtt_inflight:capacity(Inflight5),
+    {Overflow, Inflight6} = emqtt_inflight:trim_overflow(Inflight5),
+    [_, _] = Overflow,
+    true = emqtt_inflight:is_full(Inflight6),
+    0 = emqtt_inflight:capacity(Inflight6).
 
 foreach_test() ->
     emqtt_inflight:foreach(
