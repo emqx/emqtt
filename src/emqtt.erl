@@ -267,9 +267,7 @@
 
 -type(expire_at() :: non_neg_integer() | infinity). %% in millisecond
 
--type(pendings() :: #{requests := queue:queue(publish_req()),
-                      count := non_neg_integer()
-                     }).
+-type(pendings() :: queue:queue(publish_req())).
 
 -type(publish_success() :: ok | {ok, publish_reply()}).
 
@@ -739,9 +737,7 @@ init([Options]) ->
                           reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
                           qoe             = false,
                           last_packet_id  = 1,
-                          pendings        = #{requests => queue:new(),
-                                              count => 0
-                                             }
+                          pendings        = queue:new()
                          })),
     {ok, initialized, init_parse_state(State)}.
 
@@ -1588,7 +1584,7 @@ maybe_shoot(State0 = #state{pendings = Pendings, inflight = Inflight}) ->
     end.
 
 shoot(State = #state{pendings = Pendings}) ->
-    {PubReq, NPendings} = dequeue_publish_req(Pendings),
+    {{value, PubReq}, NPendings} = dequeue_publish_req(Pendings),
     shoot(PubReq, State#state{pendings = NPendings}).
 
 shoot(?PUB_REQ(Msg, default, ExpireAt, Callback), State) ->
@@ -1622,18 +1618,16 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
             maybe_shutdown(Reason, State)
     end.
 
-is_pendings_empty(_Pendings = #{count := Cnt}) ->
-    Cnt =< 0 .
+is_pendings_empty(Pendings) ->
+    queue:is_empty(Pendings).
 
-enqueue_publish_req(PubReq, Pendings = #{requests := Reqs, count := Cnt}) ->
-    Pendings#{requests := queue:in(PubReq, Reqs), count := Cnt + 1}.
+enqueue_publish_req(PubReq, Pendings) ->
+    queue:in(PubReq, Pendings).
 
 %% the previous decision ensures that the length of the queue
 %% is greater than 0
-dequeue_publish_req(Pendings = #{requests := Reqs, count := Cnt}) when Cnt > 0 ->
-    {{value, PubReq}, NReqs} = queue:out(Reqs),
-    {PubReq,
-     Pendings#{requests := NReqs, count := Cnt - 1}}.
+dequeue_publish_req(Pendings) ->
+    queue:out(Pendings).
 
 ack_inflight(Via,
   ?PUBACK_PACKET(PacketId, ReasonCode, Properties),
@@ -1693,21 +1687,19 @@ ack_inflight(Via,
             State
      end.
 
-drop_expired(Pendings = #{count := 0}) ->
-    Pendings;
 drop_expired(Pendings) ->
-    drop_expired(Pendings, now_ts()).
+    case queue:is_empty(Pendings) of
+        true -> Pendings;
+        false -> drop_expired(Pendings, now_ts())
+    end.
 
-drop_expired(Pendings = #{count := 0}, _Now) ->
-    Pendings;
-drop_expired(Pendings = #{requests := Reqs}, Now) ->
-    {value, ?PUB_REQ(_Msg, _Via, ExpireAt, Callback)} = queue:peek(Reqs),
-    case Now > ExpireAt of
-        true ->
+drop_expired(Pendings, Now) ->
+    case queue:peek(Pendings) of
+        {value, ?PUB_REQ(_Msg, _Via, ExpireAt, Callback)} when Now > ExpireAt ->
             {_Dropped, NPendings} = dequeue_publish_req(Pendings),
             eval_callback_handler({error, timeout}, Callback),
             drop_expired(NPendings, Now);
-        false ->
+        _ ->
             Pendings
     end.
 
@@ -1966,11 +1958,10 @@ reply_all_inflight_reqs(Reason, #state{inflight = Inflight}) ->
 
 reply_all_pendings_reqs(Reason, #state{pendings = Pendings}) ->
     %% reply error to all pendings caller
-    Reqs = maps:get(requests, Pendings),
     lists:foreach(
           fun(?PUB_REQ(_, _, _, Callback)) ->
                   eval_callback_handler({error, Reason}, Callback)
-          end, queue:to_list(Reqs)).
+          end, queue:to_list(Pendings)).
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
