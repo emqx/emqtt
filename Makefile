@@ -1,6 +1,8 @@
 CT_NODE_NAME = ct@127.0.0.1
+CT_EMQX_PROFILE = emqx
 
 REBAR ?= $(or $(shell which rebar3 2>/dev/null),$(CURDIR)/rebar3)
+REBAR_TEST = env PROFILE=$(CT_EMQX_PROFILE) $(REBAR)
 
 REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.19.0/rebar3
 
@@ -34,13 +36,13 @@ xref:
 	$(REBAR) xref
 
 eunit: compile
-	$(REBAR) eunit verbose=true
+	$(REBAR_TEST) eunit --verbose
 
 ct: compile
-	$(REBAR) as test ct -v --name $(CT_NODE_NAME)
+	$(REBAR_TEST) as test ct --verbose --name $(CT_NODE_NAME)
 
 cover:
-	$(REBAR) cover
+	$(REBAR_TEST) cover
 
 test: eunit ct cover
 
