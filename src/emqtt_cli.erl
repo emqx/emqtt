@@ -177,8 +177,11 @@ main(PubSubOrJustConnect, Opts0) ->
                     disconnect(Client);
                 sub ->
                     subscribe(Client, NOpts),
-                    KeepAlive = maps:get('Server-Keep-Alive', Properties, get_value(keepalive, NOpts)) * 1000,
-                    timer:send_interval(KeepAlive, ping),
+                    KeepAlive = case Properties of
+                        #{'Server-Keep-Alive' := I} -> I;
+                        _ -> get_value(keepalive, NOpts)
+                    end,
+                    timer:send_interval(KeepAlive * 1000, ping),
                     receive_loop(Client, Print)
             end;
         {error, Reason} ->
