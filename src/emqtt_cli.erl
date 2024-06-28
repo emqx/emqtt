@@ -50,7 +50,9 @@
         ]).
 
 -define(CONN_LONG_OPTS,
-        [{will_topic, undefined, "will-topic", string,
+        [{max_inflight, undefined, "max-inflight", {integer, infinity},
+          "Maximum number of yet unacked QoS>0 messages allowed to be in-flight"},
+         {will_topic, undefined, "will-topic", string,
           "Topic for will message"},
          {will_payload, undefined, "will-payload", string,
           "Payload in will message"},
@@ -299,6 +301,10 @@ parse_cmd_opts([{password, Password} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{password, list_to_binary(Password)} | Acc]);
 parse_cmd_opts([{clientid, Clientid} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{clientid, list_to_binary(Clientid)} | Acc]);
+parse_cmd_opts([{max_inflight, infinity} | Opts], Acc) ->
+    parse_cmd_opts(Opts, Acc);
+parse_cmd_opts([{max_inflight, N} | Opts], Acc) ->
+    parse_cmd_opts(Opts, [{max_inflight, N} | Acc]);
 parse_cmd_opts([{will_topic, Topic} | Opts], Acc) ->
     parse_cmd_opts(Opts, [{will_topic, list_to_binary(Topic)} | Acc]);
 parse_cmd_opts([{will_payload, Payload} | Opts], Acc) ->
