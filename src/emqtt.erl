@@ -1051,14 +1051,17 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                           session_present = SessPresent},
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
-    Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
-    case take_call({connect, Via}, State3) of
-        {value, #call{from = From}, State4} ->
-            {next_state, connected, State4, [{reply, From, Reply} | Retry]};
+    ReceiveMaximum = maps:get('Receive-Maximum', AllProps1, infinity),
+    Inflight1 = emqtt_inflight:limit(ReceiveMaximum, Inflight),
+    State4 = State3#state{inflight = Inflight1},
+    Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight1)],
+    case take_call({connect, Via}, State4) of
+        {value, #call{from = From}, State5} ->
+            {next_state, connected, State5, [{reply, From, Reply} | Retry]};
         false ->
             %% unkown caller, internally initiated re-connect
-            ok = eval_msg_handler(State3, connected, Properties),
-            {next_state, connected, State3, Retry}
+            ok = eval_msg_handler(State4, connected, Properties),
+            {next_state, connected, State4, Retry}
     end;
 
 waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
@@ -1323,7 +1326,8 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
                            pending_calls = timeout_calls(Timeout, Calls)},
     {keep_state, ensure_ack_timer(NewState)};
 
-connected(info, immediate_retry, State = #state{clean_start = false, inflight = Inflight}) ->
+connected(info, immediate_retry, State = #state{clean_start = false}) ->
+    State1 = #state{inflight = Inflight} = drop_overflow(State),
     ?LOG(debug, "replay_all_inflight_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
     Now = now_ts(),
     Pred = fun(_, _) -> true end,
@@ -1335,7 +1339,7 @@ connected(info, immediate_retry, State = #state{clean_start = false, inflight = 
     NState = retry_send(
                Now,
                emqtt_inflight:to_retry_list(Pred, Inflight1),
-               State#state{inflight = Inflight1}
+               State1#state{inflight = Inflight1}
               ),
     {keep_state, NState};
 
@@ -1832,6 +1836,16 @@ sent_at(?INFLIGHT_PUBLISH(_Via, _, SentAt, _, _)) ->
     SentAt;
 sent_at(?INFLIGHT_PUBREL(_Via, _, SentAt, _)) ->
     SentAt.
+
+drop_overflow(State = #state{inflight = Inflight}) ->
+    {Overflow, Inflight1} = emqtt_inflight:trim_overflow(Inflight),
+    lists:foreach(
+        fun({_PacketId, ?INFLIGHT_PUBLISH(_Via, _Msg, _SentAt, _ExpireAt, Callback)}) ->
+                eval_callback_handler({error, dropped}, Callback);
+           ({_PacketId, _InflightPubReq}) ->
+                ok
+        end, Overflow),
+    State#state{inflight = Inflight1}.
 
 retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
     try
