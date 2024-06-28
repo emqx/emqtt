@@ -1361,10 +1361,9 @@ connected(info, ?PUB_REQ(#mqtt_msg{qos = ?QOS_0}, _Via, _ExpireAt, _Callback) = 
     shoot(PubReq, State0);
 
 connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _Via, _ExpireAt, _Callback) = PubReq,
-          State0 = #state{pendings = Pendings0})
+          State)
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
-    Pendings = enqueue_publish_req(PubReq, Pendings0),
-    maybe_shoot(State0#state{pendings = Pendings});
+    maybe_shoot(PubReq, State);
 
 connected(info, maybe_shoot, State) ->
     maybe_shoot(State);
@@ -1569,15 +1568,22 @@ should_ping(ConnMod, Sock, _LastPktId) ->
             Error
     end.
 
+maybe_shoot(PubReq, State = #state{pendings = Pendings0, inflight = Inflight}) ->
+    case emqtt_inflight:is_full(Inflight) of
+        false ->
+            shoot(PubReq, State);
+        true ->
+            Pendings = enqueue_publish_req(PubReq, Pendings0),
+            {keep_state, State#state{pendings = Pendings}}
+    end.
+
 maybe_shoot(State0 = #state{pendings = Pendings, inflight = Inflight}) ->
     NPendings = drop_expired(Pendings),
     State = State0#state{pendings = NPendings},
-    case {is_pendings_empty(NPendings), emqtt_inflight:is_full(Inflight)} of
-        {false, false}->
-            shoot(State#state{pendings = NPendings});
-        {true, _} ->
-            {keep_state, State};
-        {_, true} ->
+    case is_pendings_empty(NPendings) orelse emqtt_inflight:is_full(Inflight) of
+        false ->
+            shoot(State);
+        true ->
             {keep_state, State}
     end.
 
