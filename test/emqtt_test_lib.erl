@@ -82,12 +82,11 @@ ensure_quic_listener(Name, BindPort) ->
 ensure_listener(Type, Name, BindAddr, BindPort) ->
     Type =:= quic andalso application:ensure_all_started(quicer),
     BaseConf = #{
-                 acceptors => 16,
-                 bind => {BindAddr, BindPort},
                  enable => true,
-                 idle_timeout => 15000,
-                 limiter => #{},
+                 bind => {BindAddr, BindPort},
+                 acceptors => 16,
                  max_connections => 1024000,
+                 limiter => #{},
                  mountpoint => <<>>,
                  zone => default,
                  proxy_protocol => false,
@@ -135,7 +134,8 @@ listener_conf(ws) ->
         mqtt_piggyback => multiple,
         proxy_address_header => "x-forwarded-for",
         proxy_port_header => "x-forwarded-port",
-        supported_subprotocols => ["mqtt","mqtt-v3","mqtt-v3.1.1","mqtt-v5"]}
+        supported_subprotocols => ["mqtt","mqtt-v3","mqtt-v3.1.1","mqtt-v5"],
+        validate_utf8 => true}
      };
 listener_conf(_) -> #{}.
 
