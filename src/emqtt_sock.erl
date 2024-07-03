@@ -33,7 +33,7 @@
 
 -type(sockname() :: {inet:ip_address(), inet:port_number()}).
 
--type(option() :: gen_tcp:connect_option() | {ssl_opts, [ssl:ssl_option()]}).
+-type(option() :: gen_tcp:connect_option() | {ssl_opts, [ssl:tls_option()]}).
 
 -export_type([socket/0, option/0]).
 

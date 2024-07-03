@@ -140,6 +140,12 @@
                          disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
 
+-if(?OTP_RELEASE < 27).
+-type tls_options() :: [ssl:tls_option()].
+-else.
+-type tls_options() :: [ssl:ssl_option()].
+-endif.
+
 -type(option() :: {name, atom()}
                 | {owner, pid()}
                 | {msg_handler, msg_handler()}
@@ -148,7 +154,7 @@
                 | {port, inet:port_number()}
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
-                | {ssl_opts, [ssl:ssl_option()]}
+                | {ssl_opts, tls_options()}
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
@@ -1767,7 +1773,7 @@ process_pubrel(Via, ?PUBREL_PACKET(PacketId, _ReasonCode = 0),
 process_pubrel(Via, ?PUBREL_PACKET(PacketId, ReasonCode), State) ->
     %% AutoAck = true | false
     %% User does not expect unsuccesful PUBREL, so just log it.
-    ?LOG(warning, "unsuccessful_PUBREL", 
+    ?LOG(warning, "unsuccessful_PUBREL",
       #{packet_id => PacketId,
         reason_code => ReasonCode,
         reason_code_name => reason_code_name(ReasonCode),

@@ -375,7 +375,7 @@ option() = {name, atom()} |
            {port, inet:port_number()} |
            {tcp_opts, [gen_tcp:option()]} |
            {ssl, boolean()} |
-           {ssl_opts, [ssl:ssl_option()]} |
+           {ssl_opts, [ssl:tls_option()]} |
            {ws_path, string()} |
            {connect_timeout, pos_integer()} |
            {bridge_mode, boolean()} |
