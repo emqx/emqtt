@@ -82,7 +82,7 @@
 
 -export([subscriptions/1]).
 
--export([info/1, stop/1]).
+-export([info/1, info/2, stop/1]).
 
 %% For test cases
 -export([ pause/1
@@ -686,6 +686,12 @@ subscriptions(Client) ->
 info(Client) ->
     gen_statem:call(Client, info).
 
+-spec(info(client(), n_queued) -> _NumQueuedMessages :: non_neg_integer();
+          (client(), n_inflight) -> _NumInflightMessages :: non_neg_integer();
+          (client(), max_inflight) -> _MaxInflightMessages :: pos_integer() | infinity).
+info(Client, Attr) ->
+    gen_statem:call(Client, {info, Attr}).
+
 stop(Client) ->
     gen_statem:call(Client, stop).
 
@@ -1125,6 +1131,14 @@ connected({call, From}, subscriptions, #state{subscriptions = Subscriptions}) ->
 
 connected({call, From}, info, State) ->
     Info = lists:zip(record_info(fields, state), tl(tuple_to_list(State))),
+    {keep_state_and_data, [{reply, From, Info}]};
+
+connected({call, From}, {info, Attr}, State) ->
+    Info = case Attr of
+               n_queued -> queue:len(State#state.pendings);
+               n_inflight -> emqtt_inflight:size(State#state.inflight);
+               max_inflight -> emqtt_inflight:maxsize(State#state.inflight)
+           end,
     {keep_state_and_data, [{reply, From, Info}]};
 
 connected({call, From}, pause, State) ->

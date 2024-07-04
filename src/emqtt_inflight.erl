@@ -28,6 +28,7 @@
         , update/3
         , delete/2
         , size/1
+        , maxsize/1
         , capacity/1
         , is_full/1
         , is_empty/1
@@ -98,6 +99,10 @@ delete(Id, Inflight = #{sent := Sent}) ->
 size(#{sent := Sent}) ->
     maps:size(Sent).
 
+-spec(maxsize(inflight()) -> pos_integer() | infinity).
+maxsize(#{max_inflight := MI}) ->
+    effective_max_inflight(MI).
+
 -spec(is_full(inflight()) -> boolean()).
 is_full(Inflight) ->
     Capacity = capacity(Inflight),
@@ -113,12 +118,17 @@ limit(Limit, Inflight = #{max_inflight := MI}) ->
 capacity(#{max_inflight := MI, sent := Sent}) ->
     capacity(MI, Sent).
 
-capacity({MI, Limit}, Sent) ->
-    capacity(min(MI, Limit), Sent);
 capacity(infinity, _Sent) ->
     infinity;
+capacity(MI, Sent) when is_tuple(MI) ->
+    capacity(effective_max_inflight(MI), Sent);
 capacity(Max, Sent) ->
     Max - maps:size(Sent).
+
+effective_max_inflight({MI, Limit}) ->
+    min(MI, Limit);
+effective_max_inflight(MI) ->
+    MI.
 
 -spec(trim_overflow(inflight()) -> {_Overflow :: [{id(), req()}], inflight()}).
 trim_overflow(Inflight = #{max_inflight := MI, sent := Sent}) ->
@@ -239,6 +249,7 @@ size_full_empty_test() ->
 limit_full_empty_test() ->
     Inflight = emqtt_inflight:new(10),
     0 = emqtt_inflight:size(Inflight),
+    10 = emqtt_inflight:maxsize(Inflight),
     true = emqtt_inflight:is_empty(Inflight),
     false = emqtt_inflight:is_full(Inflight),
 
@@ -248,6 +259,7 @@ limit_full_empty_test() ->
     false = emqtt_inflight:is_full(Inflight1),
     
     Inflight2 = emqtt_inflight:limit(1, Inflight1),
+    1 = emqtt_inflight:maxsize(Inflight2),
     false = emqtt_inflight:is_empty(Inflight2),
     true = emqtt_inflight:is_full(Inflight2),
     error = emqtt_inflight:insert(2, req2, Inflight2),
