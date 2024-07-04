@@ -1051,6 +1051,11 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                           session_present = SessPresent},
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
+    %% NOTE
+    %% Server is supposedly permitted to change `Receive-Maximum` for each new connection.
+    %% This is fine for the initial connection, but for reconnections, it's not clear what
+    %% to do if the `Receive-Maximum` is reduced and is now less than the inflight size
+    %% (see `connected(info, immediate_retry, ...)` below).
     ReceiveMaximum = maps:get('Receive-Maximum', AllProps1, infinity),
     Inflight1 = emqtt_inflight:limit(ReceiveMaximum, Inflight),
     State4 = State3#state{inflight = Inflight1},
@@ -1327,6 +1332,16 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
     {keep_state, ensure_ack_timer(NewState)};
 
 connected(info, immediate_retry, State = #state{clean_start = false}) ->
+    %% NOTE
+    %% Dropping *random* inflight messages on the floor if the inflight window now
+    %% contains more messages than the current effective max inflight size. This
+    %% is incorrect, strictly speaking, because some of the dropped messages may
+    %% have actually reached the server, and would be acked soon.
+    %% TODO
+    %% Ideally, in that case we should split off "overflow" part of the inflight
+    %% window into a separate queue, and retry those messages after the non-overflow
+    %% part has been resent, while also draining it if there are matching acks.
+    %% Isn't worth the trouble as we expect this situation to be extremely rare.
     State1 = #state{inflight = Inflight} = drop_overflow(State),
     ?LOG(debug, "replay_all_inflight_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
     Now = now_ts(),
@@ -1839,6 +1854,8 @@ sent_at(?INFLIGHT_PUBREL(_Via, _, SentAt, _)) ->
 
 drop_overflow(State = #state{inflight = Inflight}) ->
     {Overflow, Inflight1} = emqtt_inflight:trim_overflow(Inflight),
+    Overflow =/= [] andalso
+        ?LOG(debug, "dropped_inflight_overflow_messages", #{dropped => Overflow}, State),
     lists:foreach(
         fun({_PacketId, ?INFLIGHT_PUBLISH(_Via, _Msg, _SentAt, _ExpireAt, Callback)}) ->
                 eval_callback_handler({error, dropped}, Callback);
