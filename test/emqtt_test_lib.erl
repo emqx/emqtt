@@ -21,6 +21,7 @@
         , ensure_test_module/1
         , ensure_listener/4
         , ensure_quic_listener/2
+        , is_tcp_server_available/2
         , all/1
         , has_quic/0
         ]).
@@ -54,6 +55,10 @@ start_emqx() ->
 stop_emqx() ->
     ensure_test_module(emqx_common_test_helpers),
     emqx_common_test_helpers:stop_apps([]).
+
+is_tcp_server_available(Host, Port) ->
+    ensure_test_module(emqx_common_test_helpers),
+    emqx_common_test_helpers:is_tcp_server_available(Host, Port).
 
 -spec ensure_test_module(M::atom()) -> ok.
 ensure_test_module(M) ->

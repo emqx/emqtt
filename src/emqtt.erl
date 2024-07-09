@@ -173,7 +173,8 @@
                 | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
-                | {nst,  binary()}).
+                | {nst,  binary()}
+                | {custom_auth_callbacks, custom_auth_callbacks()}).
 
 -type(topic() :: binary()).
 -type(payload() :: iodata()).
@@ -201,6 +202,15 @@
 
 -type(client() :: pid() | atom()).
 
+-type(custom_auth_state() :: term()).
+-type(custom_auth_handle_fn() ::
+        fun((custom_auth_state(), _Reason :: atom(), properties()) ->
+              {continue, _OutAuthPacket, custom_auth_state()}
+            | {stop, _Reason :: term()})).
+-type(custom_auth_callbacks() :: #{
+    init := fun(() -> custom_auth_state()),
+    handle_auth := custom_auth_handle_fn()
+}).
 
 %% 'Via' field add ability of multi stream support for QUIC transport
 %% For TCP based it should be always 'default'
@@ -872,6 +882,12 @@ init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binar
     init(Opts, State#state{sock_opts = [{nst, Ticket} | SockOpts]});
 init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
     init(Opts, State#state{qoe = IsReportQoE});
+init([{custom_auth_callbacks, #{init := InitFn, handle_auth := HandleAuthFn}} | Opts], State) when is_function(InitFn, 0), is_function(HandleAuthFn, 3) ->
+    %% HandleAuthFn :: fun((State, Reason, Props) -> {continue, OutPacket, State} | {stop, Reason}).
+    AuthState = InitFn(),
+    Extra0 = State#state.extra,
+    Extra = Extra0#{auth_cb => #{init => InitFn, handle_auth => HandleAuthFn, state => AuthState}},
+    init(Opts, State#state{extra = Extra});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -1076,6 +1092,26 @@ waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Reply}]};
         false when ?NEED_RECONNECT(Re) -> next_reconnect(State);
         false -> {stop, connack_error}
+    end;
+
+waiting_for_connack(cast, {?AUTH_PACKET(ReasonCode,
+                                        Properties), Via},
+                    State0 = #state{proto_ver = ProtoVer, socket = Via,
+                                   extra = #{auth_cb := #{} = AuthCb} = Extra0}) ->
+    #{handle_auth := HandleAuthFn, state := AuthState0} = AuthCb,
+    Reason = reason_code_name(ReasonCode, ProtoVer),
+    case HandleAuthFn(AuthState0, Reason, Properties) of
+        {continue, OutPacket, AuthState} ->
+            Extra = Extra0#{auth_cb := AuthCb#{state := AuthState}},
+            State1 = State0#state{extra = Extra},
+            case send(Via, OutPacket, State1) of
+                {ok, State} ->
+                    {keep_state, State};
+                {error, _} = Error ->
+                    {stop, Error}
+            end;
+        {stop, StopReason} ->
+            {stop, StopReason}
     end;
 
 waiting_for_connack({call, From}, status, _State) ->
@@ -1767,7 +1803,7 @@ process_pubrel(Via, ?PUBREL_PACKET(PacketId, _ReasonCode = 0),
 process_pubrel(Via, ?PUBREL_PACKET(PacketId, ReasonCode), State) ->
     %% AutoAck = true | false
     %% User does not expect unsuccesful PUBREL, so just log it.
-    ?LOG(warning, "unsuccessful_PUBREL", 
+    ?LOG(warning, "unsuccessful_PUBREL",
       #{packet_id => PacketId,
         reason_code => ReasonCode,
         reason_code_name => reason_code_name(ReasonCode),
