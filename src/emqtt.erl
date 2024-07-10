@@ -1101,9 +1101,10 @@ waiting_for_connack(cast, {?AUTH_PACKET(ReasonCode,
     #{handle_auth := HandleAuthFn, state := AuthState0} = AuthCb,
     Reason = reason_code_name(ReasonCode, ProtoVer),
     case HandleAuthFn(AuthState0, Reason, Properties) of
-        {continue, OutPacket, AuthState} ->
+        {continue, {OutReasonCode, OutProps}, AuthState} ->
             Extra = Extra0#{auth_cb := AuthCb#{state := AuthState}},
             State1 = State0#state{extra = Extra},
+            OutPacket = ?AUTH_PACKET(OutReasonCode, OutProps),
             case send(Via, OutPacket, State1) of
                 {ok, State} ->
                     {keep_state, State};

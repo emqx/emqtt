@@ -74,8 +74,7 @@ auth_handle(AuthState0, Reason, Props) ->
             OutProps = #{ 'Authentication-Method' => <<"SCRAM-SHA-512">>
                         , 'Authentication-Data' => ClientFinalMessage
                         },
-            OutPacket = ?AUTH_PACKET(?RC_CONTINUE_AUTHENTICATION, OutProps),
-            {continue, OutPacket, AuthState};
+            {continue, {?RC_CONTINUE_AUTHENTICATION, OutProps}, AuthState};
         _ ->
             {stop, protocol_error}
     end.
