@@ -580,7 +580,9 @@ Maximum time interval that is permitted to elapse between the point at which the
 
 `{max_inflight, MaxInflight}`
 
-Max number of QoS 1 and QoS 2 packets in flight. In other words, the number of packets that were sent but not yet acked. Defaults to `infinity`, means no limit.
+Max number of QoS 1 and QoS 2 packets in flight. In other words, the number of packets that were sent but not yet acked. Defaults to `infinity`, which means there's no hard limit. However, Server may have its own idea and advertise it through the `Receive-Maximum` property in a `CONNACK` packet. In that case the lesser of the two values will act as the limit.
+
+Once inflight window is full, messages will be queued in the Client process and sent when slots in the inflight window become available. There's no limit on the queue size, so flow control measures and/or setting reasonable publish timeouts are recommended if you expect the Server's throughput to be insufficient.
 
 `{retry_interval, RetryInterval}`
 

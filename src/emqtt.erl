@@ -82,7 +82,7 @@
 
 -export([subscriptions/1]).
 
--export([info/1, stop/1]).
+-export([info/1, info/2, stop/1]).
 
 %% For test cases
 -export([ pause/1
@@ -277,9 +277,7 @@
 
 -type(expire_at() :: non_neg_integer() | infinity). %% in millisecond
 
--type(pendings() :: #{requests := queue:queue(publish_req()),
-                      count := non_neg_integer()
-                     }).
+-type(pendings() :: queue:queue(publish_req())).
 
 -type(publish_success() :: ok | {ok, publish_reply()}).
 
@@ -698,6 +696,12 @@ subscriptions(Client) ->
 info(Client) ->
     gen_statem:call(Client, info).
 
+-spec(info(client(), n_queued) -> _NumQueuedMessages :: non_neg_integer();
+          (client(), n_inflight) -> _NumInflightMessages :: non_neg_integer();
+          (client(), max_inflight) -> _MaxInflightMessages :: pos_integer() | infinity).
+info(Client, Attr) ->
+    gen_statem:call(Client, {info, Attr}).
+
 stop(Client) ->
     gen_statem:call(Client, stop).
 
@@ -749,9 +753,7 @@ init([Options]) ->
                           reconnect_timeout = ?DEFAULT_RECONNECT_TIMEOUT,
                           qoe             = false,
                           last_packet_id  = 1,
-                          pendings        = #{requests => queue:new(),
-                                              count => 0
-                                             }
+                          pendings        = queue:new()
                          })),
     {ok, initialized, init_parse_state(State)}.
 
@@ -1071,14 +1073,22 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                           session_present = SessPresent},
     State2 = qoe_inject(connected, State1),
     State3 = ensure_retry_timer(ensure_keepalive_timer(State2)),
-    Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight)],
-    case take_call({connect, Via}, State3) of
-        {value, #call{from = From}, State4} ->
-            {next_state, connected, State4, [{reply, From, Reply} | Retry]};
+    %% NOTE
+    %% Server is supposedly permitted to change `Receive-Maximum` for each new connection.
+    %% This is fine for the initial connection, but for reconnections, it's not clear what
+    %% to do if the `Receive-Maximum` is reduced and is now less than the inflight size
+    %% (see `connected(info, immediate_retry, ...)` below).
+    ReceiveMaximum = maps:get('Receive-Maximum', AllProps1, infinity),
+    Inflight1 = emqtt_inflight:limit(ReceiveMaximum, Inflight),
+    State4 = State3#state{inflight = Inflight1},
+    Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight1)],
+    case take_call({connect, Via}, State4) of
+        {value, #call{from = From}, State5} ->
+            {next_state, connected, State5, [{reply, From, Reply} | Retry]};
         false ->
             %% unkown caller, internally initiated re-connect
-            ok = eval_msg_handler(State3, connected, Properties),
-            {next_state, connected, State3, Retry}
+            ok = eval_msg_handler(State4, connected, Properties),
+            {next_state, connected, State4, Retry}
     end;
 
 waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
@@ -1158,6 +1168,14 @@ connected({call, From}, subscriptions, #state{subscriptions = Subscriptions}) ->
 
 connected({call, From}, info, State) ->
     Info = lists:zip(record_info(fields, state), tl(tuple_to_list(State))),
+    {keep_state_and_data, [{reply, From, Info}]};
+
+connected({call, From}, {info, Attr}, State) ->
+    Info = case Attr of
+               n_queued -> queue:len(State#state.pendings);
+               n_inflight -> emqtt_inflight:size(State#state.inflight);
+               max_inflight -> emqtt_inflight:maxsize(State#state.inflight)
+           end,
     {keep_state_and_data, [{reply, From, Info}]};
 
 connected({call, From}, pause, State) ->
@@ -1364,7 +1382,18 @@ connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
                            pending_calls = timeout_calls(Timeout, Calls)},
     {keep_state, ensure_ack_timer(NewState)};
 
-connected(info, immediate_retry, State = #state{clean_start = false, inflight = Inflight}) ->
+connected(info, immediate_retry, State = #state{clean_start = false}) ->
+    %% NOTE
+    %% Dropping *random* inflight messages on the floor if the inflight window now
+    %% contains more messages than the current effective max inflight size. This
+    %% is incorrect, strictly speaking, because some of the dropped messages may
+    %% have actually reached the server, and would be acked soon.
+    %% TODO
+    %% Ideally, in that case we should split off "overflow" part of the inflight
+    %% window into a separate queue, and retry those messages after the non-overflow
+    %% part has been resent, while also draining it if there are matching acks.
+    %% Isn't worth the trouble as we expect this situation to be extremely rare.
+    State1 = #state{inflight = Inflight} = drop_overflow(State),
     ?LOG(debug, "replay_all_inflight_msgs_due_to_reconnected", #{count => emqtt_inflight:size(Inflight)}, State),
     Now = now_ts(),
     Pred = fun(_, _) -> true end,
@@ -1376,7 +1405,7 @@ connected(info, immediate_retry, State = #state{clean_start = false, inflight = 
     NState = retry_send(
                Now,
                emqtt_inflight:to_retry_list(Pred, Inflight1),
-               State#state{inflight = Inflight1}
+               State1#state{inflight = Inflight1}
               ),
     {keep_state, NState};
 
@@ -1398,10 +1427,9 @@ connected(info, ?PUB_REQ(#mqtt_msg{qos = ?QOS_0}, _Via, _ExpireAt, _Callback) = 
     shoot(PubReq, State0);
 
 connected(info, ?PUB_REQ(#mqtt_msg{qos = QoS}, _Via, _ExpireAt, _Callback) = PubReq,
-          State0 = #state{pendings = Pendings0})
+          State)
   when QoS == ?QOS_1; QoS == ?QOS_2 ->
-    Pendings = enqueue_publish_req(PubReq, Pendings0),
-    maybe_shoot(State0#state{pendings = Pendings});
+    maybe_shoot(PubReq, State);
 
 connected(info, maybe_shoot, State) ->
     maybe_shoot(State);
@@ -1606,20 +1634,27 @@ should_ping(ConnMod, Sock, _LastPktId) ->
             Error
     end.
 
+maybe_shoot(PubReq, State = #state{pendings = Pendings0, inflight = Inflight}) ->
+    case emqtt_inflight:is_full(Inflight) of
+        false ->
+            shoot(PubReq, State);
+        true ->
+            Pendings = enqueue_publish_req(PubReq, Pendings0),
+            {keep_state, State#state{pendings = Pendings}}
+    end.
+
 maybe_shoot(State0 = #state{pendings = Pendings, inflight = Inflight}) ->
     NPendings = drop_expired(Pendings),
     State = State0#state{pendings = NPendings},
-    case {is_pendings_empty(NPendings), emqtt_inflight:is_full(Inflight)} of
-        {false, false}->
-            shoot(State#state{pendings = NPendings});
-        {true, _} ->
-            {keep_state, State};
-        {_, true} ->
+    case is_pendings_empty(NPendings) orelse emqtt_inflight:is_full(Inflight) of
+        false ->
+            shoot(State);
+        true ->
             {keep_state, State}
     end.
 
 shoot(State = #state{pendings = Pendings}) ->
-    {PubReq, NPendings} = dequeue_publish_req(Pendings),
+    {{value, PubReq}, NPendings} = dequeue_publish_req(Pendings),
     shoot(PubReq, State#state{pendings = NPendings}).
 
 shoot(?PUB_REQ(Msg, default, ExpireAt, Callback), State) ->
@@ -1653,18 +1688,16 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
             maybe_shutdown(Reason, State)
     end.
 
-is_pendings_empty(_Pendings = #{count := Cnt}) ->
-    Cnt =< 0 .
+is_pendings_empty(Pendings) ->
+    queue:is_empty(Pendings).
 
-enqueue_publish_req(PubReq, Pendings = #{requests := Reqs, count := Cnt}) ->
-    Pendings#{requests := queue:in(PubReq, Reqs), count := Cnt + 1}.
+enqueue_publish_req(PubReq, Pendings) ->
+    queue:in(PubReq, Pendings).
 
 %% the previous decision ensures that the length of the queue
 %% is greater than 0
-dequeue_publish_req(Pendings = #{requests := Reqs, count := Cnt}) when Cnt > 0 ->
-    {{value, PubReq}, NReqs} = queue:out(Reqs),
-    {PubReq,
-     Pendings#{requests := NReqs, count := Cnt - 1}}.
+dequeue_publish_req(Pendings) ->
+    queue:out(Pendings).
 
 ack_inflight(Via,
   ?PUBACK_PACKET(PacketId, ReasonCode, Properties),
@@ -1724,21 +1757,19 @@ ack_inflight(Via,
             State
      end.
 
-drop_expired(Pendings = #{count := 0}) ->
-    Pendings;
 drop_expired(Pendings) ->
-    drop_expired(Pendings, now_ts()).
+    case queue:is_empty(Pendings) of
+        true -> Pendings;
+        false -> drop_expired(Pendings, now_ts())
+    end.
 
-drop_expired(Pendings = #{count := 0}, _Now) ->
-    Pendings;
-drop_expired(Pendings = #{requests := Reqs}, Now) ->
-    {value, ?PUB_REQ(_Msg, _Via, ExpireAt, Callback)} = queue:peek(Reqs),
-    case Now > ExpireAt of
-        true ->
+drop_expired(Pendings, Now) ->
+    case queue:peek(Pendings) of
+        {value, ?PUB_REQ(_Msg, _Via, ExpireAt, Callback)} when Now > ExpireAt ->
             {_Dropped, NPendings} = dequeue_publish_req(Pendings),
             eval_callback_handler({error, timeout}, Callback),
             drop_expired(NPendings, Now);
-        false ->
+        _ ->
             Pendings
     end.
 
@@ -1872,6 +1903,18 @@ sent_at(?INFLIGHT_PUBLISH(_Via, _, SentAt, _, _)) ->
 sent_at(?INFLIGHT_PUBREL(_Via, _, SentAt, _)) ->
     SentAt.
 
+drop_overflow(State = #state{inflight = Inflight}) ->
+    {Overflow, Inflight1} = emqtt_inflight:trim_overflow(Inflight),
+    Overflow =/= [] andalso
+        ?LOG(debug, "dropped_inflight_overflow_messages", #{dropped => Overflow}, State),
+    lists:foreach(
+        fun({_PacketId, ?INFLIGHT_PUBLISH(_Via, _Msg, _SentAt, _ExpireAt, Callback)}) ->
+                eval_callback_handler({error, dropped}, Callback);
+           ({_PacketId, _InflightPubReq}) ->
+                ok
+        end, Overflow),
+    State#state{inflight = Inflight1}.
+
 retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
     try
         Now = now_ts(),
@@ -1997,11 +2040,10 @@ reply_all_inflight_reqs(Reason, #state{inflight = Inflight}) ->
 
 reply_all_pendings_reqs(Reason, #state{pendings = Pendings}) ->
     %% reply error to all pendings caller
-    Reqs = maps:get(requests, Pendings),
     lists:foreach(
           fun(?PUB_REQ(_, _, _, Callback)) ->
                   eval_callback_handler({error, Reason}, Callback)
-          end, queue:to_list(Reqs)).
+          end, queue:to_list(Pendings)).
 
 packet_to_msg(#mqtt_packet{header   = #mqtt_packet_header{type   = ?PUBLISH,
                                                           dup    = Dup,
