@@ -901,7 +901,7 @@ The function should return a tuple in the form of: `{continue, {?RC_CONTINUE_AUT
 
 For practical implementations of these callbacks, refer to the following test suites in this repository:
 
-- `test/emqtt_sasl_scram_auth_SUITE.erl`
-- `test/emqtt_sasl_gssapi_auth_SUITE.erl`
+- `test/emqtt_scram_auth_SUITE.erl`
+- `test/emqtt_kerberos_auth_SUITE.erl`
 
 These examples demonstrate how to configure the authentication callbacks for different SASL mechanisms supported by EMQTT.

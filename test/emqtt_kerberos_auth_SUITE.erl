@@ -26,7 +26,7 @@
 %% - Configure EMQX default tcp listener with kerberos auth enabled.
 %% - Copy client keytab file '/var/lib/secret/krb_authn_cli.keytab' from container 'kdc.emqx.net' to `/tmp`
 %%
--module(emqtt_sasl_gssapi_auth_SUITE).
+-module(emqtt_kerberos_auth_SUITE).
 
 -compile(nowarn_export_all).
 -compile(export_all).
