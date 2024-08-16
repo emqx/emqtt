@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(emqtt_custom_auth_SUITE).
+-module(emqtt_sasl_scram_auth_SUITE).
 
 -compile(nowarn_export_all).
 -compile(export_all).

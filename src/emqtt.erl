@@ -884,11 +884,21 @@ init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binar
     init(Opts, State#state{sock_opts = [{nst, Ticket} | SockOpts]});
 init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
     init(Opts, State#state{qoe = IsReportQoE});
-init([{custom_auth_callbacks, #{init := InitFn, handle_auth := HandleAuthFn}} | Opts], State) when is_function(InitFn, 0), is_function(HandleAuthFn, 3) ->
+init([{custom_auth_callbacks, #{init := InitFn,
+                                handle_auth := HandleAuthFn,
+                                int_args := InitArgs
+                               }} | Opts], State) when is_function(InitFn, 0), is_function(HandleAuthFn, 3) ->
     %% HandleAuthFn :: fun((State, Reason, Props) -> {continue, OutPacket, State} | {stop, Reason}).
-    AuthState = InitFn(),
+    AuthState = case erlang:fun_info(InitFn, arity) of
+                    {arity, 0} ->
+                        InitFn();
+                    {arity, 1} ->
+                        InitFn(InitArgs)
+                end,
     Extra0 = State#state.extra,
-    Extra = Extra0#{auth_cb => #{init => InitFn, handle_auth => HandleAuthFn, state => AuthState}},
+    Extra = Extra0#{auth_cb => #{init => InitFn,
+                                 handle_auth => HandleAuthFn,
+                                 state => AuthState}},
     init(Opts, State#state{extra = Extra});
 init([_Opt | Opts], State) ->
     init(Opts, State).
