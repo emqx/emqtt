@@ -44,7 +44,7 @@ all() ->
 
 init_per_suite(Config) ->
     Host = os:getenv("EMQX_HOST", "localhost"),
-    Port = list_to_integer(os:getenv("EMQX_PORT", "1883")),
+    Port = list_to_integer(os:getenv("EMQX_PORT", "3883")),
     case emqtt_test_lib:is_tcp_server_available(Host, Port) of
         true ->
             [ {host, Host}
