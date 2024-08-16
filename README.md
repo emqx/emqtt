@@ -216,7 +216,7 @@ Client emqtt-zhouzibodeMacBook-Pro-1e4677ab46cecf1298ac sent DISCONNECT
             [--will-qos [<will_qos>]]
             [--will-retain [<will_retain>]]
             [--enable-websocket [<enable_websocket>]]
-            [--enable-quic [<enable_quic>]]            
+            [--enable-quic [<enable_quic>]]
             [--enable-ssl [<enable_ssl>]]
             [--tls-version [<tls_version>]]
             [--CAfile <cafile>] [--cert <cert>]
@@ -395,7 +395,8 @@ option() = {name, atom()} |
            {auto_ack, boolean()} |
            {ack_timeout, pos_integer()} |
            {force_ping, boolean()} |
-           {properties, properties()}
+           {properties, properties()} |
+           {custom_auth_callbacks, map()}
 ```
 
 <span id="client">**client()**</span>
@@ -623,6 +624,12 @@ If false (the default), if any other packet is sent during keep alive interval, 
 `{properties, Properties}`
 
 Properties of CONNECT packet.
+
+`{custom_auth_callbacks, Callbacks}`
+
+This configuration option enables enhanced authentication mechanisms in MQTT v5 by specifying custom callback functions.
+
+See [Enhanced Authentication](#EnhancedAuthentication) below for more details.
 
 **emqtt:connect(Client) -> {ok, Properties} | {error, Reason}**
 
@@ -854,12 +861,47 @@ end.
 ok = emqtt:disconnect(ConnPid).
 ok = emqtt:stop(ConnPid).
 ```
+## Enhanced Authentication
 
-## License
+As a MQTT client CLI, `emqtt` currently does not support enhanced authentication.
 
-Apache License Version 2.0
+As a MQTT client library, `emqtt` supports enhanced authentication with caller provided
+callbacks.
 
-## Author
+The callbacks should be provided as a `start_link` option `{custom_auth_callbacks, Callbacks}`,
+where the `Callbacks` parameter should be a map structured as follows:
 
-EMQX Team.
+```erlang
+#{
+  init => {InitFunc :: function(), InitArgs :: list()},
+  handle_auth => HandleAuth :: function()
+}.
+```
 
+
+### InitFunc
+
+This function is executed with InitArgs as arguments. It must return a tuple `{AuthProps, AuthState}`, where:
+
+- `AuthProps` is a map containing the initial authentication properties, including `'Authentication-Method'` and `'Authentication-Data'`.
+
+- `AuthState` is a term that is used in subsequent authentication steps.
+
+### HandleAuth
+
+This function is responsible for handling the continuation of the authentication process. It accepts the following parameters:
+
+- `AuthState`: The current state of authentication.
+- `continue_authentication | ErrorCode`: A directive to continue authentication or an error code indicating the failure reason.
+- `AuthProps`: A map containing properties for authentication, which must always include `'Authentication-Method'` and `'Authentication-Data'` at each step of the authentication process.
+
+The function should return a tuple in the form of: `{continue, {?RC_CONTINUE_AUTHENTICATION, AuthProps}, AuthState}` or `{stop, Reason}` to abort.
+
+### Examples
+
+For practical implementations of these callbacks, refer to the following test suites in this repository:
+
+- `test/emqtt_sasl_scram_auth_SUITE.erl`
+- `test/emqtt_sasl_gssapi_auth_SUITE.erl`
+
+These examples demonstrate how to configure the authentication callbacks for different SASL mechanisms supported by EMQTT.
