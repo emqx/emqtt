@@ -208,7 +208,7 @@
               {continue, _OutAuthPacket, custom_auth_state()}
             | {stop, _Reason :: term()})).
 -type(custom_auth_callbacks() :: #{
-    init := fun(() -> custom_auth_state()),
+    init := fun(() -> custom_auth_state()) | {function(), list()},
     handle_auth := custom_auth_handle_fn()
 }).
 
@@ -884,11 +884,24 @@ init([{nst, Ticket} | Opts], State = #state{sock_opts = SockOpts}) when is_binar
     init(Opts, State#state{sock_opts = [{nst, Ticket} | SockOpts]});
 init([{with_qoe_metrics, IsReportQoE} | Opts], State) when is_boolean(IsReportQoE) ->
     init(Opts, State#state{qoe = IsReportQoE});
-init([{custom_auth_callbacks, #{init := InitFn, handle_auth := HandleAuthFn}} | Opts], State) when is_function(InitFn, 0), is_function(HandleAuthFn, 3) ->
+init([{custom_auth_callbacks, #{init := InitFn,
+                                handle_auth := HandleAuthFn
+                               }} | Opts], State) ->
     %% HandleAuthFn :: fun((State, Reason, Props) -> {continue, OutPacket, State} | {stop, Reason}).
-    AuthState = InitFn(),
+    {AuthInitFn, AuthInitArgs} =
+        case InitFn of
+            Fn when is_function(Fn, 0) ->
+                %% upgrade init callback
+                {fun() -> {#{}, Fn()} end, []};
+            {_Fn, _Args} = FnAndArgs ->
+                FnAndArgs
+        end,
+    {AuthProps, AuthState} = erlang:apply(AuthInitFn, AuthInitArgs),
     Extra0 = State#state.extra,
-    Extra = Extra0#{auth_cb => #{init => InitFn, handle_auth => HandleAuthFn, state => AuthState}},
+    %% TODO: to support re-authenticate, should keep the initial func and args in state
+    Extra = Extra0#{auth_cb => #{handle_auth => HandleAuthFn,
+                                 initial_auth_props => AuthProps,
+                                 state => AuthState}},
     init(Opts, State#state{extra = Extra});
 init([_Opt | Opts], State) ->
     init(Opts, State).
@@ -1007,7 +1020,10 @@ mqtt_connect(State = #state{clientid    = ClientId,
                             proto_name  = ProtoName,
                             keepalive   = KeepAlive,
                             will_msg    = WillMsg,
-                            properties  = Properties}) ->
+                            properties  = Properties0,
+                            extra       = Extra
+                           }) ->
+    Properties = maybe_merge_auth_props(Properties0, Extra),
     ?WILL_MSG(WillQoS, WillRetain, WillTopic, WillProps, WillPayload) = ensure_will_msg(WillMsg),
     ConnProps = emqtt_props:filter(?CONNECT, Properties),
     Packet =
@@ -1028,6 +1044,11 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = emqtt_secret:unwrap(Password)}),
     send(Packet, State).
+
+maybe_merge_auth_props(Properties, #{auth_cb := #{initial_auth_props := AuthProps}}) ->
+    maps:merge(Properties, AuthProps);
+maybe_merge_auth_props(Properties, _) ->
+    Properties.
 
 reconnect(state_timeout, Reconnect, #state{conn_mod = CMod} = State) ->
     case do_connect(CMod, State) of
