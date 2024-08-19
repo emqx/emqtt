@@ -1,3 +1,13 @@
+# 1.13.0
+
+- Support Kerberos authentication callbacks.
+
+# 1.12.0
+
+- Add `max_inflight` option.
+- Respect Receive-Maximum if advertised by server.
+- Support SCRAM authentication callbacks.
+
 # 1.11.0
 
 - Add `connect` command which only establishes connection,
