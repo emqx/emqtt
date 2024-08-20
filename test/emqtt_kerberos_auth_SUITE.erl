@@ -121,7 +121,7 @@ auth_handle(#{step := 2,
     end.
 
 props(Data) ->
-    #{'Authentication-Method' => <<"GSSAPI-KERBEROS">>,
+    #{'Authentication-Method' => <<"GS2-KRB5">>,
       'Authentication-Data' => Data
      }.
 
@@ -165,7 +165,7 @@ t_bad_method_name(Config) ->
         {ok, ClientHandle} = sasl_auth:client_new(<<"mqtt">>, ServerFQDN, ServerPrincipal, <<"krb_authn_cli">>),
         {ok, {sasl_continue, FirstClientToken}} = sasl_auth:client_start(ClientHandle),
         InitialProps0 = props(FirstClientToken),
-        %% the expected method is GSSAPI-KERBEROS, using "KERBEROS" should immediately result in a rejection
+        %% the expected method is GS3-KRB5, using "KERBEROS" should immediately result in a rejection
         InitialProps = InitialProps0#{'Authentication-Method' => <<"KERBEROS">>},
         State = #{client_handle => ClientHandle, step => 1},
         {InitialProps, State}
