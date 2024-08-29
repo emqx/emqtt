@@ -22,7 +22,8 @@
 -include("logger.hrl").
 -include("emqtt_internal.hrl").
 
--export([ start_link/0
+-export([ start/1
+        , start_link/0
         , start_link/1
         ]).
 
@@ -174,6 +175,7 @@
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
                 | {nst,  binary()}
+                | {link, boolean()}
                 | {custom_auth_callbacks, custom_auth_callbacks()}).
 
 -type(topic() :: binary()).
@@ -354,12 +356,18 @@
 %%--------------------------------------------------------------------
 
 -spec(start_link() -> gen_statem:start_ret()).
-start_link() -> start_link([]).
+start_link() -> start([{link, true}]).
 
 -spec(start_link(map() | [option()]) -> gen_statem:start_ret()).
 start_link(Options) when is_map(Options) ->
-    start_link(maps:to_list(Options));
+    start(Options#{link => true});
 start_link(Options) when is_list(Options) ->
+    start([{link, true} | Options]).
+
+-spec(start(map() | [option()]) -> gen_statem:start_ret()).
+start(Options) when is_map(Options) ->
+    start(maps:to_list(Options));
+start(Options) when is_list(Options) ->
     ok = emqtt_props:validate(
             proplists:get_value(properties, Options, #{})),
     StatmOpts = case proplists:get_bool(low_mem, Options) of
@@ -371,12 +379,17 @@ start_link(Options) when is_list(Options) ->
                          {hibernate_after, 50}
                         ]
                 end,
-
+    Fname = case proplists:get_bool(link, Options) of
+                true ->
+                    start_link;
+                false ->
+                    start
+            end,
     case proplists:get_value(name, Options) of
         undefined ->
-            gen_statem:start_link(?MODULE, [with_owner(Options)], StatmOpts);
+            gen_statem:Fname(?MODULE, [with_owner(Options)], StatmOpts);
         Name when is_atom(Name) ->
-            gen_statem:start_link({local, Name}, ?MODULE, [with_owner(Options)], StatmOpts)
+            gen_statem:Fname({local, Name}, ?MODULE, [with_owner(Options)], StatmOpts)
     end.
 
 with_owner(Options) ->
