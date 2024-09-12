@@ -217,6 +217,7 @@
 -type via() :: default                                         % via default socket
                | {new_data_stream, quicer:stream_opts()}       % Create and use new long living data stream
                | {new_req_stream, quicer:stream_opts()}        % @TODO create and use short lived req stream
+               | {logical_stream_id, non_neg_integer(), quicer:stream_opts()}
                | inet:socket() | emqtt_quic:quic_sock().
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
@@ -2305,6 +2306,7 @@ maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , conn_parse_state => PS %% set once
                                                   , data_stream_socks => []
+                                                  , logical_stream_map => #{}
                                                   , control_stream_sock => undefined
                                                   , reconnect => ?NEED_RECONNECT(Re)})};
 maybe_init_quic_state(_, Old) ->
@@ -2317,6 +2319,19 @@ update_data_streams(#{ data_stream_socks := Socks
     Extra#{ data_stream_socks := [ NewSock | Socks ]
           , stream_parse_state := PSS#{NewSock => PS}
           }.
+
+update_data_streams(#{ data_stream_socks := Socks
+                     , conn_parse_state := PS
+                     , logical_stream_map := LSM
+                     , stream_parse_state := PSS
+                     } = Extra, LogicStreamId, NewSock) ->
+    Extra#{ data_stream_socks := [ NewSock | Socks ]
+          , logical_stream_map := LSM#{LogicStreamId => NewSock}
+          , stream_parse_state := PSS#{NewSock => PS}
+          }.
+
+get_logic_stream(#{logical_stream_map := LSM}, ID) ->
+    maps:get(ID, LSM, undefined).
 
 maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}
                                          } = OldState, _Sock)
@@ -2342,6 +2357,24 @@ maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
     NewSock = {quic, Conn, NewStream},
     NewState = State#state{extra = update_data_streams(Extra, NewSock)},
     {NewSock, NewState};
+maybe_new_stream({logic_stream_id, LSID, StreamOpts}, #state{conn_mod = emqtt_quic,
+                                                       socket = {quic, Conn, _Stream},
+                                                       extra = Extra
+                                                      } = State) ->
+    case get_logic_stream(Extra, LSID) of
+        undefined ->
+            {ok, NewStream} = quicer:start_stream(Conn, StreamOpts),
+            P = maps:get(priority, StreamOpts, undefined),
+            is_integer(P) andalso
+                            (begin ok = quicer:setopt(NewStream, priority, P),
+                             {ok, P} = quicer:getopt(NewStream, priority, false)
+                             end),
+            NewSock = {quic, Conn, NewStream},
+            NewState = State#state{extra = update_data_streams(Extra, LSID, NewSock)},
+            {NewSock, NewState};
+        Sock ->
+            {Sock, State}
+    end;
 maybe_new_stream(Def, State) ->
     {Def, State}.
 
