@@ -717,12 +717,8 @@ resume(Client) ->
 
 init([Options]) ->
     process_flag(trap_exit, true),
-    ClientId = case {proplists:get_value(proto_ver, Options, v4),
-                     proplists:get_value(clientid, Options)} of
-                   {v5, undefined}   -> ?NO_CLIENT_ID;
-                   {_ver, undefined} -> random_client_id();
-                   {_ver, Id}        -> iolist_to_binary(Id)
-               end,
+    ClientId = maybe_rand_id(proplists:get_value(proto_ver, Options, v4),
+                             proplists:get_value(clientid, Options, ?NO_CLIENT_ID)),
     State = check_options(
               init(Options,
                    #state{host            = {127,0,0,1},
@@ -756,6 +752,10 @@ init([Options]) ->
                           pendings        = queue:new()
                          })),
     {ok, initialized, init_parse_state(State)}.
+
+maybe_rand_id(v5, ?NO_CLIENT_ID) -> ?NO_CLIENT_ID;
+maybe_rand_id(_, ?NO_CLIENT_ID) -> random_client_id();
+maybe_rand_id(_, ID) -> ID.
 
 random_client_id() ->
     rand:seed(exsplus, erlang:timestamp()),
@@ -1082,14 +1082,15 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                     State = #state{properties = AllProps,
                                    clientid = ClientId,
                                    inflight = Inflight,
-                                   socket = Via
+                                   socket = Via,
+                                   proto_ver = Ver
                                   }) ->
     AllProps1 = case Properties of
                     undefined -> AllProps;
                     _ -> maps:merge(AllProps, Properties)
                 end,
     Reply = {ok, Properties},
-    State1 = State#state{clientid = assign_id(ClientId, AllProps1),
+    State1 = State#state{clientid = assign_id(ClientId, Ver, AllProps1),
                          properties = AllProps1,
                           session_present = SessPresent},
     State2 = qoe_inject(connected, State1),
@@ -1794,14 +1795,14 @@ drop_expired(Pendings, Now) ->
             Pendings
     end.
 
-assign_id(?NO_CLIENT_ID, Props) ->
+assign_id(Id, Ver, Props) when Id =:= ?NO_CLIENT_ID orelse Id =:= undefined ->
     case maps:find('Assigned-Client-Identifier', Props) of
         {ok, Value} ->
             Value;
         _ ->
-            error(bad_client_id)
+            error(#{cause => no_client_id_assigned_by_broker, proto_ver => Ver})
     end;
-assign_id(Id, _Props) ->
+assign_id(Id, _Ver, _Props) ->
     Id.
 
 publish_qos1(Via, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
