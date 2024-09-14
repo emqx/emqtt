@@ -140,6 +140,12 @@
                          disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
                         }).
 
+-if(?OTP_RELEASE < 27).
+-type tls_options() :: [ssl:tls_option()].
+-else.
+-type tls_options() :: [ssl:ssl_option()].
+-endif.
+
 -type(option() :: {name, atom()}
                 | {owner, pid()}
                 | {msg_handler, msg_handler()}
@@ -148,7 +154,7 @@
                 | {port, inet:port_number()}
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
-                | {ssl_opts, [ssl:ssl_option()]}
+                | {ssl_opts, tls_options()}
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
