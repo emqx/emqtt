@@ -21,6 +21,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include_lib("kernel/include/file.hrl").
 
 suite() ->
     [{timetrap, {seconds, 30}}].
@@ -34,7 +35,8 @@ all() ->
      t_quic_sock,
      t_quic_sock_fail,
      t_0_rtt,
-     t_0_rtt_fail
+     t_0_rtt_fail,
+     t_ssl_keylogfile_dump
     ].
 
 groups() ->
@@ -924,6 +926,29 @@ t_multi_streams_remote_shutdown_with_reconnect(Config) ->
     start_emqx_quic(?config(port, Config)),
     %% Client is alive.
     ?assert(is_list(emqtt:info(C))).
+
+t_ssl_keylogfile_dump(Config) ->
+    TargetFName = filename:join(["/tmp/", ?FUNCTION_NAME]),
+    erlang:process_flag(trap_exit, true),
+    PubQos = ?config(pub_qos, Config),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    %% GIVEN: quic conn opt sslkeylogfile is set
+    {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, true},
+                                {clean_start, false},
+                                {clientid, <<"remote_shutdown_with_reconnect">>},
+                                {connect_timeout, 5}, %% speedup test
+                                {quic_opts, {[{sslkeylogfile, TargetFName}],[]}}
+                               | Config]),
+    %% WHEN: client connected to server successfully
+    {ok, _} = emqtt:quic_connect(C),
+    case emqtt:publish_via(C, {logic_stream_id, 1, #{}}, Topic, #{},  <<1,2,3,4,5>>, [{qos, PubQos}]) of
+        ok when PubQos == 0 -> ok;
+        {ok, #{reason_code := 0, via := _PVia}} -> ok
+    end,
+    %% THEN: file is created and none empty.
+    ?assertMatch({ok, #file_info{type = regular, size = S}} when S > 0, file:read_file_info(TargetFName)),
+    file:delete(TargetFName),
+    ok.
 
 %%--------------------------------------------------------------------
 %% Helper functions

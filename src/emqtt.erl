@@ -149,6 +149,7 @@
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
                 | {ssl_opts, [ssl:ssl_option()]}
+                | {quic_opts, {_, _}}
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
                 | {bridge_mode, boolean()}
@@ -173,7 +174,7 @@
                 | {reconnect_timeout, pos_integer()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
-                | {nst,  binary()}
+                | {nst,  binary()} %% @deprecated 1.13.1
                 | {custom_auth_callbacks, custom_auth_callbacks()}).
 
 -type(topic() :: binary()).
@@ -217,7 +218,7 @@
 -type via() :: default                                         % via default socket
                | {new_data_stream, quicer:stream_opts()}       % Create and use new long living data stream
                | {new_req_stream, quicer:stream_opts()}        % @TODO create and use short lived req stream
-               | {logical_stream_id, non_neg_integer(), quicer:stream_opts()}
+               | {logic_stream_id, non_neg_integer(), quicer:stream_opts()}
                | inet:socket() | emqtt_quic:quic_sock().
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
@@ -789,6 +790,8 @@ init([{hosts, Hosts} | Opts], State) ->
     init(Opts, State#state{hosts = Hosts1});
 init([{tcp_opts, TcpOpts} | Opts], State = #state{sock_opts = SockOpts}) ->
     init(Opts, State#state{sock_opts = merge_opts(SockOpts, TcpOpts)});
+init([{quic_opts, {_ConnOpts, _StreamOpts}} = QuicOpts | Opts], State = #state{sock_opts = SockOpts}) ->
+    init(Opts, State#state{sock_opts = merge_opts(SockOpts, [QuicOpts])});
 init([{ssl, EnableSsl} | Opts], State) ->
     case lists:keytake(ssl_opts, 1, Opts) of
         {value, SslOpts, WithOutSslOpts} ->
@@ -2307,7 +2310,7 @@ maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , conn_parse_state => PS %% set once
                                                   , data_stream_socks => []
-                                                  , logical_stream_map => #{}
+                                                  , logic_stream_map => #{}
                                                   , control_stream_sock => undefined
                                                   , reconnect => ?NEED_RECONNECT(Re)})};
 maybe_init_quic_state(_, Old) ->
@@ -2323,15 +2326,15 @@ update_data_streams(#{ data_stream_socks := Socks
 
 update_data_streams(#{ data_stream_socks := Socks
                      , conn_parse_state := PS
-                     , logical_stream_map := LSM
+                     , logic_stream_map := LSM
                      , stream_parse_state := PSS
                      } = Extra, LogicStreamId, NewSock) ->
     Extra#{ data_stream_socks := [ NewSock | Socks ]
-          , logical_stream_map := LSM#{LogicStreamId => NewSock}
+          , logic_stream_map := LSM#{LogicStreamId => NewSock}
           , stream_parse_state := PSS#{NewSock => PS}
           }.
 
-get_logic_stream(#{logical_stream_map := LSM}, ID) ->
+get_logic_stream(#{logic_stream_map := LSM}, ID) ->
     maps:get(ID, LSM, undefined).
 
 maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}

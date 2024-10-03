@@ -110,30 +110,17 @@ open_connection() ->
     quicer:open_connection().
 
 connect(Host, Port, Opts, Timeout) ->
-    KeepAlive = proplists:get_value(keepalive, Opts, 60),
-    OptsSSL = proplists:get_value(ssl_opts, Opts, []),
-    Opts1 = Opts ++ OptsSSL,
-    ConnOpts = [ {alpn, ["mqtt"]}
-               , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
-               , {peer_unidi_stream_count, 1}
-               , {peer_bidi_stream_count, 1}
-               , {verify, proplists:get_value(verify, Opts1, verify_none)}
-               , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}
-               % , {send_idle_timeout_ms,  1000}
-               % , {disconnect_timeout_ms, 300000}
-               %% uncomment for decrypt wireshark trace
-               %%, {sslkeylogfile, "/tmp/SSLKEYLOGFILE"}
-               | Opts1] ++ local_addr(Opts1),
-    case lists:keymember(nst, 1, ConnOpts) of
-        true -> do_0rtt_connect(Host, Port, ConnOpts);
-        false -> do_1rtt_connect(Host, Port, ConnOpts, Timeout)
+    {ConnOpts, StreamOpts} = from_sockopts(Opts),
+    case maps:is_key(nst, ConnOpts) of
+        true -> do_0rtt_connect(Host, Port, ConnOpts, StreamOpts);
+        false -> do_1rtt_connect(Host, Port, ConnOpts, StreamOpts, Timeout)
     end.
 
-do_0rtt_connect(Host, Port, ConnOpts) ->
-    IsConnOpened = proplists:is_defined(handle, ConnOpts),
+do_0rtt_connect(Host, Port, ConnOpts, StreamOpts) ->
+    IsConnOpened = maps:is_key(handle, ConnOpts),
     case quicer:async_connect(Host, Port, ConnOpts) of
         {ok, Conn} when not IsConnOpened ->
-            case quicer:start_stream(Conn, #{active => 1}) of
+            case quicer:start_stream(Conn, StreamOpts) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
                 {error, Type, Info} ->
@@ -149,11 +136,11 @@ do_0rtt_connect(Host, Port, ConnOpts) ->
             Error
     end.
 
-do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
-    IsConnOpened = proplists:is_defined(handle, ConnOpts),
+do_1rtt_connect(Host, Port, ConnOpts, StreamOpts, Timeout) ->
+    IsConnOpened = maps:is_key(handle, ConnOpts),
     case quicer:connect(Host, Port, ConnOpts, Timeout) of
         {ok, Conn} when not IsConnOpened ->
-            case quicer:start_stream(Conn, #{active => 1}) of
+            case quicer:start_stream(Conn, StreamOpts) of
                 {ok, Stream} ->
                     {ok, {quic, Conn, Stream}};
                 {error, Type, Info} ->
@@ -172,7 +159,7 @@ do_1rtt_connect(Host, Port, ConnOpts, Timeout) ->
 send({quic, _Conn, Stream}, Bin) ->
     send(Stream, Bin);
 send(Stream, Bin) ->
-    %% Use async here because we could send before start the connecion.
+    %% Use async here because we could send before start the connection.
     case quicer:async_send(Stream, Bin) of
         {ok, _Len} ->
             ok;
@@ -211,6 +198,33 @@ local_addr(SOpts) ->
         {Port, IpAddr} when is_tuple(IpAddr) ->
             [{param_conn_local_address, inet:ntoa(IpAddr) ++ ":" ++integer_to_list(Port)}]
     end.
+
+ssl_opts(SOpts) ->
+    proplists:get_value(ssl_opts, SOpts, []).
+
+-spec from_sockopts(proplists:proplist()) -> {ConnOpts::map(), StreamOpts::map()}.
+from_sockopts(SockOpts) ->
+    {UserConnOpts0, UserStreamOpts0} = proplists:get_value(quic_opts, SockOpts, {[], []}),
+    %% Mandatory defaults
+    KeepAlive = proplists:get_value(keepalive, SockOpts, 60),
+    DefConnOpts = [ {alpn, ["mqtt"]}
+                  , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
+                  , {peer_unidi_stream_count, 1}
+                  , {peer_bidi_stream_count, 3}
+                  , {verify, proplists:get_value(verify, SockOpts, verify_none)}
+                  , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}],
+    %% Deprecated but for backward compatibility
+    OptionalOpts = lists:filter(fun({handle, _}) -> true;
+                                   ({nst, _}) -> true;
+                                   (_) -> false
+                                end, SockOpts),
+    QuicConnOpts = maps:from_list(DefConnOpts
+                                  ++ ssl_opts(SockOpts)
+                                  ++ local_addr(SockOpts)
+                                  ++ OptionalOpts
+                                  ++ UserConnOpts0),
+    QuicStremOpts = maps:from_list([{active, 1} | UserStreamOpts0]),
+    {QuicConnOpts, QuicStremOpts}.
 
 -else.
 %% BUILD_WITHOUT_QUIC
