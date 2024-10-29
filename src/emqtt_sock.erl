@@ -33,7 +33,7 @@
 
 -type(sockname() :: {inet:ip_address(), inet:port_number()}).
 
--type(option() :: gen_tcp:connect_option() | {ssl_opts, [ssl:ssl_option()]}).
+-type(option() :: gen_tcp:connect_option() | {ssl_opts, [ssl:tls_client_option()]}).
 
 -export_type([socket/0, option/0]).
 
@@ -111,7 +111,7 @@ close(Sock) when is_port(Sock) ->
 close(#ssl_socket{ssl = SslSock}) ->
     ssl:close(SslSock).
 
--spec(setopts(socket(), [gen_tcp:option() | ssl:socketoption()]) -> ok | {error, any()}).
+-spec(setopts(socket(), [gen_tcp:option() | ssl:tls_client_option()]) -> ok | {error, any()}).
 setopts(Sock, Opts) when is_port(Sock) ->
     inet:setopts(Sock, Opts);
 setopts(#ssl_socket{ssl = SslSock}, Opts) ->

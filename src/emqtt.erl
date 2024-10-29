@@ -134,7 +134,7 @@
 
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
--type(msg_handler() :: #{publish => fun((emqx_types:message()) -> any()) | mfas(),
+-type(msg_handler() :: #{publish => fun((_Publish :: map()) -> any()) | mfas(),
                          pubrel => fun((_PubRel :: map()) -> any()) | mfas(),
                          connected => fun((_Properties :: term()) -> any()) | mfas(),
                          disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
@@ -148,7 +148,7 @@
                 | {port, inet:port_number()}
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
-                | {ssl_opts, [ssl:ssl_option()]}
+                | {ssl_opts, [ssl:tls_client_option()]}
                 | {quic_opts, {_, _}}
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}

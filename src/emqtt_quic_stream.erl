@@ -178,7 +178,7 @@ handle_call(_Stream, _Request, _Opts, S) ->
 
 %%% Internals
 -spec parse(binary(), emqtt_frame:parse_state(), emqtt_quic:mqtt_packets())
-           -> emqtt_frame:parse_res().
+           -> emqtt_frame:parse_result().
 parse(<<>>, PS, Packets) ->
     {keep_state, PS, Packets};
 parse(Bin, PS, Packets) ->

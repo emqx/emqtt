@@ -147,8 +147,8 @@ main(_Argv) ->
 
 main(PubSubOrJustConnect, Opts0) ->
     _ = process_flag(trap_exit, true),
-    application:ensure_all_started(quicer),
-    application:ensure_all_started(emqtt),
+    _ = application:ensure_all_started(quicer),
+    _ = application:ensure_all_started(emqtt),
     Print = proplists:get_value(print, Opts0),
     Opts = proplists:delete(print, Opts0),
     NOpts = enrich_opts(parse_cmd_opts(Opts)),
@@ -156,7 +156,7 @@ main(PubSubOrJustConnect, Opts0) ->
         undefined ->
             ok;
         Level ->
-            logger:set_primary_config(level, Level)
+            ok = logger:set_primary_config(level, Level)
     end,
     {ok, Client} = emqtt:start_link(NOpts),
     ConnRet = case {proplists:get_bool(enable_websocket, NOpts),
@@ -181,7 +181,7 @@ main(PubSubOrJustConnect, Opts0) ->
                         #{'Server-Keep-Alive' := I} -> I;
                         _ -> get_value(keepalive, NOpts)
                     end,
-                    timer:send_interval(KeepAlive * 1000, ping),
+                    _ = timer:send_interval(KeepAlive * 1000, ping),
                     receive_loop(Client, Print)
             end;
         {error, Reason} ->
@@ -427,6 +427,7 @@ i(false) -> 0.
 log(Fmt, Args) ->
     io:format("~s " ++ Fmt, [ts() | Args]).
 
+-spec log_halt(_, _) -> no_return().
 log_halt(Fmt, Args) ->
     log(Fmt, Args),
     halt(1).
