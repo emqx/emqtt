@@ -760,7 +760,7 @@ maybe_rand_id(_, ?NO_CLIENT_ID) -> random_client_id();
 maybe_rand_id(_, ID) -> ID.
 
 random_client_id() ->
-    rand:seed(exsplus, erlang:timestamp()),
+    _ = rand:seed(exsplus, erlang:timestamp()),
     I1 = rand:uniform(round(math:pow(2, 48))) - 1,
     I2 = rand:uniform(round(math:pow(2, 32))) - 1,
     {ok, Host} = inet:gethostname(),
