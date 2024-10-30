@@ -44,6 +44,7 @@
 -export_type([ mqtt_packets/0
              , quic_msg/0
              , quic_sock/0
+             , cb_data/0
              ]).
 
 -type cb_data() :: #{ clientid := binary()
@@ -52,7 +53,7 @@
                     , data_stream_socks := [quic_sock()]
                     , control_stream_sock := undefined | quic_sock()
                     , stream_opts := map()
-                    , state_name := gen_fsm:state_name()
+                    , state_name := atom()
                     , is_local => boolean()
                     , is_unidir => boolean()
                     , quic_conn_cb => module()
@@ -77,7 +78,7 @@ init_state(Data) when is_map(Data) ->
          , is_unidir => false %% @TODO per stream
          }.
 
--spec handle_info(quic_msg(), gen_statem:state(), cb_data()) -> gen_statem:handle_event_result().
+-spec handle_info(quic_msg(), atom(), cb_data()) -> gen_statem:handle_event_result().
 %% Handle Quic Data
 handle_info({quic, Data, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
   when is_binary(Data) ->
@@ -130,8 +131,6 @@ do_0rtt_connect(Host, Port, ConnOpts, StreamOpts) ->
             end;
         {ok, _Conn} ->
             skip;
-        {error, Type, Info} ->
-            {error, {Type, Info}};
         {error, _} = Error ->
             Error
     end.
@@ -182,7 +181,7 @@ setopts({quic, _Conn, Stream}, Opts) ->
 
 close({quic, Conn, Stream}) ->
     %% gracefully shutdown the stream to flush all the msg in sndbuf.
-    quicer:shutdown_stream(Stream, 500),
+    _ = quicer:shutdown_stream(Stream, 500),
     quicer:close_connection(Conn, ?QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0, 500).
 
 sockname({quic, Conn, _Stream}) ->

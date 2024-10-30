@@ -980,7 +980,7 @@ initialized({call, From}, {open_connection, emqtt_quic}, #state{sock_opts = Sock
             {stop_and_reply, {shutdown, Error}, {reply, From, Error}}
     end;
 initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefined}} = State) ->
-    {ok, NewCtrlStream} = quicer:start_stream(Conn, [{active, 1}]),
+    {ok, NewCtrlStream} = quicer:start_stream(Conn, #{active => 1}),
     NewSocket = {quic, Conn, NewCtrlStream},
     case mqtt_connect(maybe_update_ctrl_sock(emqtt_quic, maybe_init_quic_state(emqtt_quic, State), NewSocket)) of
         {ok, #state{socket = Via} = NewState} ->

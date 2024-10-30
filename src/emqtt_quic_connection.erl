@@ -23,6 +23,7 @@
 -include_lib("quicer/include/quicer.hrl").
 -include_lib("snabbkaffe/include/snabbkaffe.hrl").
 
+
 %% Callback init
 -export([ init/1 ]).
 
@@ -44,9 +45,9 @@
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clientid => maps:get(clientid, State)}, #{})).
 
--type cb_ret() :: gen_statem:event_handler_result().
+-type cb_ret() :: gen_statem:handle_event_result().
 -type cb_data() :: emqtt_quic:cb_data().
--type connection_handle() :: quicer:connected_handle().
+-type connection_handle() :: quicer:connection_handle().
 
 %% Not in use.
 init(ConnOpts) when is_list(ConnOpts) ->
@@ -65,7 +66,7 @@ closed(_Conn, #{} = _Flags, #{state_name := _Other} = S)->
     %% @TODO why not stop?
     {stop, {shutdown, conn_closed}, S}.
 
--spec new_conn(connection_handle(), quicer:conn_closed_props(), cb_data()) -> cb_ret().
+-spec new_conn(connection_handle(), quicer:new_conn_props(), cb_data()) -> cb_ret().
  new_conn(_Conn, #{version := _Vsn}, #{stream_opts := _SOpts} = _S) ->
     {stop, not_server}.
 
@@ -74,20 +75,20 @@ nst_received(_Conn, Ticket, #{clientid := Cid} = S) when is_binary(Ticket) ->
     catch ets:insert(quic_clients_nsts, {Cid, Ticket}),
     {keep_state, S#{nst => Ticket}}.
 
--spec new_stream(quicer:stream_handle(), quicer:new_stream_props(), cb_data()) -> cb_ret().
+-spec new_stream(quicer:stream_handle(), quicer:new_stream_props(), quicer:connection_handle())
+                -> cb_ret().
 %% handles stream when there is no stream acceptors.
 new_stream(_Stream, #{is_orphan := true} = _StreamProps,
            %% @TODO put conn ?
-           #{conn := _Conn, streams := _Streams, stream_opts := _SOpts} = _CBState) ->
-    %% @TODO here we could only spawn new server
-    %% Spawn new stream
-    {stop, unimpl}.
+           _Handle) ->
+    %% Remote stream from the broker, unsupported.
+    {stop, unsupp}.
 
 -spec shutdown(connection_handle(), quicer:error_code(), cb_data()) -> cb_ret().
 shutdown(_Conn, _ErrorCode, #{state_name := waiting_for_connack, reconnect := true} = _S) ->
     keep_state_and_data;
 shutdown(Conn, _ErrorCode, #{reconnect := true}) ->
-    quicer:async_shutdown_connection(Conn, 0, 0),
+    _ = quicer:async_shutdown_connection(Conn, 0, 0),
     %% @TODO how to reconnect here?
     {keep_state_and_data, {next_event, info, {quic_closed, Conn}}};
 shutdown(Conn, ErrorCode, S) ->
@@ -103,7 +104,7 @@ shutdown(Conn, ErrorCode, S) ->
             {stop, {shutdown, ErrorCode}, S}
     end.
 
--spec transport_shutdown(connection_handle(), quicer:transport_shutdown_info(), cb_data())
+-spec transport_shutdown(connection_handle(), quicer:transport_shutdown_props(), cb_data())
                         -> cb_ret().
 transport_shutdown(_C, DownInfo, S) ->
     ?LOG(error, "QUIC_transport_shutdown", #{down_info => DownInfo}, S),
@@ -126,8 +127,8 @@ streams_available(_C, #{ unidi_streams := UnidirCnt
 
 %% @doc May integrate with App flow control
 -spec peer_needs_streams(connection_handle(), undefined, cb_data()) -> cb_ret().
-peer_needs_streams(_C, undefined, S) ->
-    {ok, S}.
+peer_needs_streams(_C, undefined, _S) ->
+    keep_state_and_data.
 
 -spec connected(connection_handle(), quicer:connected_props(), cb_data()) -> cb_ret().
 %% handles async 0-RTT connect
@@ -136,7 +137,7 @@ connected(_Connecion, #{ is_resumed := true }, #{state_name := waiting_for_conna
 connected(_Connecion, _Props, _S) ->
     keep_state_and_data.
 
--spec dgram_state_changed(connection_handle(), quicer:datagram_state(), cb_data()) -> cb_ret().
+-spec dgram_state_changed(connection_handle(), quicer:dgram_state(), cb_data()) -> cb_ret().
 dgram_state_changed(_C, _State, _S) ->
     keep_state_and_data.
 -else.
