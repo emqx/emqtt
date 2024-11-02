@@ -51,7 +51,18 @@
 
 -type(cont_fun() :: fun((binary()) -> parse_result())).
 
--type(serialize_fun() :: fun((emqx_types:packet()) -> iodata())).
+-type(packet() :: #mqtt_packet_connect{} |
+                  #mqtt_packet_connack{} |
+                  #mqtt_packet_publish{} |
+                  #mqtt_packet_puback{} |
+                  #mqtt_packet_subscribe{} |
+                  #mqtt_packet_suback{} |
+                  #mqtt_packet_unsubscribe{} |
+                  #mqtt_packet_unsuback{} |
+                  #mqtt_packet_disconnect{} |
+                  #mqtt_packet_auth{}).
+
+-type(serialize_fun() :: fun((packet()) -> iodata())).
 
 -define(none(Options), {none, Options}).
 

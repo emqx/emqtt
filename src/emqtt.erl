@@ -134,7 +134,7 @@
 
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
--type(msg_handler() :: #{publish => fun((emqx_types:message()) -> any()) | mfas(),
+-type(msg_handler() :: #{publish => fun((_Publish :: map()) -> any()) | mfas(),
                          pubrel => fun((_PubRel :: map()) -> any()) | mfas(),
                          connected => fun((_Properties :: term()) -> any()) | mfas(),
                          disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
@@ -148,7 +148,7 @@
                 | {port, inet:port_number()}
                 | {tcp_opts, [gen_tcp:option()]}
                 | {ssl, boolean()}
-                | {ssl_opts, [ssl:ssl_option()]}
+                | {ssl_opts, [ssl:tls_client_option()]}
                 | {quic_opts, {_, _}}
                 | {ws_path, string()}
                 | {connect_timeout, pos_integer()}
@@ -760,7 +760,7 @@ maybe_rand_id(_, ?NO_CLIENT_ID) -> random_client_id();
 maybe_rand_id(_, ID) -> ID.
 
 random_client_id() ->
-    rand:seed(exsplus, erlang:timestamp()),
+    _ = rand:seed(exsplus, erlang:timestamp()),
     I1 = rand:uniform(round(math:pow(2, 48))) - 1,
     I2 = rand:uniform(round(math:pow(2, 32))) - 1,
     {ok, Host} = inet:gethostname(),
@@ -980,7 +980,7 @@ initialized({call, From}, {open_connection, emqtt_quic}, #state{sock_opts = Sock
             {stop_and_reply, {shutdown, Error}, {reply, From, Error}}
     end;
 initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefined}} = State) ->
-    {ok, NewCtrlStream} = quicer:start_stream(Conn, [{active, 1}]),
+    {ok, NewCtrlStream} = quicer:start_stream(Conn, #{active => 1}),
     NewSocket = {quic, Conn, NewCtrlStream},
     case mqtt_connect(maybe_update_ctrl_sock(emqtt_quic, maybe_init_quic_state(emqtt_quic, State), NewSocket)) of
         {ok, #state{socket = Via} = NewState} ->

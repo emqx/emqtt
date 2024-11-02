@@ -42,7 +42,7 @@
 -define(LOG(Level, Msg, Meta, State),
         ?SLOG(Level, Meta#{msg => Msg, clientid => maps:get(clientid, State)}, #{})).
 
--type cb_ret() :: gen_statem:event_handler_result().
+-type cb_ret() :: gen_statem:handle_event_result().
 -type cb_data() :: emqtt_quic:cb_data().
 
 -spec init_handoff(stream_handle(), #{}, quicer:connection_handle(), #{}) -> cb_ret().
@@ -50,7 +50,7 @@ init_handoff(_Stream, _StreamOpts, _Conn, _Flags) ->
     %% stream owner already set while starts.
     {stop, unimpl}.
 
--spec new_stream(stream_handle(), quicer:new_stream_props(), cb_data()) -> cb_ret().
+-spec new_stream(stream_handle(), quicer:new_stream_props(), connection_handle()) -> cb_ret().
 new_stream(_Stream, #{flags := _Flags, is_orphan := _IsOrphan}, _Conn) ->
     {stop, unimpl}.
 
@@ -62,19 +62,19 @@ peer_accepted(_Stream, undefined, _S) ->
 -spec peer_receive_aborted(stream_handle(), non_neg_integer(), cb_data()) -> cb_ret().
 peer_receive_aborted(Stream, ErrorCode, #{is_unidir := false} = _S) ->
     %% we abort send with same reason
-    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
     keep_state_and_data;
 peer_receive_aborted(Stream, ErrorCode, #{is_unidir := true, is_local := true} = _S) ->
-    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
     keep_state_and_data.
 
 -spec peer_send_aborted(stream_handle(), non_neg_integer(), cb_data()) -> cb_ret().
 peer_send_aborted(Stream, ErrorCode, #{is_unidir := false} = _S) ->
     %% we abort receive with same reason
-    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, ErrorCode),
     keep_state_and_data;
 peer_send_aborted(Stream, ErrorCode, #{is_unidir := true, is_local := false} = _S) ->
-    quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE, ErrorCode),
     keep_state_and_data.
 
 -spec peer_send_shutdown(stream_handle(), undefined, cb_data()) -> cb_ret().
@@ -133,7 +133,7 @@ handle_stream_data(_Stream, _Bin, _Flags,
 -spec passive(stream_handle(), undefined, cb_data()) -> cb_ret().
 passive(Stream, undefined, _S)->
     %% @TODO Should be called only once during the whole connecion
-    quicer:setopt(Stream, active, true),
+    _ = quicer:setopt(Stream, active, true),
     keep_state_and_data.
 
 -spec stream_closed(stream_handle(), stream_closed_props(), cb_data()) -> cb_ret().
@@ -178,7 +178,7 @@ handle_call(_Stream, _Request, _Opts, S) ->
 
 %%% Internals
 -spec parse(binary(), emqtt_frame:parse_state(), emqtt_quic:mqtt_packets())
-           -> emqtt_frame:parse_res().
+           -> cb_ret().
 parse(<<>>, PS, Packets) ->
     {keep_state, PS, Packets};
 parse(Bin, PS, Packets) ->
