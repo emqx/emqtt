@@ -21,9 +21,7 @@
 %% check 'allow' here, only evaluate Data and Meta when necessary
     case logger:allow(Level, ?MODULE) of
         true ->
-            logger:log(Level, (Data), (Meta#{ mfa => {?MODULE, ?FUNCTION_NAME, ?FUNCTION_ARITY}
-                                            , line => ?LINE
-            }));
+            logger:log(Level, (Data), (begin Meta end)#{mfa => {?MODULE, ?FUNCTION_NAME, ?FUNCTION_ARITY}, line => ?LINE});
         false ->
             ok
     end).
