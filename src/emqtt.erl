@@ -988,6 +988,7 @@ initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefi
              add_call(new_call({connect, Via}, From), NewState),
              {reply, From, ok}};
         {error, Reason} = Error->
+            %% TODO: handle error async to allow reconnect
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Error}]}
     end;
 initialized({call, From}, {new_data_stream, _StreamOpts} = Via0, State) ->
@@ -999,18 +1000,35 @@ initialized(info, ?PUB_REQ(#mqtt_msg{}, _Via, _ExpireAt, _Callback) = PubReq,
 initialized(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, initialized, State).
 
-do_connect(ConnMod, #state{sock_opts = SockOpts,
-                           connect_timeout = Timeout} = State) ->
+do_connect(ConnMod, #state{socket = OldSock,
+                           sock_opts = SockOpts,
+                           connect_timeout = Timeout
+                          } = State) ->
     State0 = maybe_init_quic_state(ConnMod, State),
     IsConnOpened = proplists:is_defined(handle, SockOpts),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         skip ->
             {ok, State0};
-        {ok, Sock} when not IsConnOpened ->
-            State1 = maybe_update_ctrl_sock(ConnMod, State0, Sock),
+        {ok, NewSock} when not IsConnOpened ->
+            State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
             State2 = qoe_inject(handshaked, State1),
-            mqtt_connect(run_sock(State2#state{conn_mod = ConnMod, socket = Sock}));
+            State3 = replace_connect_call_via(State2, OldSock, NewSock),
+            State4 = run_sock(State3#state{conn_mod = ConnMod, socket = NewSock}),
+            case mqtt_connect(State4) of
+                {ok, State5} ->
+                    {ok, State5};
+                {error, Reason} ->
+                    ?LOG(info, "failed_to_send_CONNECT", #{reason => Reason}, State),
+                    %% Failed to send CONNECT packet.
+                    %% wait for the async socket close or error event
+                    {ok, State4}
+            end;
+        {error, econnreset} ->
+            %% TODO: handle econnreset.
+            %% For now this may lead to immediate shtudown even if reconnect is allowed
+            {error, econnreset};
         {error, Reason} ->
+            %% cannot think of other reasons for delayed retry
             {error, Reason}
     end.
 
@@ -1049,6 +1067,16 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  password     = emqtt_secret:unwrap(Password)}),
     send(Packet, State).
 
+%% CONNACK cannot be received from a stale socket, so change to the new one.
+replace_connect_call_via(#state{pending_calls = Calls} = State, OldSock, NewSock) ->
+    NewCalls = lists:map(fun(Call) -> replace_connect_call_via2(Call, OldSock, NewSock) end, Calls),
+    State#state{pending_calls = NewCalls}.
+
+replace_connect_call_via2(#call{id = {connect, OldSock}} = C, OldSock, NewSock) ->
+    C#call{id = {connect, NewSock}};
+replace_connect_call_via2(Call, _OldSock, _NewSock) ->
+    Call.
+
 maybe_merge_auth_props(Properties, #{auth_cb := #{initial_auth_props := AuthProps}}) ->
     maps:merge(Properties, AuthProps);
 maybe_merge_auth_props(Properties, _) ->
@@ -1075,6 +1103,15 @@ reconnect({call, From}, stop, _State) ->
     {stop_and_reply, normal, [{reply, From, ok}]};
 reconnect({call, From}, status, _State) ->
     {keep_state_and_data, {reply, From, reconnect}};
+reconnect(info, {Close, _StaleSock}, _State) when ?SOCK_CLOSED(Close) ->
+    %% ignore stale socket close events
+    keep_state_and_data;
+reconnect(info, {Error, StaleSock, _Reason}, #state{socket = StaleSock}) when ?SOCK_ERROR(Error) ->
+    %% ignore stale socket error events
+    keep_state_and_data;
+reconnect(info, {'EXIT', Owner, Reason}, State = #state{owner = Owner}) ->
+    ?LOG(debug, "EXIT_from_owner", #{reason => Reason}, State),
+    {stop, {shutdown, {owner, Owner, Reason}}, State};
 reconnect(_EventType, _, _State) ->
     {keep_state_and_data, postpone}.
 
@@ -1365,8 +1402,8 @@ connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
 connected(cast, {?DISCONNECT_PACKET(_ReasonCode), _Via},
           #state{reconnect = Re, conn_mod = ConnMod, socket = Sock} = State)
     when ?NEED_RECONNECT(Re) ->
-    _ = ConnMod:close(Sock),
-    next_reconnect(State#state{socket = undefined});
+    _ = close_socket(ConnMod, Sock),
+    next_reconnect(State);
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
@@ -1489,33 +1526,33 @@ handle_event(info, {Error, Sock, Reason}, connected,
     when ?SOCK_ERROR(Error) andalso ?NEED_RECONNECT(Re) ->
     ?LOG(info, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {Error, Sock, Reason}, waiting_for_connack,
              #state{reconnect = Re, socket = Sock} = State)
     when ?SOCK_ERROR(Error) andalso ?NEED_RECONNECT(Re) ->
     ?LOG(info, "socket_error_before_connack",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
              #state{reconnect = Re, socket = #ssl_socket{ssl = SSLSock}} = State)
     when ?NEED_RECONNECT(Re) ->
     ?LOG(info, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, waiting_for_connack,
              #state{reconnect = Re, socket = #ssl_socket{ssl = SSLSock}} = State)
     when ?NEED_RECONNECT(Re) ->
     ?LOG(info, "socket_error_before_connack",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
-    when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
+    when ?SOCK_ERROR(Error) ->
     ?LOG(error, "connection_error",
-         #{error => Error, reason =>Reason}, State),
+         #{error => Error, reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
@@ -1536,12 +1573,12 @@ handle_event(info, {tcp_closed, Sock} = Event, StateName, #state{socket = SockIn
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
     ?LOG(info, "socket_closed_when_connected", #{}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {Closed, _Sock}, waiting_for_connack, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
     ?LOG(info, "socket_closed_before_connack", #{}, State),
-    next_reconnect(State#state{socket = undefined});
+    next_reconnect(State);
 
 handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
@@ -1889,6 +1926,7 @@ ensure_keepalive_timer(I, State) when is_integer(I) ->
 
 new_call(Id, From) ->
     new_call(Id, From, undefined).
+
 new_call(Id, From, Req) ->
     #call{id = Id, from = From, req = Req, ts = os:timestamp()}.
 
@@ -1899,7 +1937,8 @@ take_call(Id, Data = #state{pending_calls = Calls}) ->
     case lists:keytake(Id, #call.id, Calls) of
         {value, Call, Left} ->
             {value, Call, Data#state{pending_calls = Left}};
-        false -> false
+        false ->
+            false
     end.
 
 timeout_calls(Timeout, Calls) ->
@@ -2269,7 +2308,7 @@ next_reconnect(#state{retry_timer = RetryTimer,
                       sock_opts = OldSockOpts,
                       reconnect = Reconnect,
                       reconnect_timeout = Timeout,
-                      ack_timer     = AckTimer,
+                      ack_timer = AckTimer,
                       socket = OldSocket,
                       conn_mod = ConnMod
                      } = State, Actions) ->
@@ -2277,8 +2316,9 @@ next_reconnect(#state{retry_timer = RetryTimer,
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
     ok = cancel_timer(AckTimer),
-    {next_state, reconnect, State#state{socket = undefined,
-                                        sock_opts = proplists:delete(handle, OldSockOpts),
+    %% NOTE: do not set socket to 'undefined' here
+    %% because it is needed to swap for a new socket in pending_calls
+    {next_state, reconnect, State#state{sock_opts = proplists:delete(handle, OldSockOpts),
                                         retry_timer = undefined,
                                         keepalive_timer = undefined
                                        },
