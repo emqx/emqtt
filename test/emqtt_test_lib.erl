@@ -95,7 +95,8 @@ ensure_listener(Type, Name, BindAddr, BindPort) ->
                  mountpoint => <<>>,
                  zone => default,
                  proxy_protocol => false,
-                 tcp_options => #{active_n => 100}
+                 tcp_options => #{active_n => 10},
+                 hibernate_after => 5000
                 },
     TypeSpecificConf = listener_conf(Type),
     Conf = maps:merge(BaseConf, TypeSpecificConf),
