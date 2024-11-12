@@ -1,3 +1,23 @@
+# 1.13.4
+
+- Handle `tcp_error` and `ssl_error` at `waiting_for_connack` state.
+- Change log level for `reconnect_due_to_connection_error` from `error` to `info`
+- Fix compile warnings on OTP 27.
+
+# 1.13.3
+
+- Fix compile issues on OTP 27.
+
+# 1.13.2
+
+- Support fine-tuneing QUIC transport options.
+
+# 1.13.1
+
+- Support QUIC stream ID.
+- Improve exception context when broker did not assign client ID as expected.
+  Changed `bad_client_id` to `no_client_id_assigned_by_broker` so we know it's broker to blame but not client.
+
 # 1.13.0
 
 - Support Kerberos authentication callbacks.

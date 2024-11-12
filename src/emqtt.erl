@@ -349,7 +349,7 @@
                          E =:= quic_closed)).
 
 -define(LOG(Level, Msg, Meta, State),
-        ?SLOG(Level, Meta#{msg => Msg, clientid => State#state.clientid}, #{})).
+        ?SLOG(Level, (begin Meta end)#{msg => Msg, clientid => State#state.clientid}, #{})).
 
 %%--------------------------------------------------------------------
 %% API
@@ -1365,8 +1365,8 @@ connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
 connected(cast, {?DISCONNECT_PACKET(_ReasonCode), _Via},
           #state{reconnect = Re, conn_mod = ConnMod, socket = Sock} = State)
     when ?NEED_RECONNECT(Re) ->
-    ConnMod:close(Sock),
-    next_reconnect(State);
+    _ = ConnMod:close(Sock),
+    next_reconnect(State#state{socket = undefined});
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
     {stop, {disconnected, ReasonCode, Properties}, State};
 
@@ -1487,19 +1487,30 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
 handle_event(info, {Error, Sock, Reason}, connected,
              #state{reconnect = Re, socket = Sock} = State)
     when ?SOCK_ERROR(Error) andalso ?NEED_RECONNECT(Re) ->
-    ?LOG(error, "reconnect_due_to_connection_error",
+    ?LOG(info, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State);
+    next_reconnect(State#state{socket = undefined});
 
-%% ssl connection is wrapped in a `#ssl_socket{}' record defined in
-%% `emqtt_sock', which is not the same as what `ssl' uses in its
-%% errors.
+handle_event(info, {Error, Sock, Reason}, waiting_for_connack,
+             #state{reconnect = Re, socket = Sock} = State)
+    when ?SOCK_ERROR(Error) andalso ?NEED_RECONNECT(Re) ->
+    ?LOG(info, "socket_error_before_connack",
+         #{error => Error, reason => Reason}, State),
+    next_reconnect(State#state{socket = undefined});
+
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
              #state{reconnect = Re, socket = #ssl_socket{ssl = SSLSock}} = State)
     when ?NEED_RECONNECT(Re) ->
-    ?LOG(error, "reconnect_due_to_connection_error",
+    ?LOG(info, "reconnect_due_to_connection_error",
          #{error => Error, reason => Reason}, State),
-    next_reconnect(State);
+    next_reconnect(State#state{socket = undefined});
+
+handle_event(info, {ssl_error = Error, SSLSock, Reason}, waiting_for_connack,
+             #state{reconnect = Re, socket = #ssl_socket{ssl = SSLSock}} = State)
+    when ?NEED_RECONNECT(Re) ->
+    ?LOG(info, "socket_error_before_connack",
+         #{error => Error, reason => Reason}, State),
+    next_reconnect(State#state{socket = undefined});
 
 handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
     when Error =:= tcp_error; Error =:= ssl_error; Error =:= 'EXIT' ->
@@ -1507,9 +1518,6 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
          #{error => Error, reason =>Reason}, State),
     {stop, {shutdown, Reason}, State};
 
-%% ssl connection is wrapped in a `#ssl_socket{}' record defined in
-%% `emqtt_sock', which is not the same as what `ssl' uses in its
-%% errors.
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
     ?LOG(error, "connection_error",
          #{error => Error, reason => Reason}, State),
@@ -1527,10 +1535,12 @@ handle_event(info, {tcp_closed, Sock} = Event, StateName, #state{socket = SockIn
 
 handle_event(info, {Closed, _Sock}, connected, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
+    ?LOG(info, "socket_closed_when_connected", #{}, State),
     next_reconnect(State#state{socket = undefined});
 
 handle_event(info, {Closed, _Sock}, waiting_for_connack, #state{ reconnect = Re} = State)
     when ?SOCK_CLOSED(Closed) andalso ?NEED_RECONNECT(Re) ->
+    ?LOG(info, "socket_closed_before_connack", #{}, State),
     next_reconnect(State#state{socket = undefined});
 
 handle_event(info, {Closed, Sock}, StateName, State)
