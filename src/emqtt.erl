@@ -129,6 +129,7 @@
 -type(host() :: inet:ip_address() | inet:hostname() | binary_host()).
 
 -define(NO_HANDLER, undefined).
+-define(socket_reconnecting, socket_reconnecting).
 
 -type(mfas() :: {module(), atom(), list()} | {function(), list()}).
 
@@ -214,12 +215,13 @@
 }).
 
 %% 'Via' field add ability of multi stream support for QUIC transport
-%% For TCP based it should be always 'default'
+%% For TCP based, always try use 'default'
 -type via() :: default                                         % via default socket
                | {new_data_stream, quicer:stream_opts()}       % Create and use new long living data stream
                | {new_req_stream, quicer:stream_opts()}        % @TODO create and use short lived req stream
                | {logic_stream_id, non_neg_integer(), quicer:stream_opts()}
-               | inet:socket() | emqtt_quic:quic_sock().
+               | inet:socket() | emqtt_quic:quic_sock()
+               | ?socket_reconnecting.
 
 -opaque(mqtt_msg() :: #mqtt_msg{}).
 
@@ -306,7 +308,14 @@
 
 -type(sent_at() :: non_neg_integer()). %% in millisecond
 
+-type opname() :: connect | subscribe | unsubscribe | ping.
+-record(callid, {op :: opname(),
+                 via  :: via(),
+                 packet_id :: packet_id() | undefined
+                }).
+-type callid() :: #callid{}.
 -export_type([publish_success/0, publish_reply/0]).
+
 
 -define(PUB_REQ(Msg, Via, ExpireAt, Callback), {publish, Via, Msg, ExpireAt, Callback}).
 
@@ -960,7 +969,7 @@ initialized({call, From}, {connect, ConnMod}, State) ->
     case do_connect(ConnMod, qoe_inject(?FUNCTION_NAME, State)) of
         {ok, #state{connect_timeout = Timeout, socket = Via} = NewState} ->
             {next_state, waiting_for_connack,
-             add_call(new_call({connect, Via}, From), NewState),
+             add_call(new_call(call_id(connect, Via), From), NewState),
              {state_timeout, Timeout, Timeout}};
         {error, Reason} ->
             Error = {error, Reason},
@@ -985,7 +994,7 @@ initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefi
     case mqtt_connect(maybe_update_ctrl_sock(emqtt_quic, maybe_init_quic_state(emqtt_quic, State), NewSocket)) of
         {ok, #state{socket = Via} = NewState} ->
             {keep_state,
-             add_call(new_call({connect, Via}, From), NewState),
+             add_call(new_call(call_id(connect, Via), From), NewState),
              {reply, From, ok}};
         {error, Reason} = Error->
             %% TODO: handle error async to allow reconnect
@@ -1000,28 +1009,31 @@ initialized(info, ?PUB_REQ(#mqtt_msg{}, _Via, _ExpireAt, _Callback) = PubReq,
 initialized(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, initialized, State).
 
-do_connect(ConnMod, #state{socket = OldSock,
+do_connect(ConnMod, #state{pending_calls = Pendings,
                            sock_opts = SockOpts,
                            connect_timeout = Timeout
                           } = State) ->
     State0 = maybe_init_quic_state(ConnMod, State),
-    IsConnOpened = proplists:is_defined(handle, SockOpts),
+    IsUsingQuicHandle = proplists:is_defined(handle, SockOpts),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         skip ->
             {ok, State0};
-        {ok, NewSock} when not IsConnOpened ->
+        {ok, NewSock} when not IsUsingQuicHandle ->
             State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
             State2 = qoe_inject(handshaked, State1),
-            State3 = replace_connect_call_via(State2, OldSock, NewSock),
-            State4 = run_sock(State3#state{conn_mod = ConnMod, socket = NewSock}),
-            case mqtt_connect(State4) of
-                {ok, State5} ->
-                    {ok, State5};
+            NewPendings = refresh_calls(Pendings, NewSock),
+            State3 = run_sock(State2#state{conn_mod = ConnMod,
+                                           socket = NewSock,
+                                           pending_calls = NewPendings
+                                          }),
+            case mqtt_connect(State3) of
+                {ok, State4} ->
+                    {ok, State4};
                 {error, Reason} ->
                     ?LOG(info, "failed_to_send_CONNECT", #{reason => Reason}, State),
                     %% Failed to send CONNECT packet.
                     %% wait for the async socket close or error event
-                    {ok, State4}
+                    {ok, State3}
             end;
         {error, econnreset} ->
             %% TODO: handle econnreset.
@@ -1066,16 +1078,6 @@ mqtt_connect(State = #state{clientid    = ClientId,
                                  username     = Username,
                                  password     = emqtt_secret:unwrap(Password)}),
     send(Packet, State).
-
-%% CONNACK cannot be received from a stale socket, so change to the new one.
-replace_connect_call_via(#state{pending_calls = Calls} = State, OldSock, NewSock) ->
-    NewCalls = lists:map(fun(Call) -> replace_connect_call_via2(Call, OldSock, NewSock) end, Calls),
-    State#state{pending_calls = NewCalls}.
-
-replace_connect_call_via2(#call{id = {connect, OldSock}} = C, OldSock, NewSock) ->
-    C#call{id = {connect, NewSock}};
-replace_connect_call_via2(Call, _OldSock, _NewSock) ->
-    Call.
 
 maybe_merge_auth_props(Properties, #{auth_cb := #{initial_auth_props := AuthProps}}) ->
     maps:merge(Properties, AuthProps);
@@ -1145,7 +1147,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     Inflight1 = emqtt_inflight:limit(ReceiveMaximum, Inflight),
     State4 = State3#state{inflight = Inflight1},
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight1)],
-    case take_call({connect, Via}, State4) of
+    case take_call(call_id(connect, Via), State4) of
         {value, #call{from = From}, State5} ->
             {next_state, connected, State5, [{reply, From, Reply} | Retry]};
         false ->
@@ -1159,7 +1161,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
                                            Properties), Via},
                     State = #state{proto_ver = ProtoVer, socket = Via, reconnect = Re}) ->
     Reason = reason_code_name(ReasonCode, ProtoVer),
-    case take_call({connect, Via}, State) of
+    case take_call(call_id(connect, Via), State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, {Reason, Properties}},
             {stop_and_reply, {shutdown, Reason}, [{reply, From, Reply}]};
@@ -1197,7 +1199,7 @@ waiting_for_connack(info, ?PUB_REQ(_Msg, _Via, _ExpireAt, _Callback), _State) ->
     {keep_state_and_data, postpone};
 
 waiting_for_connack(state_timeout, _Timeout, #state{reconnect = Re} = State) ->
-    case take_call({connect, default_via(State)}, State) of
+    case take_call(call_id(connect, default_via(State)), State) of
         {value, #call{from = From}, _State} ->
             Reply = {error, connack_timeout},
             {stop_and_reply, connack_timeout, [{reply, From, Reply}]};
@@ -1257,7 +1259,7 @@ connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
     {Via, State1} = maybe_new_stream(Via0, State),
     case send(Via, ?SUBSCRIBE_PACKET(PacketId, Properties, Topics), State1) of
         {ok, NewState} ->
-            Call = new_call({subscribe, Via, PacketId}, From, SubReq),
+            Call = new_call(call_id(subscribe, Via, PacketId), From, SubReq),
             Subscriptions1 =
                 lists:foldl(fun({Topic, Opts}, Acc) ->
                                 maps:put(Topic, Opts, Acc)
@@ -1276,7 +1278,7 @@ connected({call, From}, UnsubReq = {unsubscribe, Via0, Properties, Topics},
     {Via, State1} = maybe_new_stream(Via0, State),
     case send(Via, ?UNSUBSCRIBE_PACKET(PacketId, Properties, Topics), State1) of
         {ok, NewState} ->
-            Call = new_call({unsubscribe, Via, PacketId}, From, UnsubReq),
+            Call = new_call(call_id(unsubscribe, Via, PacketId), From, UnsubReq),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
@@ -1288,7 +1290,7 @@ connected({call, From}, {ping, Via0}, State) ->
     {Via, State1} = maybe_new_stream(Via0, State),
     case send(Via, ?PACKET(?PINGREQ), State1) of
         {ok, NewState} ->
-            Call = new_call({ping, Via}, From),
+            Call = new_call(call_id(ping, Via), From),
             {keep_state, ensure_ack_timer(add_call(Call, NewState))};
         Error = {error, Reason} ->
             {stop_and_reply, Reason, [{reply, From, Error}]}
@@ -1357,7 +1359,7 @@ connected(cast, {?PUBCOMP_PACKET(_PacketId, _ReasonCode, _Properties) = PubComp,
 
 connected(cast, {?SUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
           State = #state{subscriptions = _Subscriptions}) ->
-    case take_call({subscribe, Via, PacketId}, State) of
+    case take_call(call_id(subscribe, Via, PacketId), State) of
         {value, #call{from = From}, NewState} ->
             NewProperties = case Properties of
                                 undefined -> #{via => Via};
@@ -1372,7 +1374,7 @@ connected(cast, {?SUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
 
 connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
           State = #state{subscriptions = Subscriptions}) ->
-    case take_call({unsubscribe, Via, PacketId}, State) of
+    case take_call(call_id(unsubscribe, Via, PacketId), State) of
         {value, #call{from = From, req = {_, Via, _, Topics}}, NewState} ->
             Subscriptions1 =
               lists:foldl(fun(Topic, Acc) ->
@@ -1393,7 +1395,7 @@ connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
 connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []}) ->
     keep_state_and_data;
 connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
-    case take_call({ping, Via}, State) of
+    case take_call(call_id(ping, Via), State) of
         {value, #call{from = From}, NewState} ->
             {keep_state, NewState, [{reply, From, pong}]};
         false ->
@@ -1930,6 +1932,9 @@ new_call(Id, From) ->
 new_call(Id, From, Req) ->
     #call{id = Id, from = From, req = Req, ts = os:timestamp()}.
 
+set_call_via(#call{id = OldId}, Via) ->
+    #call{id = call_id(OldId, Via)}.
+
 add_call(Call, Data = #state{pending_calls = Calls}) ->
     Data#state{pending_calls = [Call | Calls]}.
 
@@ -2316,15 +2321,16 @@ next_reconnect(#state{retry_timer = RetryTimer,
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
     ok = cancel_timer(AckTimer),
-    %% NOTE: do not set socket to 'undefined' here
-    %% because it is needed to swap for a new socket in pending_calls
-    {next_state, reconnect, State#state{sock_opts = proplists:delete(handle, OldSockOpts),
+    State1 = update_for_reconnecting(State),
+    {next_state, reconnect, State1#state{sock_opts = proplists:delete(handle, OldSockOpts),
                                         retry_timer = undefined,
                                         keepalive_timer = undefined
                                        },
      [{state_timeout, Timeout, Reconnect} | Actions]}.
 
 close_socket(_, undefined) ->
+    ok;
+close_socket(_, ?socket_reconnecting) ->
     ok;
 close_socket(ConnMod, Socket) ->
     _ = ConnMod:close(Socket),
@@ -2355,16 +2361,19 @@ now_ts() ->
 maybe_init_quic_state(emqtt_quic, Old = #state{extra = #{control_stream_sock := {quic, _, _} }}) ->
     %% Already opened
     Old;
-maybe_init_quic_state(emqtt_quic, #state{extra = Extra, clientid = Cid,
-                                         reconnect = Re, parse_state = PS} = Old) ->
+maybe_init_quic_state(emqtt_quic, State) ->
+    do_init_quic_state(State);
+maybe_init_quic_state(_, Old) ->
+    Old.
+
+do_init_quic_state(#state{extra = Extra, clientid = Cid,
+                          reconnect = Re, parse_state = PS} = Old) ->
     Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
                                                   , conn_parse_state => PS %% set once
                                                   , data_stream_socks => []
                                                   , logic_stream_map => #{}
                                                   , control_stream_sock => undefined
-                                                  , reconnect => ?NEED_RECONNECT(Re)})};
-maybe_init_quic_state(_, Old) ->
-    Old.
+                                                  , reconnect => ?NEED_RECONNECT(Re)})}.
 
 update_data_streams(#{ data_stream_socks := Socks
                      , conn_parse_state := PS
@@ -2437,8 +2446,39 @@ maybe_new_stream(Def, State) ->
 default_via(#state{socket = Via})->
     Via.
 
+%% Update #state{} for reconnecting, forget about old connections.
+update_for_reconnecting(#state{socket = Socket, pending_calls = Calls} = State0)
+  when Socket =/= ?socket_reconnecting ->
+    NewSocket = ?socket_reconnecting,
+    PendingCalls = refresh_calls(Calls, ?socket_reconnecting),
+    State1 = maybe_reinit_quic_state(State0),
+    State1#state{socket = NewSocket, pending_calls = PendingCalls}.
+
+maybe_reinit_quic_state(#state{extra = #{control_stream_sock := _}} = S) ->
+    do_init_quic_state(S);
+maybe_reinit_quic_state(S) ->
+    S.
+
+refresh_calls(Calls, Via) ->
+    lists:map(fun(X)->
+                      set_call_via(X, Via)
+              end, Calls).
+
 %% @doc avoid sensitive data leakage in the debug log
 redact_packet(#mqtt_packet{variable = #mqtt_packet_connect{} = Conn} = Packet) ->
     Packet#mqtt_packet{variable = Conn#mqtt_packet_connect{password = <<"******">>}};
 redact_packet(Packet) ->
     Packet.
+
+-spec call_id(opname(),
+              via(),
+              packet_id() | undefined
+             ) -> callid().
+call_id(Op, Via, PacketId) ->
+    #callid{op = Op, via = Via, packet_id = PacketId}.
+
+-spec call_id(callid() | opname(), via()) -> callid().
+call_id(#callid{} = C, Via) ->
+    C#callid{via = Via};
+call_id(Op, Via) when is_atom(Op) ->
+    call_id(Op, Via, undefined).
