@@ -1558,7 +1558,7 @@ handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = St
     {stop, {shutdown, Reason}, State};
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, _StateName, #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
-    ?LOG(error, "connection_error",
+    ?LOG(error, "TLS connection_error",
          #{error => Error, reason => Reason}, State),
     {stop, {shutdown, Reason}, State};
 

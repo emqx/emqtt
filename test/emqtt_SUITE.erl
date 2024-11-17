@@ -301,8 +301,11 @@ t_ssl_error_server_reject_client(Config) ->
                                            , {verify, verify_none}
                                            ]}
                                ]),
-    ?assertMatch({error, {ssl_error, _Sock, {tls_alert, {unknown_ca, _}}}},
-                 emqtt:connect(C)),
+    ?assertExit({{shutdown,
+                  {tls_alert,
+                   {unknown_ca,
+                    "TLS client: In state connection received SERVER ALERT: Fatal - Unknown CA\n"}}}, _},
+                emqtt:connect(C)),
     ok.
 
 t_reconnect_enabled(Config) ->
