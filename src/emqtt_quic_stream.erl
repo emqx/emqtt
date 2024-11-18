@@ -115,14 +115,19 @@ handle_stream_data(Stream, Bin, _Flags, #{ is_local := true
                                          , stream_parse_state := PSS} = S) ->
     ?LOG(debug, "RECV_Data", #{data => Bin}, S),
     Via = {quic, Conn, Stream},
-    #{ Via := PS } = PSS,
-    case parse(Bin, PS, []) of
-        {keep_state, NewPS, Packets} ->
-            {keep_state, S#{stream_parse_state := PSS#{Via := NewPS}},
-             [{next_event, cast, {P, Via} }
-              || P <- lists:reverse(Packets)]};
-        {stop, _} = Stop ->
-            Stop
+    case maps:get(Via, PSS, undefined) of
+        undefined ->
+            ?LOG(warning, "unknown stream data", #{stream => Stream}, S),
+            {stop, {unknown_stream_data, Stream}, S};
+        PS ->
+            case parse(Bin, PS, []) of
+                {keep_state, NewPS, Packets} ->
+                    {keep_state, S#{stream_parse_state := maps:update(Via, NewPS, PSS)},
+                     [{next_event, cast, {P, Via} }
+                      || P <- lists:reverse(Packets)]};
+                {stop, _} = Stop ->
+                    Stop
+            end
     end;
 %% Remote stream
 handle_stream_data(_Stream, _Bin, _Flags,

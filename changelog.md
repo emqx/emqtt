@@ -1,7 +1,8 @@
 # 1.13.4
 
-- Handle `tcp_error` and `ssl_error` at `waiting_for_connack` state.
-- Change log level for `reconnect_due_to_connection_error` from `error` to `info`
+- Handle CONNECT packet send error asynchronously so to allow a retry.
+- Handle `tcp_error` and `ssl_error` at `waiting_for_connack` state so to allow a retry.
+- Change log level for `reconnect_due_to_connection_error` from `error` to `info`.
 - Fix compile warnings on OTP 27.
 
 # 1.13.3
