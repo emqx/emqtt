@@ -83,6 +83,8 @@ groups() ->
        t_pubcomp,
        t_reconnect_disabled,
        t_reconnect_enabled,
+       t_retry_CONNECT_packet_send,
+       t_retry_CONNECT_asyn_socket_error,
        t_reconnect_enabled_server_disconnect,
        t_reconnect_stop,
        t_reconnect_reach_max_attempts,
@@ -351,6 +353,63 @@ t_reconnect_enabled(Config) ->
                  }
                ], receive_messages(1))
     end.
+
+t_retry_CONNECT_packet_send(Config) ->
+    retry_CONNECT_packet_send(true, Config).
+
+t_retry_CONNECT_asyn_socket_error(Config) ->
+    retry_CONNECT_packet_send(false, Config).
+
+retry_CONNECT_packet_send(SendError, Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    process_flag(trap_exit, true),
+    meck:new(emqtt_sock, [passthrough, no_history]),
+    meck:new(emqtt_quic, [passthrough, no_history]),
+    Tester = self(),
+    F = fun(Sock, _Packet) ->
+                Msg = case ConnFun of
+                    connect ->
+                        {tcp_error, Sock, closed};
+                    quic_connect ->
+                        {quic_error, Sock, closed}
+                end,
+                _ = erlang:send_after(10, self(), Msg),
+                Tester ! sync,
+                case SendError of
+                    true ->
+                        {error, einval};
+                    false ->
+                        ok
+                end
+        end,
+    meck:expect(emqtt_sock, send, F),
+    meck:expect(emqtt_quic, send, F),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {reconnect, true},
+                                {clean_start, false},
+                                {reconnect_timeout, 1}]), % 1 sec
+    spawn_link(fun() ->
+                       Res =  emqtt:ConnFun(C),
+                       Tester ! {connect_result, Res}
+               end),
+    receive
+        sync -> ok
+    after
+        1000 ->
+            error(timeout)
+    end,
+    %% unload mock, expect reconnect to succeed
+    meck:unload(emqtt_sock),
+    meck:unload(emqtt_quic),
+    receive
+        {connect_result, Res} ->
+            ?assertMatch({ok, _}, Res)
+    after
+        3000 ->
+            error(timeout)
+    end,
+    ok.
 
 t_reconnect_enabled_server_disconnect(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -688,7 +747,6 @@ test_publish_port_error(Config) ->
     exit(Sock, kill),
     PublishResult = receive {publish_result, R} -> R
                     after 5000 ->
-                              io:format(user, "~p\n", [sys:get_state(C)]),
                               ct:fail(timeout)
                     end,
     ?assertEqual({error, {shutdown, killed}}, PublishResult),
@@ -756,7 +814,6 @@ test_publish_port_error_retry(Config) ->
                                      end
                              after
                                  10_000 ->
-                                     io:format(user, "~p~n", [sys:get_state(C)]),
                                      error(timeout)
                              end
                      end,
