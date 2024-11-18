@@ -1210,7 +1210,7 @@ waiting_for_connack(state_timeout, _Timeout, #state{reconnect = Re} = State) ->
 waiting_for_connack(EventType, EventContent, State) ->
     case handle_event(EventType, EventContent, waiting_for_connack, #state{socket = Via} = State) of
         {stop, Reason, NewState} ->
-            case take_call({connect, Via}, NewState) of
+            case take_call(call_id(connect, Via), NewState) of
                 {value, #call{from = From}, _State} ->
                     Reply = case Reason of
                                 {shutdown, _ShutdownReason} ->
@@ -1932,13 +1932,13 @@ new_call(Id, From) ->
 new_call(Id, From, Req) ->
     #call{id = Id, from = From, req = Req, ts = os:timestamp()}.
 
-set_call_via(#call{id = OldId}, Via) ->
-    #call{id = call_id(OldId, Via)}.
+set_call_via(#call{id = OldId} = Call, Via) ->
+    Call#call{id = call_id(OldId, Via)}.
 
 add_call(Call, Data = #state{pending_calls = Calls}) ->
     Data#state{pending_calls = [Call | Calls]}.
 
-take_call(Id, Data = #state{pending_calls = Calls}) ->
+take_call(#callid{} = Id, Data = #state{pending_calls = Calls}) ->
     case lists:keytake(Id, #call.id, Calls) of
         {value, Call, Left} ->
             {value, Call, Data#state{pending_calls = Left}};
@@ -2460,9 +2460,7 @@ maybe_reinit_quic_state(S) ->
     S.
 
 refresh_calls(Calls, Via) ->
-    lists:map(fun(X)->
-                      set_call_via(X, Via)
-              end, Calls).
+    lists:map(fun(X)-> set_call_via(X, Via) end, Calls).
 
 %% @doc avoid sensitive data leakage in the debug log
 redact_packet(#mqtt_packet{variable = #mqtt_packet_connect{} = Conn} = Packet) ->
