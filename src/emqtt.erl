@@ -396,10 +396,11 @@ with_owner(Options) ->
         undefined -> [{owner, self()} | Options]
     end.
 
--spec(connect(client()) -> {ok, properties()} | {error, term()}).
+-spec(connect(client()) -> {ok, properties() | undefined} | {error, term()}).
 connect(Client) ->
     call(Client, {connect, emqtt_sock}).
 
+-spec(ws_connect(client()) -> {ok, properties() | undefined} | {error, term()}).
 ws_connect(Client) ->
     call(Client, {connect, emqtt_ws}).
 
@@ -1515,7 +1516,7 @@ handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
 
 handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
              _StateName, State = #state{socket = ConnPid}) ->
-    ?LOG(debug, "webSocket_down", #{reason => Reason}, State),
+    ?LOG(debug, "websocket_down", #{reason => Reason}, State),
     {stop, Reason, State};
 
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
