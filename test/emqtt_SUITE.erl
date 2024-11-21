@@ -513,15 +513,9 @@ t_reconnect_reach_max_attempts(Config) ->
     ok = emqtt_test_lib:stop_emqx(),
 
     receive
-        {'DOWN', MRef, process, C, _Info} ->
-            receive
-                {'EXIT', C, {reconnect_error, _}} ->
-                    ok
-            after 100 ->
-                    ct:fail(no_exit)
-            end
+        {'DOWN', MRef, process, C, {shutdown, fake_conn_error}} -> ok
     after 5000 ->
-            ct:fail(conn_still_alive)
+        ct:fail(conn_still_alive)
     end,
     meck:unload(emqtt_sock),
     unmock_quic().
