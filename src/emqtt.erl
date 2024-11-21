@@ -1106,7 +1106,7 @@ reconnect(info, {Error, StaleSock, _Reason}, #state{socket = StaleSock}) when ?S
     %% ignore stale socket error events
     keep_state_and_data;
 reconnect(info, {'EXIT', Owner, Reason}, State = #state{owner = Owner}) ->
-    ?LOG(debug, "EXIT_from_owner", #{reason => Reason}, State),
+    ?LOG(debug, "exit_from_owner", #{reason => Reason}, State),
     shutdown({owner, Owner, Reason}, State);
 reconnect(_EventType, _, _State) ->
     {keep_state_and_data, postpone}.
@@ -2221,7 +2221,7 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState, socket
             {keep_state, State#state{parse_state = NParseState}, next_events(Via, Packets)}
     catch
         error:Reason:St ->
-            shutdown({parse_packets_error, Reason, St}, State)
+            maybe_shutdown({parse_packets_error, Reason, St}, State)
     end.
 
 -compile({inline, [next_events/2]}).
