@@ -1030,7 +1030,7 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
                 {ok, State4} ->
                     {ok, State4};
                 {error, Reason} ->
-                    ?LOG(info, "failed_to_send_CONNECT", #{reason => Reason}, State),
+                    ?LOG(info, "failed_to_send_connect_packet", #{reason => Reason}, State),
                     %% Failed to send CONNECT packet.
                     %% wait for the async socket close or error event
                     {ok, State3}
@@ -1159,7 +1159,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(ReasonCode,
         {value, #call{from = From}, _State} ->
             Reply = {error, {Reason, Properties}},
             shutdown_reply(Reason, From, Reply);
-        false -> maybe_shutdown({connack_error, Reason}, State)
+        false -> maybe_reconnect({connack_error, Reason}, State)
     end;
 
 waiting_for_connack(cast, {?AUTH_PACKET(ReasonCode,
@@ -1196,7 +1196,7 @@ waiting_for_connack(state_timeout, connack_timeout, State) ->
         {value, #call{from = From}, _State} ->
             shutdown_reply(connack_timeout, From, {error, connack_timeout});
         false ->
-            maybe_shutdown(connack_timeout, State)
+            maybe_reconnect(connack_timeout, State)
     end;
 
 waiting_for_connack(EventType, EventContent, State) ->
@@ -1258,7 +1258,7 @@ connected({call, From}, SubReq = {subscribe, Via0, Properties, Topics},
                             end, Subscriptions, Topics),
             {keep_state, ensure_ack_timer(add_call(Call,NewState#state{subscriptions = Subscriptions1}))};
         Error = {error, Reason} when ?NEED_RECONNECT(Re) ->
-            goto_reconnect(Reason, State, [{reply, From, Error}]);
+            enter_reconnect(Reason, State, [{reply, From, Error}]);
         Error = {error, Reason} ->
             shutdown_reply(Reason, From, Error)
     end;
@@ -1395,7 +1395,7 @@ connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
     end;
 
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
-    maybe_shutdown({disconnected, ReasonCode, Properties}, State);
+    maybe_reconnect({disconnected, ReasonCode, Properties}, State);
 
 connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
     case send(?PACKET(?PINGREQ), State) of
@@ -1403,7 +1403,7 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, l
             IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
             {keep_state, ensure_keepalive_timer(NewState)};
         {error, Reason} ->
-            maybe_shutdown(Reason, State)
+            maybe_reconnect(Reason, State)
     end;
 
 connected(info, {timeout, TRef, keepalive},
@@ -1419,14 +1419,14 @@ connected(info, {timeout, TRef, keepalive},
                             put(send_oct, Val),
                             {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
                         {error, Reason} ->
-                            maybe_shutdown(Reason, State)
+                            maybe_reconnect(Reason, State)
                     end;
-                {error, Reason} -> maybe_shutdown(Reason, State)
+                {error, Reason} -> maybe_reconnect(Reason, State)
             end;
         false ->
             {keep_state, ensure_keepalive_timer(State), [hibernate]};
         {error, Reason} ->
-            maybe_shutdown(Reason, State)
+            maybe_reconnect(Reason, State)
     end;
 
 connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
@@ -1505,7 +1505,7 @@ handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
 handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
              _StateName, State = #state{socket = ConnPid}) ->
     ?LOG(debug, "websocket_down", #{reason => Reason}, State),
-    maybe_shutdown({websocket_down, Reason}, State);
+    maybe_reconnect({websocket_down, Reason}, State);
 
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
         when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
@@ -1515,24 +1515,24 @@ handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
 handle_event(info, {Error, Sock, Reason}, connected, #state{socket = Sock} = State)
         when ?SOCK_ERROR(Error) ->
     ?LOG(info, "socket_error", #{error => Error, reason => Reason}, State),
-    maybe_shutdown(Reason, State);
+    maybe_reconnect(Reason, State);
 
 handle_event(info, {Error, Sock, Reason}, waiting_for_connack,
              #state{socket = Sock} = State)
         when ?SOCK_ERROR(Error) ->
     ?LOG(info, "socket_error_before_connack", #{error => Error, reason => Reason}, State),
-    maybe_shutdown(Reason, State);
+    maybe_reconnect(Reason, State);
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
              #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
     ?LOG(info, "socket_error", #{error => Error, reason => Reason}, State),
-    maybe_shutdown(Reason, State);
+    maybe_reconnect(Reason, State);
 
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, waiting_for_connack,
              #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
     ?LOG(info, "socket_error_before_connack",
          #{error => Error, reason => Reason}, State),
-    maybe_shutdown(Reason, State);
+    maybe_reconnect(Reason, State);
 
 handle_event(info, {Error, Sock, Reason}, _StateName, #state{socket = Sock} = State)
     when ?SOCK_ERROR(Error) ->
@@ -1555,11 +1555,11 @@ handle_event(info, {tcp_closed, Sock} = Event, StateName, #state{socket = SockIn
 
 handle_event(info, {Closed, _Sock}, connected, State) when ?SOCK_CLOSED(Closed) ->
     ?LOG(info, "socket_closed_when_connected", #{}, State),
-    maybe_shutdown(Closed, State);
+    maybe_reconnect(Closed, State);
 
 handle_event(info, {Closed, _Sock}, waiting_for_connack, State) when ?SOCK_CLOSED(Closed) ->
     ?LOG(info, "socket_closed_before_connack", #{}, State),
-    maybe_shutdown(Closed, State);
+    maybe_reconnect(Closed, State);
 
 handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->
@@ -1575,7 +1575,7 @@ handle_event(info, {inet_reply, _Sock, ok}, _, _State) ->
     keep_state_and_data;
 handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     ?LOG(error, "tcp_error", #{ reason => Reason}, State),
-    maybe_shutdown(Reason, State);
+    maybe_reconnect(Reason, State);
 
 %% QUIC messages
 handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} = State) ->
@@ -1601,7 +1601,7 @@ handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} =
     end;
 
 handle_event(info, {'EXIT', Pid, normal}, StateName, State) ->
-    ?LOG(info, "unexpected_EXIT_ignored", #{pid => Pid, state => StateName}, State),
+    ?LOG(info, "unexpected_exit_ignored", #{pid => Pid, state => StateName}, State),
     keep_state_and_data;
 
 handle_event(info, {timeout, TRef, retry}, StateName, State0 = #state{retry_timer = TRef}) ->
@@ -1721,7 +1721,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = ?QOS_0}, Via0,  _ExpireAt, Callback), State
             maybe_shoot(NState);
         {error, Reason} ->
             eval_callback_handler({error, Reason}, Callback),
-            maybe_shutdown(Reason, State)
+            maybe_reconnect(Reason, State)
     end;
 shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
       State0 = #state{last_packet_id = PacketId, inflight = Inflight})
@@ -1739,7 +1739,7 @@ shoot(?PUB_REQ(Msg = #mqtt_msg{qos = QoS}, Via0, ExpireAt, Callback),
             maybe_shoot(State1);
         {error, Reason} ->
             eval_callback_handler({error, Reason}, Callback),
-            maybe_shutdown(Reason, State)
+            maybe_reconnect(Reason, State)
     end.
 
 is_pendings_empty(Pendings) ->
@@ -1768,7 +1768,7 @@ ack_inflight(Via,
                     }}, Callback),
             State#state{inflight = NInflight};
         error ->
-            ?LOG(warning, "unexpected_PUBACK", #{packet_id => PacketId, via => Via}, State),
+            ?LOG(warning, "unexpected_puback", #{packet_id => PacketId, via => Via}, State),
             State
     end;
 
@@ -1792,10 +1792,10 @@ ack_inflight(Via,
                                ),
             State#state{inflight = NInflight};
          {{value, ?INFLIGHT_PUBREL(Via, _PacketId, _SentAt, _ExpireAt)}, _} ->
-            ?LOG(notice, "duplicated_PUBREC_packet", #{via => Via, packet_id => PacketId}, State),
+            ?LOG(notice, "duplicated_pubrec_packet", #{via => Via, packet_id => PacketId}, State),
             State;
         error ->
-            ?LOG(warning, "unexpected_PUBREC_packet", #{via => Via, packet_id => PacketId}, State),
+            ?LOG(warning, "unexpected_pubrec_packet", #{via => Via, packet_id => PacketId}, State),
             State
     end;
 
@@ -1807,7 +1807,7 @@ ack_inflight(Via,
         {{value, ?INFLIGHT_PUBREL(Via, _PacketId, _SentAt, _ExpireAt)}, NInflight} ->
             State#state{inflight = NInflight};
         error ->
-            ?LOG(warning, "unexpected_PUBCOMP", #{packet_id => PacketId}, State),
+            ?LOG(warning, "unexpected_pubcomp_packet", #{packet_id => PacketId}, State),
             State
      end.
 
@@ -1883,13 +1883,13 @@ process_pubrel(Via, ?PUBREL_PACKET(PacketId, _ReasonCode = 0),
                 false -> {keep_state, State}
             end;
         error ->
-            ?LOG(warning, "unexpected_PUBREL", #{packet_id => PacketId}, State0),
+            ?LOG(warning, "unexpected_pubrel_packet", #{packet_id => PacketId}, State0),
             keep_state_and_data
     end;
 process_pubrel(Via, ?PUBREL_PACKET(PacketId, ReasonCode), State) ->
     %% AutoAck = true | false
     %% User does not expect unsuccesful PUBREL, so just log it.
-    ?LOG(warning, "unsuccessful_PUBREL",
+    ?LOG(warning, "unsuccessful_pubrel_packet",
       #{packet_id => PacketId,
         reason_code => ReasonCode,
         reason_code_name => reason_code_name(ReasonCode),
@@ -1983,7 +1983,7 @@ retry_send(State = #state{retry_interval = Intv, inflight = Inflight}) ->
         NState = retry_send(Now, emqtt_inflight:to_retry_list(Pred, Inflight), State),
         {keep_state, ensure_retry_timer(NState)}
     catch error : Reason ->
-              maybe_shutdown(Reason, State)
+        maybe_reconnect(Reason, State)
     end.
 
 retry_send(Now, [{{Via, PacketId}, ?INFLIGHT_PUBLISH(_Via, Msg, _, ExpireAt, Callback)} | More],
@@ -2082,9 +2082,9 @@ apply_callback_function({M, F, A}, Result)
        is_list(A) ->
     erlang:apply(M, F, A ++ [Result]).
 
-maybe_shutdown(Reason, #state{reconnect = Re} = State) when ?NEED_RECONNECT(Re) ->
-    goto_reconnect(Reason, State);
-maybe_shutdown(Reason, State) ->
+maybe_reconnect(Reason, #state{reconnect = Re} = State) when ?NEED_RECONNECT(Re) ->
+    enter_reconnect(Reason, State);
+maybe_reconnect(Reason, State) ->
     shutdown(Reason, State).
 
 shutdown(normal, State) ->
@@ -2175,7 +2175,7 @@ host(Host) -> Host.
 send_puback(Via, Packet, State) ->
     case send(Via, Packet, State) of
         {ok, NewState}  -> {keep_state, NewState};
-        {error, Reason} -> maybe_shutdown(Reason, State)
+        {error, Reason} -> maybe_reconnect(Reason, State)
     end.
 
 send(Msg, State) ->
@@ -2191,10 +2191,10 @@ send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
     Data = emqtt_frame:serialize(Packet, Ver),
     case ConnMod:send(Sock, Data) of
         ok  ->
-            ?LOG(debug, "SEND_Data", #{packet => redact_packet(Packet), socket => Sock}, State),
+            ?LOG(debug, "send_data", #{packet => redact_packet(Packet), socket => Sock}, State),
             {ok, bump_last_packet_id(State)};
         {error, Reason} ->
-            ?LOG(debug, "SEND_Data_failed", #{reason => Reason, packet => redact_packet(Packet), socket => Sock}, State),
+            ?LOG(debug, "send_data_failed", #{reason => Reason, packet => redact_packet(Packet), socket => Sock}, State),
             {error, Reason}
     end.
 
@@ -2221,7 +2221,7 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState, socket
             {keep_state, State#state{parse_state = NParseState}, next_events(Via, Packets)}
     catch
         error:Reason:St ->
-            maybe_shutdown({parse_packets_error, Reason, St}, State)
+            maybe_reconnect({parse_packets_error, Reason, St}, State)
     end.
 
 -compile({inline, [next_events/2]}).
@@ -2299,9 +2299,9 @@ reason_code_name(16#A1) -> subscription_identifiers_not_supported;
 reason_code_name(16#A2) -> wildcard_subscriptions_not_supported;
 reason_code_name(_Code) -> unknown_error.
 
-goto_reconnect(Reason, State) ->
-    goto_reconnect(Reason, State, []).
-goto_reconnect(Reason, #state{reconnect = Cnt, reconnect_timeout = Timeout} = State, Actions) ->
+enter_reconnect(Reason, State) ->
+    enter_reconnect(Reason, State, []).
+enter_reconnect(Reason, #state{reconnect = Cnt, reconnect_timeout = Timeout} = State, Actions) ->
     EventContent = #{retry_cnt => Cnt, reason => Reason},
     {next_state, reconnect, prepare_reconnect(State),
         [{state_timeout, Timeout, EventContent} | Actions]}.
