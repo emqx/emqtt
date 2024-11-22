@@ -87,7 +87,7 @@ send_complete(_Stream, false, _S) ->
     keep_state_and_data;
 send_complete(_Stream, true = _IsCanceled, S) ->
     %% @TODO bump counter
-    ?LOG(error, "QUIC_stream_send_canceled", #{}, S),
+    ?LOG(error, "quic_stream_send_canceled", #{}, S),
     keep_state_and_data.
 
 -spec send_shutdown_complete(stream_handle(), boolean(), cb_data()) -> cb_ret().
@@ -97,13 +97,13 @@ send_shutdown_complete(_Stream, _IsGraceful, _S) ->
 -spec start_completed(stream_handle(), quicer:stream_start_completed_props(), cb_data())
                      -> cb_ret().
 start_completed(_Stream, #{status := success, stream_id := StreamId} = Prop, S) ->
-    ?LOG(debug, "QUIC_stream_start_completed", Prop, S),
+    ?LOG(debug, "quic_stream_start_completed", Prop, S),
     {ok, S#{stream_id => StreamId}};
 start_completed(_Stream, #{status := stream_limit_reached, stream_id := _StreamId} = Prop, S) ->
-    ?LOG(error, "QUIC_stream_start_failed", Prop, S),
+    ?LOG(error, "quic_stream_start_failed", Prop, S),
     {stop, stream_limit_reached};
 start_completed(_Stream, #{status := Other } = Prop, S) ->
-    ?LOG(error, "QUIC_stream_start_failed", Prop, S),
+    ?LOG(error, "quic_stream_start_failed", Prop, S),
     %% or we could retry?
     {stop, {start_fail, Other}, S}.
 
@@ -113,7 +113,7 @@ start_completed(_Stream, #{status := Other } = Prop, S) ->
 handle_stream_data(Stream, Bin, _Flags, #{ is_local := true
                                          , control_stream_sock := {quic, Conn, _ControlStream}
                                          , stream_parse_state := PSS} = S) ->
-    ?LOG(debug, "RECV_Data", #{data => Bin}, S),
+    ?LOG(debug, "recv_data", #{data => Bin}, S),
     Via = {quic, Conn, Stream},
     case maps:get(Via, PSS, undefined) of
         undefined ->

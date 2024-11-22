@@ -372,10 +372,12 @@ $ rebar3 compile
 option() = {name, atom()} |
            {owner, pid()} |
            {host, host()} |
+           {hosts, [{host(), inet:port_number()}]} |
            {port, inet:port_number()} |
            {tcp_opts, [gen_tcp:option()]} |
            {ssl, boolean()} |
            {ssl_opts, [ssl:tls_client_option()]} |
+           {quic_opts, {quicer:conn_opts(), quicer:stream_opts()}} |
            {ws_path, string()} |
            {connect_timeout, pos_integer()} |
            {bridge_mode, boolean()} |
@@ -395,6 +397,9 @@ option() = {name, atom()} |
            {auto_ack, boolean()} |
            {ack_timeout, pos_integer()} |
            {force_ping, boolean()} |
+           {low_mem, boolean()} |
+           {reconnect, infinity | non_neg_integer()} |
+           {reconnect_timeout, pos_integer()} |
            {properties, properties()} |
            {custom_auth_callbacks, map()}
 ```
@@ -527,6 +532,10 @@ Client process will send messages like `{diconnected, ReasonCode, Properties}` t
 
 The host of the MQTT server to be connected. Host can be a hostname or an IP address. Defaults to `localhost`
 
+`{hosts, [{Host, Port}]}`
+
+A list of hosts to connect to. If the connection to the first host fails, the client will try the next host in the list. If the connection to all hosts fails, the client will return an error. Setting this option will override the `host` option.
+
 `{port, Port}`
 
 The port of the MQTT server to be connected. If not given, the default of 1883 for MQTT or 8883 for MQTT over TLS will be used.
@@ -620,6 +629,18 @@ Maximum time to wait for a reply message. Defaults to 30s.
 `{force_ping, boolean()}`
 
 If false (the default), if any other packet is sent during keep alive interval, the ping packet will not be sent this time. If true, the ping packet will be sent every time.
+
+`{low_mem, boolean()}`
+
+If true, the client will try to reduce memory usage by garbage collecting more frequently. Defaults to false.
+
+`{reconnect, infinity | non_neg_integer()}`
+
+The maximum number of reconnection attempts. Defaults to 0, means no reconnection.
+
+`{reconnect_timeout, pos_integer()}`
+
+The time interval between reconnection attempts. Defaults to 5s.
 
 `{properties, Properties}`
 

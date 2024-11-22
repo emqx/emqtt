@@ -1,3 +1,12 @@
+# 1.13.5
+
+- Avoid OTP crash reports by wrapping exit reason in the format `{shutdown,Reason}`.
+- Avoid `badmatch` error when `websocket` connection timeout.
+- Reformat some code for readability.
+- Fix `emqtt` was not trying to reconnect in certain error scenarios.
+- Fix function specs for `emqtt:connect/1` and `emqtt:ws_connect/1`.
+- Add missing opts to `README.md`.
+
 # 1.13.4
 
 - Handle CONNECT packet send error asynchronously so to allow a retry.

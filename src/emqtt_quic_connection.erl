@@ -59,10 +59,10 @@ init(ConnOpts) when is_map(ConnOpts) ->
 
 -spec closed(connection_handle(), quicer:conn_closed_props(), cb_data()) -> cb_ret().
 closed(_Conn, #{} = _Flags, #{state_name := waiting_for_connack, reconnect := true} =  S) ->
-    ?LOG(error, "QUIC_connection_closed_reconnect", #{}, S),
+    ?LOG(error, "quic_connection_closed_reconnect", #{}, S),
     keep_state_and_data;
 closed(_Conn, #{} = _Flags, #{state_name := _Other} = S)->
-    ?LOG(error, "QUIC_connection_closed", #{}, S),
+    ?LOG(error, "quic_connection_closed", #{}, S),
     %% @TODO why not stop?
     {stop, {shutdown, conn_closed}, S}.
 
@@ -93,7 +93,7 @@ shutdown(Conn, _ErrorCode, #{reconnect := true}) ->
     {keep_state_and_data, {next_event, info, {quic_closed, Conn}}};
 shutdown(Conn, ErrorCode, S) ->
     ok = quicer:async_close_connection(Conn),
-    ?LOG(info, "QUIC_peer_conn_shutdown", #{error_code => ErrorCode}, S),
+    ?LOG(info, "quic_peer_conn_shutdown", #{error_code => ErrorCode}, S),
     %% TCP return {shutdown, closed}
     case ErrorCode of
         success ->
@@ -107,7 +107,7 @@ shutdown(Conn, ErrorCode, S) ->
 -spec transport_shutdown(connection_handle(), quicer:transport_shutdown_props(), cb_data())
                         -> cb_ret().
 transport_shutdown(_C, DownInfo, S) ->
-    ?LOG(error, "QUIC_transport_shutdown", #{down_info => DownInfo}, S),
+    ?LOG(error, "quic_transport_shutdown", #{down_info => DownInfo}, S),
     keep_state_and_data.
 
 -spec peer_address_changed(connection_handle(), quicer:quicer_addr(), cb_data()) -> cb_ret().

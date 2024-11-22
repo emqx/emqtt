@@ -47,9 +47,12 @@ connect(Host0, Port, Opts, Timeout) ->
     ConnOpts = maps:merge(Opts1, DefaultOpts),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
-            {ok, _} = gun:await_up(ConnPid, Timeout),
-            case upgrade(ConnPid, Opts, Timeout) of
-                {ok, _Headers} -> {ok, ConnPid};
+            case gun:await_up(ConnPid, Timeout) of
+                {ok, _} ->
+                    case upgrade(ConnPid, Opts, Timeout) of
+                        {ok, _Headers} -> {ok, ConnPid};
+                        Error -> Error
+                    end;
                 Error -> Error
             end;
         Error -> Error
