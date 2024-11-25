@@ -740,7 +740,7 @@ test_publish_port_error(Config) ->
                     after 5000 ->
                               ct:fail(timeout)
                     end,
-    ?assertEqual({error, {shutdown, killed}}, PublishResult),
+    ?assertEqual({error, killed}, PublishResult),
     meck:unload(emqtt_sock).
 
 t_publish_port_error_retry(Config) ->
@@ -937,10 +937,10 @@ t_eval_callback_in_order(Config) ->
     mock_quic_send(fun(_, _) -> {error, closed} end),
 
     ?assertMatch([{1, ok}, %% qos0: treat send as successfully
-                  {2, {error, {shutdown, closed}}}, %% from inflight
-                  {3, {error, {shutdown, closed}}},
-                  {4, {error, {shutdown, closed}}}, %% from pending request queue
-                  {5, {error, {shutdown, closed}}},
+                  {2, {error, closed}}, %% from inflight
+                  {3, {error, closed}},
+                  {4, {error, closed}}, %% from pending request queue
+                  {5, {error, closed}},
                   {'EXIT', C, {shutdown, closed}}], ?COLLECT_ASYNC_RESULT(C)),
 
     meck:unload(emqtt_sock),
