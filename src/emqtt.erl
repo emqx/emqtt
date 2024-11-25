@@ -1641,13 +1641,7 @@ handle_unknown_event(EventType, EventContent, StateName, State) ->
 terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket}) ->
     reply_all_inflight_reqs(Reason, State),
     ok = reply_all_pendings_reqs(Reason, State),
-    case Reason of
-        {disconnected, ReasonCode, Properties} ->
-            %% backward compatible
-            ok = eval_msg_handler(State, disconnected, {ReasonCode, Properties});
-        _ ->
-            ok = eval_msg_handler(State, disconnected, Reason)
-    end,
+    ok = eval_msg_handler(State, disconnected, Reason),
     ok = close_socket(ConnMod, Socket).
 
 %% Downgrade
@@ -2023,16 +2017,12 @@ deliver(_Via, {pubrel, Msg}, State) ->
     ok = eval_msg_handler(State, pubrel, Msg),
     State.
 
-%% no dialyzer warning because the second clause kept for compatibility
--dialyzer({nowarn_function, [eval_msg_handler/3]}).
-eval_msg_handler(#state{msg_handler = ?NO_HANDLER,
-                        owner = Owner},
-                 disconnected, {ReasonCode, Properties}) when is_integer(ReasonCode) ->
+eval_msg_handler(#state{msg_handler = ?NO_HANDLER, owner = Owner}, disconnected,
+                {shutdown, {disconnected, ReasonCode, Properties}}) when is_integer(ReasonCode) ->
     %% Special handling for disconnected message when there is no handler callback
     Owner ! {disconnected, ReasonCode, Properties},
     ok;
-eval_msg_handler(#state{msg_handler = ?NO_HANDLER},
-                 disconnected, _OtherReason) ->
+eval_msg_handler(#state{msg_handler = ?NO_HANDLER}, disconnected, _OtherReason) ->
     %% do nothing to be backward compatible
     ok;
 eval_msg_handler(#state{msg_handler = ?NO_HANDLER,
