@@ -1,3 +1,7 @@
+# 1.13.6
+
+- Fix a typo in MQTT v3 reason code.
+
 # 1.13.5
 
 - Avoid OTP crash reports by wrapping exit reason in the format `{shutdown,Reason}`.
