@@ -1011,16 +1011,18 @@ initialized(EventType, EventContent, State) ->
 
 do_connect(ConnMod, #state{pending_calls = Pendings,
                            sock_opts = SockOpts,
-                           connect_timeout = Timeout
+                           connect_timeout = Timeout,
+                           qoe = IsQoE
                           } = State) ->
     State0 = maybe_init_quic_state(ConnMod, State),
     IsUsingQuicHandle = proplists:is_defined(handle, SockOpts),
+    IsQoE =/= false andalso put(qoe, IsQoE),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         skip ->
             {ok, State0};
         {ok, NewSock} when not IsUsingQuicHandle ->
             State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
-            State2 = qoe_inject(handshaked, State1),
+            State2 = qoe_inject(handshaked, maybe_qoe_tcp(State1)),
             NewPendings = refresh_calls(Pendings, NewSock),
             State3 = run_sock(State2#state{conn_mod = ConnMod,
                                            socket = NewSock,
@@ -2470,3 +2472,9 @@ call_id(#callid{} = C, Via) ->
     C#callid{via = Via};
 call_id(Op, Via) when is_atom(Op) ->
     call_id(Op, Via, undefined).
+
+
+maybe_qoe_tcp(#state{qoe = false} = S) ->
+    S;
+maybe_qoe_tcp(#state{qoe = QoE} = S) when is_map(QoE) ->
+    S#state{qoe = QoE#{tcp_connected_at => get(tcp_connected_at)}}.
