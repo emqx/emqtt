@@ -133,12 +133,20 @@
 
 -type(mfas() :: {module(), atom(), list()} | {function(), list()}).
 
+%% External handler events
+-define(publish, publish).
+-define(pubrel, pubrel).
+-define(connected, connected).
+-define(disconnected, disconnected).
+-define(reconnect, reconnect).
+
 %% Message handler is a set of callbacks defined to handle MQTT messages
 %% as well as the disconnect event.
--type(msg_handler() :: #{publish => fun((_Publish :: map()) -> any()) | mfas(),
-                         pubrel => fun((_PubRel :: map()) -> any()) | mfas(),
-                         connected => fun((_Properties :: term()) -> any()) | mfas(),
-                         disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas()
+-type(msg_handler() :: #{?publish => fun((_Publish :: map()) -> any()) | mfas(),
+                         ?pubrel => fun((_PubRel :: map()) -> any()) | mfas(),
+                         ?connected => fun((_Properties :: term()) -> any()) | mfas(),
+                         ?disconnected => fun(({reason_code(), _Properties :: term()}) -> any()) | mfas(),
+                         ?reconnect => fun((_Reason :: term()) -> any()) | mfas()
                         }).
 
 -type(option() :: {name, atom()}
@@ -1148,7 +1156,7 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
             {next_state, connected, State5, [{reply, From, Reply} | Retry]};
         false ->
             %% unkown caller, internally initiated re-connect
-            ok = eval_msg_handler(State4, connected, Properties),
+            ok = eval_msg_handler(State4, ?connected, Properties),
             {next_state, connected, State4, Retry}
     end;
 
@@ -1651,7 +1659,7 @@ terminate(Reason, _StateName, State = #state{conn_mod = ConnMod, socket = Socket
     Reason1 = unwrap_shutdown(Reason),
     ok = reply_all_inflight_reqs(Reason1, State),
     ok = reply_all_pendings_reqs(Reason1, State),
-    ok = eval_msg_handler(State, disconnected, Reason1),
+    ok = eval_msg_handler(State, ?disconnected, Reason1),
     ok = close_socket(ConnMod, Socket).
 
 %% Downgrade
@@ -2021,10 +2029,10 @@ deliver(Via, #mqtt_msg{qos = QoS, dup = Dup, retain = Retain, packet_id = Packet
             topic => Topic, properties => Props, payload => Payload,
             via => Via,
             client_pid => self()},
-    ok = eval_msg_handler(State, publish, Msg),
+    ok = eval_msg_handler(State, ?publish, Msg),
     State;
 deliver(_Via, {pubrel, Msg}, State) ->
-    ok = eval_msg_handler(State, pubrel, Msg),
+    ok = eval_msg_handler(State, ?pubrel, Msg),
     State.
 
 eval_msg_handler(#state{msg_handler = ?NO_HANDLER, owner = Owner}, disconnected,
@@ -2033,6 +2041,9 @@ eval_msg_handler(#state{msg_handler = ?NO_HANDLER, owner = Owner}, disconnected,
     Owner ! {disconnected, ReasonCode, Properties},
     ok;
 eval_msg_handler(#state{msg_handler = ?NO_HANDLER}, disconnected, _OtherReason) ->
+    %% do nothing to be backward compatible
+    ok;
+eval_msg_handler(#state{msg_handler = ?NO_HANDLER}, reconnect, _OtherReason) ->
     %% do nothing to be backward compatible
     ok;
 eval_msg_handler(#state{msg_handler = ?NO_HANDLER,
@@ -2083,7 +2094,7 @@ apply_callback_function({M, F, A}, Result)
     erlang:apply(M, F, A ++ [Result]).
 
 maybe_reconnect(Reason, #state{reconnect = Re} = State) when ?NEED_RECONNECT(Re) ->
-    eval_msg_handler(State, disconnected, Reason),
+    eval_msg_handler(State, ?reconnect, Reason),
     enter_reconnect(Reason, State);
 maybe_reconnect(Reason, State) ->
     shutdown(Reason, State).

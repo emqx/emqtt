@@ -4,6 +4,7 @@
 - Support QoE tcp latency tracking in SSL case.
 - Fix: `disconnected` callback handler was not being called when `reconnect` is set.
 - Fix: reply `{error, tcp_closed}` to `emqtt:connect` caller if the socket was closed while waiting for `CONNACK`.
+- Introduce new `reconnect` event (and corresponding message handler) that is triggered whenever the client process starts a reconnect attempt.
 
 # 1.13.5
 
