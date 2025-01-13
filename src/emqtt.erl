@@ -2076,6 +2076,7 @@ apply_callback_function({M, F, A}, Result)
     erlang:apply(M, F, A ++ [Result]).
 
 maybe_reconnect(Reason, #state{reconnect = Re} = State) when ?NEED_RECONNECT(Re) ->
+    eval_msg_handler(State, disconnected, Reason),
     enter_reconnect(Reason, State);
 maybe_reconnect(Reason, State) ->
     shutdown(Reason, State).

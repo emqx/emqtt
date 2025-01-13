@@ -1,7 +1,8 @@
 # 1.13.6
 
 - Fix a typo in MQTT v3 reason code.
-- Support QoE tcp latency tracking in SSL case. 
+- Support QoE tcp latency tracking in SSL case.
+- Fix: `disconnected` callback handler was not being called when `reconnect` is set.
 
 # 1.13.5
 
