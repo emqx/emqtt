@@ -1561,7 +1561,14 @@ handle_event(info, {Closed, _Sock}, connected, State) when ?SOCK_CLOSED(Closed) 
 
 handle_event(info, {Closed, _Sock}, waiting_for_connack, State) when ?SOCK_CLOSED(Closed) ->
     ?LOG(info, "socket_closed_before_connack", #{}, State),
-    maybe_reconnect(Closed, State);
+    #state{socket = Via} = State,
+    case take_call(call_id(connect, Via), State) of
+        {value, #call{from = From}, _NewState} ->
+            Error = {error, Closed},
+            shutdown_reply(Closed, From, Error);
+        false ->
+            maybe_reconnect(Closed, State)
+    end;
 
 handle_event(info, {Closed, Sock}, StateName, State)
     when Closed =:= tcp_closed; Closed =:= ssl_closed ->

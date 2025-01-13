@@ -3,6 +3,7 @@
 - Fix a typo in MQTT v3 reason code.
 - Support QoE tcp latency tracking in SSL case.
 - Fix: `disconnected` callback handler was not being called when `reconnect` is set.
+- Fix: reply `{error, tcp_closed}` to `emqtt:connect` caller if the socket was closed while waiting for `CONNACK`.
 
 # 1.13.5
 
