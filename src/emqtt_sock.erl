@@ -50,6 +50,7 @@ connect(Host, Port, SockOpts, Timeout) ->
         {ok, Sock} ->
             case lists:keyfind(ssl_opts, 1, SockOpts) of
                 {ssl_opts, SslOpts} ->
+                    ?IS_QoE andalso put(tcp_connected_at, erlang:monotonic_time(millisecond)),
                     ssl_upgrade(Host, Sock, SslOpts, Timeout);
                 false -> {ok, Sock}
             end;
