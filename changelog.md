@@ -1,6 +1,7 @@
 # 1.13.6
 
 - Fix a typo in MQTT v3 reason code.
+- Support QoE tcp latency tracking in SSL case. 
 
 # 1.13.5
 
