@@ -1499,8 +1499,8 @@ handle_event({call, From}, stop, _StateName, _State) ->
 handle_event({call, From}, status, StateName, _State) ->
     {keep_state_and_data, {reply, From, StateName}};
 
-handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
-             _StateName, State = #state{socket = ConnPid}) ->
+handle_event(info, {gun_ws, ConnPid, StreamRef, {binary, Data}},
+             _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
     ?LOG(debug, "websocket_recv_data", #{data => Data}, State),
     process_incoming(iolist_to_binary(Data), [], State);
 
