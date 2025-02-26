@@ -62,10 +62,10 @@ peer_accepted(_Stream, undefined, _S) ->
 -spec peer_receive_aborted(stream_handle(), non_neg_integer(), cb_data()) -> cb_ret().
 peer_receive_aborted(Stream, ErrorCode, #{is_unidir := false} = _S) ->
     %% we abort send with same reason
-    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND, ErrorCode),
     keep_state_and_data;
 peer_receive_aborted(Stream, ErrorCode, #{is_unidir := true, is_local := true} = _S) ->
-    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT, ErrorCode),
+    _ = quicer:async_shutdown_stream(Stream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND, ErrorCode),
     keep_state_and_data.
 
 -spec peer_send_aborted(stream_handle(), non_neg_integer(), cb_data()) -> cb_ret().
