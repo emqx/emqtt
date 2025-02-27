@@ -1509,6 +1509,10 @@ handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
     ?LOG(debug, "websocket_down", #{reason => Reason}, State),
     maybe_reconnect({websocket_down, Reason}, State);
 
+handle_event(info, {ssl, session_ticket, _Ticket}, _StateName, _State) ->
+    %% TLS 1.3 session ticket
+    keep_state_and_data;
+
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
         when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
     ?LOG(debug, "recv_data", #{data => Data}, State),

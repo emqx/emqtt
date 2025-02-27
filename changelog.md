@@ -1,3 +1,8 @@
+# 1.14.1
+
+- QUIC: Correctly handle peer stream recv abort. 
+- TLS1.3: Fix crash after recv session ticket
+
 # 1.14.0
 
 - Switch to using `gun` 2.1.0 as WebSocket client.
