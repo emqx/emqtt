@@ -43,12 +43,12 @@ jobs:
             # copy the build dir to host working dir for following build steps
             docker cp testcontainer:/_w/_build .
             docker rm -f testcontainer
-        - uses: actions/upload-artifact@v3
+        - uses: actions/upload-artifact@v4
           if: always()
           with:
             name: logs
             path: _build/test/logs
-        - uses: actions/upload-artifact@v3
+        - uses: actions/upload-artifact@v4
           with:
             name: cover
             path: _build/test/cover
