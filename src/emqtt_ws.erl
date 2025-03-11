@@ -25,9 +25,10 @@
         , getstat/2
         ]).
 
--type(option() :: {ws_path, string()}).
+-type option() :: {ws_path, string()}.
+-type connection() :: {_Conn :: pid(), gun:stream_ref()}.
 
--export_type([option/0]).
+-export_type([option/0, connection/0]).
 
 -define(WS_OPTS, #{compress => false,
                    protocols => [{<<"mqtt">>, gun_ws_h}]
