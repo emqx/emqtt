@@ -19,17 +19,13 @@
 -compile(nowarn_export_all).
 -compile(export_all).
 
--include("emqtt.hrl").
-
 -include_lib("eunit/include/eunit.hrl").
-
 -include_lib("common_test/include/ct.hrl").
 
 -define(ALL_IF_IP6, {0, 0, 0, 0, 0, 0, 0, 0}).
--define(LOCALHOST_IP6, {0, 0, 0, 0, 0, 0, 0, 1}).
 
 -define(HOSTS,
-        [{ip4, [<<"127.0.0.1">>, "127.0.0.1", {127, 0, 0, 1} ]},
+        [{ip4, [<<"127.0.0.1">>, "127.0.0.1", {127, 0, 0, 1}]},
          {ip6, ["localhost"]}
         ]).
 
@@ -51,24 +47,18 @@ all() ->
     [{group, ip6} || is_ip6_available()].
 
 connect_groups() ->
-    [{group, connect},
-     {group, ws_connect}
+    [{group, tcp},
+     {group, ws}
     ] ++
-    [{group, quic_connect} || emqtt_test_lib:has_quic()].
+    [{group, quic} || emqtt_test_lib:has_quic()].
 
 groups() ->
-    [{ip4, [], connect_groups()},
-     {connect, [], [t_connect]},
-     {ws_connect, [], [t_connect]}
-    ] ++
-    ip6_group() ++
-    quic_group().
-
-ip6_group() ->
-     [{ip6, [], connect_groups()} || is_ip6_available()].
-
-quic_group() ->
-    [{quic_connect, [], [t_connect]} || emqtt_test_lib:has_quic()].
+    [{ip4, [], connect_groups()}] ++
+    [{ip6, [], connect_groups()} || is_ip6_available()] ++
+    [{tcp, [], [t_connect, t_reconnect]},
+     {ws, [], [t_connect, t_reconnect]},
+     {quic, [], [t_connect, t_reconnect]}
+    ].
 
 suite() ->
     [{timetrap, {seconds, 15}}].
@@ -91,13 +81,13 @@ init_per_group(ip6, Config) ->
         false ->
             ok
     end,
-    [{ip_type, ip6} | Config];
-init_per_group(connect, Config) ->
-    [{conn_fun, connect} | Config];
-init_per_group(ws_connect, Config) ->
-    [{conn_fun, ws_connect} | Config];
-init_per_group(quic_connect, Config) ->
-    [{conn_fun, quic_connect} | Config].
+    [{ip_type, ip6}, {listener, mqtt_ip6} | Config];
+init_per_group(tcp, Config) ->
+    [{conn_fun, connect}, {transport, tcp} | Config];
+init_per_group(ws, Config) ->
+    [{conn_fun, ws_connect}, {transport, ws} | Config];
+init_per_group(quic, Config) ->
+    [{conn_fun, quic_connect}, {transport, quic}, {listener, mqtt} | Config].
 
 end_per_group(_, Config) ->
     Config.
@@ -113,9 +103,31 @@ t_connect(Config) ->
         {ok, C} = emqtt:start_link([{host, Host}, {port, Port}] ++ Opts),
         {ok, _} = emqtt:ConnFun(C),
         ct:pal("Connected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
-        ok= emqtt:disconnect(C)
+        pong = emqtt:ping(C),
+        connected = emqtt:status(C),
+        ok = emqtt:disconnect(C)
       end,
       Hosts).
+
+t_reconnect(Config) ->
+    %% Outermost group defines listener name:
+    ListenerName = lists:last([default] ++ [L || {listener, L} <- Config]),
+    ListenerId = atom_to_list(?config(transport, Config)) ++ ":" ++ atom_to_list(ListenerName),
+    ConnFun = ?config(conn_fun, Config),
+    [Host | _] = ?config(ip4, ?HOSTS),
+    {Port, Opts} = maps:get({ip4, ConnFun}, ?PORTS),
+    ct:pal("Connecting to ~p at port ~p via ~p", [Host, Port, ConnFun]),
+    {ok, C} = emqtt:start_link([{host, Host},
+                                {port, Port},
+                                {reconnect, 3},
+                                {reconnect_timeout, 1}] ++ Opts),
+    {ok, _} = emqtt:ConnFun(C),
+    ct:pal("Connected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
+    ok = emqx_listeners:restart_listener(ListenerId),
+    pong = emqtt:ping(C),
+    connected = emqtt:status(C),
+    ct:pal("Reconnected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
+    ok = emqtt:disconnect(C).
 
 is_ip6_available() ->
     is_ip6_available(30000).

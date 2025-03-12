@@ -236,7 +236,11 @@
           port            :: inet:port_number(),
           hosts           :: [{host(), inet:port_number()}],
           conn_mod        :: conn_mod(),
-          socket          :: undefined | ssl:sslsocket() | inet:socket() | pid() | emqtt_quic:quic_sock(),
+          socket          :: undefined
+                           | ssl:sslsocket()
+                           | inet:socket()
+                           | emqx_ws:connection()
+                           | emqtt_quic:quic_sock(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
@@ -1504,8 +1508,14 @@ handle_event(info, {gun_ws, ConnPid, StreamRef, {binary, Data}},
     ?LOG(debug, "websocket_recv_data", #{data => Data}, State),
     process_incoming(iolist_to_binary(Data), [], State);
 
-handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
-             _StateName, State = #state{socket = ConnPid}) ->
+handle_event(info, {gun_ws, ConnPid, StreamRef, {close, Code, _}},
+             _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
+    %% Expecting connection to be closed shortly.
+    ?LOG(debug, "websocket_close", #{code => Code}, State),
+    keep_state_and_data;
+
+handle_event(info, {gun_down, ConnPid, _, Reason, _KilledStreams},
+             _StateName, State = #state{socket = {ConnPid, _StreamRef}}) ->
     ?LOG(debug, "websocket_down", #{reason => Reason}, State),
     maybe_reconnect({websocket_down, Reason}, State);
 

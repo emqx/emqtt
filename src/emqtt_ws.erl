@@ -25,9 +25,10 @@
         , getstat/2
         ]).
 
--type(option() :: {ws_path, string()}).
+-type option() :: {ws_path, string()}.
+-type connection() :: {_Conn :: pid(), gun:stream_ref()}.
 
--export_type([option/0]).
+-export_type([option/0, connection/0]).
 
 -define(WS_OPTS, #{compress => false,
                    protocols => [{<<"mqtt">>, gun_ws_h}]
@@ -41,8 +42,7 @@ connect(Host0, Port, Opts, Timeout) ->
     %% 1. open connection
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
     ConnOpts = opts(TransportOptions, #{connect_timeout => Timeout,
-                                             retry => 3,
-                                             retry_timeout => 30000}),
+                                        retry => 0}),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             case gun:await_up(ConnPid, Timeout) of
