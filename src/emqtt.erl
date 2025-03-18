@@ -1544,6 +1544,11 @@ handle_event(info, {ssl_error = Error, SSLSock, Reason}, connected,
     ?LOG(info, "socket_error", #{error => Error, reason => Reason}, State),
     maybe_reconnect(Reason, State);
 
+handle_event(info, {ssl_closed = Error, SSLSock, Reason}, connected,
+             #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
+    ?LOG(info, "socket_closed", #{error => Error, reason => Reason}, State),
+    maybe_reconnect(Reason, State);
+
 handle_event(info, {ssl_error = Error, SSLSock, Reason}, waiting_for_connack,
              #state{socket = #ssl_socket{ssl = SSLSock}} = State) ->
     ?LOG(info, "socket_error_before_connack",
