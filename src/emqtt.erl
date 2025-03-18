@@ -1035,6 +1035,11 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
             case mqtt_connect(State3) of
                 {ok, State4} ->
                     {ok, State4};
+                {error, closed} ->
+                    %% We may receive the `closed' error when attempting to perform MQTT
+                    %% connect on a TLS socket, for example, if the client's TLS
+                    %% certificate is revoked and the server closes the connection.
+                    {error, closed};
                 {error, Reason} ->
                     ?LOG(info, "failed_to_send_connect_packet", #{reason => Reason}, State),
                     %% Failed to send CONNECT packet.
