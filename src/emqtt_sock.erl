@@ -76,7 +76,23 @@ ssl_upgrade(Host, Sock, SslOpts0, Timeout) ->
 send(Sock, Data) when is_port(Sock) ->
     send_tcp_data(Sock, Data);
 send(#ssl_socket{ssl = SslSock}, Data) ->
-    ssl:send(SslSock, Data);
+    case ssl:send(SslSock, Data) of
+        ok ->
+            ok;
+        {error, closed}->
+            %% We attempt to grab an async exception with more information, if
+            %% available; otherwise, bail out.
+            receive
+                {ssl_error, _Sock, DetailedReason} ->
+                    {error, DetailedReason};
+                {ssl_closed, _Sock} ->
+                    {error, closed}
+            after 1 ->
+                    {error, closed}
+            end;
+        {error, Reason}->
+            {error, Reason}
+    end;
 send(QuicStream, Data) when is_reference(QuicStream) ->
     case quicer:send(QuicStream, Data) of
         {ok, _Len} ->
