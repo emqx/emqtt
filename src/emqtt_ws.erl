@@ -51,9 +51,11 @@ connect(Host0, Port, Opts, Timeout) ->
                         {ok, StreamRef} -> {ok, {ConnPid, StreamRef}};
                         Error -> Error
                     end;
-                Error -> Error
+                Error ->
+                    Error
             end;
-        Error -> Error
+        Error ->
+            Error
     end.
 
 opts([], Acc) -> Acc;
@@ -73,6 +75,8 @@ upgrade(ConnPid, Opts, Timeout) ->
         {gun_response, ConnPid, _, _, Status, Headers} ->
             {error, {ws_upgrade_failed, Status, Headers}};
         {gun_error, ConnPid, StreamRef, Reason} ->
+            {error, {ws_upgrade_failed, Reason}};
+        {gun_down, ConnPid, _, Reason, _} ->
             {error, {ws_upgrade_failed, Reason}}
     after Timeout ->
         {error, timeout}
