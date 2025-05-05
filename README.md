@@ -354,7 +354,7 @@ Add to `rebar.config`
 
 ```erlang
 ...
-{deps, [{emqtt, {git, "https://github.com/emqx/emqtt", {tag, "v1.2.0"}}}]}.
+{deps, [{emqtt, {git, "https://github.com/emqx/emqtt", {tag, "1.14.4"}}}]}.
 ...
 ```
 
