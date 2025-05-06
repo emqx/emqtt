@@ -526,7 +526,7 @@ If a name is provided, the gen_statem will be registered with this name. For det
 
 `{owner, Pid}`
 
-Client process will send messages like `{diconnected, ReasonCode, Properties}` to the owner process.
+Client process will send messages like `{disconnected, ReasonCode, Properties}` to the owner process.
 
 `{host, Host}`
 
@@ -869,7 +869,7 @@ ok = emqtt:publish(ConnPid, <<"hello">>, #{}, <<"Hello World!">>, [{qos, 0}]).
 {ok, _PktId} = emqtt:publish(ConnPid, <<"hello">>, #{}, <<"Hello World!">>, [{qos, 1}]).
 
 receive
-    {disconnect, ReasonCode, Properties} ->
+    {disconnected, ReasonCode, Properties} ->
         io:format("Recv a DISONNECT packet - ReasonCode: ~p, Properties: ~p~n", [ReasonCode, Properties]);
     {publish, PUBLISH} ->
         io:format("Recv a PUBLISH packet: ~p~n", [PUBLISH]);
