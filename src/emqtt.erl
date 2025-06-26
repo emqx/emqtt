@@ -1040,6 +1040,11 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
                     %% connect on a TLS socket, for example, if the client's TLS
                     %% certificate is revoked and the server closes the connection.
                     {error, closed};
+                {error, {tls_alert, _} = Reason} ->
+                    %% If we receive a TLS alert here such as `Certificate Revoked`, there
+                    %% is no other socket event to be received, and thus we must terminate
+                    %% now to avoid hanging and then getting a `{error, connack_timeout}`.
+                    {error, Reason};
                 {error, Reason} ->
                     ?LOG(info, "failed_to_send_connect_packet", #{reason => Reason}, State),
                     %% Failed to send CONNECT packet.
