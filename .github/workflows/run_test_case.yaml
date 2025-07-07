@@ -2,7 +2,11 @@ name: Run test case
 
 on:
     push:
+      branches:
+        - "master"
     pull_request:
+      branches:
+        - "master"
     release:
         types:
             - published
@@ -17,11 +21,12 @@ jobs:
             fail-fast: false
             matrix:
                 docker_image:
+                  - "ghcr.io/emqx/emqx-builder/5.5-0:1.15.7-26.2.5.2-3-ubuntu24.04"
                   - "ghcr.io/emqx/emqx-builder/5.5-2:1.18.3-27.2-3-ubuntu24.04"
 
         steps:
         - name: Checkout
-          uses: actions/checkout@v3
+          uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
           with:
             submodules: recursive
         - name: work around https://github.com/actions/checkout/issues/766
@@ -43,12 +48,12 @@ jobs:
             # copy the build dir to host working dir for following build steps
             docker cp testcontainer:/_w/_build .
             docker rm -f testcontainer
-        - uses: actions/upload-artifact@v4
+        - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
           if: always()
           with:
             name: logs
             path: _build/test/logs
-        - uses: actions/upload-artifact@v4
+        - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
           with:
             name: cover
             path: _build/test/cover
