@@ -40,9 +40,11 @@ connect(Host0, Port, Opts, Timeout) ->
     Host1 = convert_host(Host0),
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
+    TcpOpts = tcp_opts(Opts, []),
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
     ConnOpts = opts(TransportOptions, #{connect_timeout => Timeout,
-                                        retry => 0}),
+                                        retry => 0,
+                                        tcp_opts => TcpOpts}),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             case gun:await_up(ConnPid, Timeout) of
@@ -61,6 +63,16 @@ connect(Host0, Port, Opts, Timeout) ->
 opts([], Acc) -> Acc;
 opts([{Name, Value} | More], Acc) ->
     opts(More, Acc#{Name => Value}).
+
+tcp_opts([], Acc) ->
+    Acc;
+tcp_opts([{Key, _Value} = Opt | Opts], Acc) ->
+    case lists:member(Key, [fd, ifaddr, ip, port, tcp_module, netns, bind_to_device, ipv6_probe]) of
+        true -> tcp_opts(Opts, [Opt | Acc]);
+        false -> tcp_opts(Opts, Acc)
+    end;
+tcp_opts([_ | Opts], Acc) ->
+    tcp_opts(Opts, Acc).
 
 -spec(upgrade(pid(), list(), timeout())
       -> {ok, Headers :: list()} | {error, Reason :: term()}).
