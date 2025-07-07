@@ -239,7 +239,7 @@
           socket          :: undefined
                            | ssl:sslsocket()
                            | inet:socket()
-                           | emqx_ws:connection()
+                           | emqtt_ws:connection()
                            | emqtt_quic:quic_sock(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
