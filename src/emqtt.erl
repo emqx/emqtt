@@ -252,6 +252,7 @@
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
           keepalive_timer :: undefined | tref(),
+          pingresp_timer  :: undefined | tref(),
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_msg        :: undefined | mqtt_msg(),
@@ -1400,14 +1401,14 @@ connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
             keep_state_and_data
     end;
 
-connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []}) ->
-    keep_state_and_data;
+connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []} = State) ->
+    {keep_state, cancel_pingresp_timer(State)};
 connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
     case take_call(call_id(ping, Via), State) of
         {value, #call{from = From}, NewState} ->
-            {keep_state, NewState, [{reply, From, pong}]};
+            {keep_state, cancel_pingresp_timer(NewState), [{reply, From, pong}]};
         false ->
-            keep_state_and_data
+            {keep_state, cancel_pingresp_timer(State)}
     end;
 
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
@@ -1417,7 +1418,7 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, l
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
             IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
-            {keep_state, ensure_keepalive_timer(NewState)};
+            {keep_state, ensure_pingresp_timer(ensure_keepalive_timer(NewState))};
         {error, Reason} ->
             maybe_reconnect(Reason, State)
     end;
@@ -1433,7 +1434,7 @@ connected(info, {timeout, TRef, keepalive},
                     case ConnMod:getstat(Sock, [send_oct]) of
                         {ok, [{send_oct, Val}]} ->
                             put(send_oct, Val),
-                            {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
+                            {keep_state, ensure_pingresp_timer(ensure_keepalive_timer(NewState)), [hibernate]};
                         {error, Reason} ->
                             maybe_reconnect(Reason, State)
                     end;
@@ -1634,6 +1635,10 @@ handle_event(info, {timeout, TRef, retry}, StateName, State0 = #state{retry_time
     ?LOG(info, "discarded_retry_timer", #{state => StateName}, State0),
     State = State0#state{retry_timer = undefined},
     {keep_state, State};
+
+handle_event(info, {timeout, TRef, pingresp}, StateName, State0 = #state{pingresp_timer = TRef}) ->
+    ?LOG(info, "pingresp_timeout", #{state => StateName}, State0),
+    maybe_reconnect(pingresp_timeout, State0);
 
 handle_event(EventType, EventContent, StateName, State) ->
     maybe_upgrade_test_cheat(EventType, EventContent, StateName, State).
@@ -1925,6 +1930,22 @@ ensure_keepalive_timer(State = #state{keepalive = I}) ->
     ensure_keepalive_timer(timer:seconds(I), State).
 ensure_keepalive_timer(I, State) when is_integer(I) ->
     State#state{keepalive_timer = erlang:start_timer(I, self(), keepalive)}.
+
+ensure_pingresp_timer(State = #state{pingresp_timer = undefined, ack_timeout = Timeout}) ->
+    State#state{pingresp_timer = erlang:start_timer(Timeout, self(), pingresp)};
+ensure_pingresp_timer(State) ->
+    State.
+
+cancel_pingresp_timer(State = #state{pingresp_timer = undefined}) ->
+    State;
+cancel_pingresp_timer(State = #state{pingresp_timer = TRef}) ->
+    _ = erlang:cancel_timer(TRef),
+    receive
+        {timeout, TRef, _} -> ok
+    after 0 ->
+        ok
+    end,
+    State#state{pingresp_timer = undefined}.
 
 new_call(Id, From) ->
     new_call(Id, From, undefined).
