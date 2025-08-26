@@ -1,3 +1,12 @@
+# 1.13.7
+
+- Fix a typo in MQTT v3 reason code.
+- Bump quicer to 0.1.11
+
+# 1.13.6
+
+- Support QoE tcp latency tracking in SSL case.
+
 # 1.13.5
 
 - Avoid OTP crash reports by wrapping exit reason in the format `{shutdown,Reason}`.
