@@ -236,7 +236,11 @@
           port            :: inet:port_number(),
           hosts           :: [{host(), inet:port_number()}],
           conn_mod        :: conn_mod(),
-          socket          :: undefined | ssl:sslsocket() | inet:socket() | pid() | emqtt_quic:quic_sock(),
+          socket          :: undefined
+                           | ssl:sslsocket()
+                           | inet:socket()
+                           | emqx_ws:connection()
+                           | emqtt_quic:quic_sock(),
           sock_opts       :: [emqtt_sock:option()|emqtt_ws:option()],
           connect_timeout :: pos_integer(),
           bridge_mode     :: boolean(),
@@ -248,6 +252,7 @@
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
           keepalive_timer :: undefined | tref(),
+          pingresp_timer  :: undefined | tref(),
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_msg        :: undefined | mqtt_msg(),
@@ -1011,16 +1016,18 @@ initialized(EventType, EventContent, State) ->
 
 do_connect(ConnMod, #state{pending_calls = Pendings,
                            sock_opts = SockOpts,
-                           connect_timeout = Timeout
+                           connect_timeout = Timeout,
+                           qoe = IsQoE
                           } = State) ->
     State0 = maybe_init_quic_state(ConnMod, State),
     IsUsingQuicHandle = proplists:is_defined(handle, SockOpts),
+    IsQoE =/= false andalso put(qoe, IsQoE),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         skip ->
             {ok, State0};
         {ok, NewSock} when not IsUsingQuicHandle ->
             State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
-            State2 = qoe_inject(handshaked, State1),
+            State2 = qoe_inject(handshaked, maybe_qoe_tcp(State1)),
             NewPendings = refresh_calls(Pendings, NewSock),
             State3 = run_sock(State2#state{conn_mod = ConnMod,
                                            socket = NewSock,
@@ -1029,6 +1036,16 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
             case mqtt_connect(State3) of
                 {ok, State4} ->
                     {ok, State4};
+                {error, closed} ->
+                    %% We may receive the `closed' error when attempting to perform MQTT
+                    %% connect on a TLS socket, for example, if the client's TLS
+                    %% certificate is revoked and the server closes the connection.
+                    {error, closed};
+                {error, {tls_alert, _} = Reason} ->
+                    %% If we receive a TLS alert here such as `Certificate Revoked`, there
+                    %% is no other socket event to be received, and thus we must terminate
+                    %% now to avoid hanging and then getting a `{error, connack_timeout}`.
+                    {error, Reason};
                 {error, Reason} ->
                     ?LOG(info, "failed_to_send_connect_packet", #{reason => Reason}, State),
                     %% Failed to send CONNECT packet.
@@ -1384,14 +1401,14 @@ connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
             keep_state_and_data
     end;
 
-connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []}) ->
-    keep_state_and_data;
+connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []} = State) ->
+    {keep_state, cancel_pingresp_timer(State)};
 connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
     case take_call(call_id(ping, Via), State) of
         {value, #call{from = From}, NewState} ->
-            {keep_state, NewState, [{reply, From, pong}]};
+            {keep_state, cancel_pingresp_timer(NewState), [{reply, From, pong}]};
         false ->
-            keep_state_and_data
+            {keep_state, cancel_pingresp_timer(State)}
     end;
 
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
@@ -1401,7 +1418,7 @@ connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, l
     case send(?PACKET(?PINGREQ), State) of
         {ok, NewState} ->
             IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
-            {keep_state, ensure_keepalive_timer(NewState)};
+            {keep_state, ensure_pingresp_timer(ensure_keepalive_timer(NewState))};
         {error, Reason} ->
             maybe_reconnect(Reason, State)
     end;
@@ -1417,7 +1434,7 @@ connected(info, {timeout, TRef, keepalive},
                     case ConnMod:getstat(Sock, [send_oct]) of
                         {ok, [{send_oct, Val}]} ->
                             put(send_oct, Val),
-                            {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
+                            {keep_state, ensure_pingresp_timer(ensure_keepalive_timer(NewState)), [hibernate]};
                         {error, Reason} ->
                             maybe_reconnect(Reason, State)
                     end;
@@ -1497,15 +1514,25 @@ handle_event({call, From}, stop, _StateName, _State) ->
 handle_event({call, From}, status, StateName, _State) ->
     {keep_state_and_data, {reply, From, StateName}};
 
-handle_event(info, {gun_ws, ConnPid, _StreamRef, {binary, Data}},
-             _StateName, State = #state{socket = ConnPid}) ->
+handle_event(info, {gun_ws, ConnPid, StreamRef, {binary, Data}},
+             _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
     ?LOG(debug, "websocket_recv_data", #{data => Data}, State),
     process_incoming(iolist_to_binary(Data), [], State);
 
-handle_event(info, {gun_down, ConnPid, _, Reason, _, _},
-             _StateName, State = #state{socket = ConnPid}) ->
+handle_event(info, {gun_ws, ConnPid, StreamRef, {close, Code, _}},
+             _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
+    %% Expecting connection to be closed shortly.
+    ?LOG(debug, "websocket_close", #{code => Code}, State),
+    keep_state_and_data;
+
+handle_event(info, {gun_down, ConnPid, _, Reason, _KilledStreams},
+             _StateName, State = #state{socket = {ConnPid, _StreamRef}}) ->
     ?LOG(debug, "websocket_down", #{reason => Reason}, State),
     maybe_reconnect({websocket_down, Reason}, State);
+
+handle_event(info, {ssl, session_ticket, _Ticket}, _StateName, _State) ->
+    %% TLS 1.3 session ticket
+    keep_state_and_data;
 
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
         when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
@@ -1608,6 +1635,10 @@ handle_event(info, {timeout, TRef, retry}, StateName, State0 = #state{retry_time
     ?LOG(info, "discarded_retry_timer", #{state => StateName}, State0),
     State = State0#state{retry_timer = undefined},
     {keep_state, State};
+
+handle_event(info, {timeout, TRef, pingresp}, StateName, State0 = #state{pingresp_timer = TRef}) ->
+    ?LOG(info, "pingresp_timeout", #{state => StateName}, State0),
+    maybe_reconnect(pingresp_timeout, State0);
 
 handle_event(EventType, EventContent, StateName, State) ->
     maybe_upgrade_test_cheat(EventType, EventContent, StateName, State).
@@ -1899,6 +1930,22 @@ ensure_keepalive_timer(State = #state{keepalive = I}) ->
     ensure_keepalive_timer(timer:seconds(I), State).
 ensure_keepalive_timer(I, State) when is_integer(I) ->
     State#state{keepalive_timer = erlang:start_timer(I, self(), keepalive)}.
+
+ensure_pingresp_timer(State = #state{pingresp_timer = undefined, ack_timeout = Timeout}) ->
+    State#state{pingresp_timer = erlang:start_timer(Timeout, self(), pingresp)};
+ensure_pingresp_timer(State) ->
+    State.
+
+cancel_pingresp_timer(State = #state{pingresp_timer = undefined}) ->
+    State;
+cancel_pingresp_timer(State = #state{pingresp_timer = TRef}) ->
+    _ = erlang:cancel_timer(TRef),
+    receive
+        {timeout, TRef, _} -> ok
+    after 0 ->
+        ok
+    end,
+    State#state{pingresp_timer = undefined}.
 
 new_call(Id, From) ->
     new_call(Id, From, undefined).
@@ -2470,3 +2517,9 @@ call_id(#callid{} = C, Via) ->
     C#callid{via = Via};
 call_id(Op, Via) when is_atom(Op) ->
     call_id(Op, Via, undefined).
+
+
+maybe_qoe_tcp(#state{qoe = false} = S) ->
+    S;
+maybe_qoe_tcp(#state{qoe = QoE} = S) when is_map(QoE) ->
+    S#state{qoe = QoE#{tcp_connected_at => get(tcp_connected_at)}}.

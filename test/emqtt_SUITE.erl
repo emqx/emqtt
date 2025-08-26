@@ -66,6 +66,7 @@ groups() ->
        t_connect_timeout,
        t_subscribe,
        t_subscribe_qoe,
+       t_subscribe_qoe_ssl,
        t_publish,
        t_publish_reply_error,
        t_publish_process_monitor,
@@ -616,7 +617,48 @@ t_subscribe_qoe(Config) ->
     {ok, _, [2]} = emqtt:subscribe(C, #{}, Topic, [{qos, ?QOS_2}, {nl, false}, {other, ignore}]),
 
     {ok, _, [0,1,2]} = emqtt:subscribe(C, [{Topic, at_most_once},{Topic, 1}, {Topic, [{qos, ?QOS_2}]}]),
-    ?assert(is_map(proplists:get_value(qoe, emqtt:info(C)))),
+    QoE = proplists:get_value(qoe, emqtt:info(C)),
+    ?assert(is_map(QoE)),
+    ?assert(undefined == maps:get(tcp_connected_at, QoE)),
+    ok = emqtt:disconnect(C).
+
+t_subscribe_qoe_ssl(Config) ->
+    ConnFun = connect,
+    Port = proplists:get_value(ssl_port, Config, 8883),
+    Topic = nth(1, ?TOPICS),
+    DataDir = cert_dir(Config),
+    Ns = atom_to_list(?FUNCTION_NAME),
+    F = fun(Name) -> Ns ++ "-" ++ atom_to_list(Name) end,
+    emqtt_test_lib:gen_ca(DataDir, F(ca)),
+    emqtt_test_lib:gen_host_cert(F(server), F(ca), DataDir, true),
+    emqtt_test_lib:gen_host_cert(F(client), F(ca), DataDir, true),
+    emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
+                                   #{ verify => verify_none
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, F(server))
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, F(server))
+                                    }),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}, {with_qoe_metrics, true},
+                                {ssl, true},
+                                {ssl_opts, [{verify, verify_none}]}
+                               ]),
+    {ok, _} = emqtt:ConnFun(C),
+    {ok, _, [0]} = emqtt:subscribe(C, Topic),
+    {ok, _, [0]} = emqtt:subscribe(C, Topic, at_most_once),
+    {ok, _, [0]} = emqtt:subscribe(C, {Topic, at_most_once}),
+    {ok, _, [0]} = emqtt:subscribe(C, #{}, Topic, at_most_once),
+
+    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
+    {ok, _, [1]} = emqtt:subscribe(C, {Topic, 1}),
+    {ok, _, [1]} = emqtt:subscribe(C, #{}, Topic, 1),
+
+    {ok, _, [2]} = emqtt:subscribe(C, Topic, [{qos, ?QOS_2}]),
+    {ok, _, [2]} = emqtt:subscribe(C, #{}, Topic, [{qos, ?QOS_2}, {nl, false}, {other, ignore}]),
+
+    {ok, _, [0,1,2]} = emqtt:subscribe(C, [{Topic, at_most_once},{Topic, 1}, {Topic, [{qos, ?QOS_2}]}]),
+    QoE = proplists:get_value(qoe, emqtt:info(C)),
+    ?assert(is_map(QoE)),
+    ?assert(is_integer(maps:get(tcp_connected_at, QoE))),
     ok = emqtt:disconnect(C).
 
 t_publish(Config) ->
