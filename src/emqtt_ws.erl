@@ -25,9 +25,10 @@
         , getstat/2
         ]).
 
--type(option() :: {ws_path, string()}).
+-type option() :: {ws_path, string()}.
+-type connection() :: {_Conn :: pid(), gun:stream_ref()}.
 
--export_type([option/0]).
+-export_type([option/0, connection/0]).
 
 -define(WS_OPTS, #{compress => false,
                    protocols => [{<<"mqtt">>, gun_ws_h}]
@@ -40,51 +41,26 @@ connect(Host0, Port, Opts, Timeout) ->
     {ok, _} = application:ensure_all_started(gun),
     %% 1. open connection
     TransportOptions = proplists:get_value(ws_transport_options, Opts, []),
-    Opts1 = opts(TransportOptions, #{}),
-    DefaultOpts = #{connect_timeout => Timeout,
-                 retry => 3,
-                 retry_timeout => 30000},
-    ConnOpts = maps:merge(Opts1, DefaultOpts),
+    ConnOpts = opts(TransportOptions, #{connect_timeout => Timeout,
+                                        retry => 0}),
     case gun:open(Host1, Port, ConnOpts) of
         {ok, ConnPid} ->
             case gun:await_up(ConnPid, Timeout) of
                 {ok, _} ->
                     case upgrade(ConnPid, Opts, Timeout) of
-                        {ok, _Headers} -> {ok, ConnPid};
+                        {ok, StreamRef} -> {ok, {ConnPid, StreamRef}};
                         Error -> Error
                     end;
-                Error -> Error
+                Error ->
+                    Error
             end;
-        Error -> Error
+        Error ->
+            Error
     end.
 
-%% Translate the gun 2.x style options to 1.3 style
-%%
-%% 1.3 style:
-%%  protocols       => [http | http2],
-%%  transport       => tcp | tls | ssl,
-%%  transport_opts  => [gen_tcp:connect_option()] | [ssl:connect_option()],
-%%  ws_opts         => ws_opts()
-%%
-%% 2.x style:
-%%  protocols => protocols(),
-%%  transport => tcp | tls | ssl,
-%%  tcp_opts  => [gen_tcp:connect_option()],
-%%  tls_opts  => [ssl:tls_client_option()],
-%%  ws_opts   => ws_opts()
-%%
-%% in 1.3, TCP and TSL optiosn are merged in transport_opts
 opts([], Acc) -> Acc;
-opts([{tls_opts, TLS} | More], Acc) ->
-    opts(More, add_transport_opts(Acc, TLS));
-opts([{tcp_opts, TCP} | More], Acc) ->
-    opts(More, add_transport_opts(Acc, TCP));
 opts([{Name, Value} | More], Acc) ->
     opts(More, Acc#{Name => Value}).
-
-add_transport_opts(Acc, New) ->
-    Old = maps:get(transport_opts, Acc, []),
-    Acc#{transport_opts => Old ++ New}.
 
 -spec(upgrade(pid(), list(), timeout())
       -> {ok, Headers :: list()} | {error, Reason :: term()}).
@@ -94,11 +70,13 @@ upgrade(ConnPid, Opts, Timeout) ->
     CustomHeaders = proplists:get_value(ws_headers, Opts, []),
     StreamRef = gun:ws_upgrade(ConnPid, Path, ?WS_HEADERS ++ CustomHeaders, ?WS_OPTS),
     receive
-        {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], Headers} ->
-            {ok, Headers};
+        {gun_upgrade, ConnPid, StreamRef, [<<"websocket">>], _Headers} ->
+            {ok, StreamRef};
         {gun_response, ConnPid, _, _, Status, Headers} ->
             {error, {ws_upgrade_failed, Status, Headers}};
         {gun_error, ConnPid, StreamRef, Reason} ->
+            {error, {ws_upgrade_failed, Reason}};
+        {gun_down, ConnPid, _, Reason, _} ->
             {error, {ws_upgrade_failed, Reason}}
     after Timeout ->
         {error, timeout}
@@ -111,12 +89,12 @@ getstat(_WsPid, Options) ->
 setopts(_WsPid, _Opts) ->
     ok.
 
--spec(send(pid(), iodata()) -> ok).
-send(WsPid, Data) ->
-    gun:ws_send(WsPid, {binary, Data}).
+-spec(send({pid(), gun:stream_ref()}, iodata()) -> ok).
+send({WsPid, StreamRef}, Data) ->
+    gun:ws_send(WsPid, StreamRef, {binary, Data}).
 
--spec(close(pid()) -> ok).
-close(WsPid) ->
+-spec(close({pid(), gun:stream_ref()}) -> ok).
+close({WsPid, _StreamRef}) ->
     gun:shutdown(WsPid).
 
 -spec convert_host(inet:ip_address() | inet:hostname()) -> inet:hostname().

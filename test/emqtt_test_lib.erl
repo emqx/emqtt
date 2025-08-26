@@ -46,7 +46,6 @@ all(Suite) ->
 -spec start_emqx() -> ok.
 start_emqx() ->
     ensure_test_module(emqx_common_test_helpers),
-    ensure_test_module(emqx_ratelimiter_SUITE),
     emqx_common_test_helpers:start_apps([]),
     ok = ensure_quic_listener(mqtt, 14567),
     ok.
@@ -140,7 +139,7 @@ listener_conf(ws) ->
         mqtt_piggyback => multiple,
         proxy_address_header => "x-forwarded-for",
         proxy_port_header => "x-forwarded-port",
-        supported_subprotocols => ["mqtt","mqtt-v3","mqtt-v3.1.1","mqtt-v5"],
+        supported_subprotocols => [<<"mqtt">>,<<"mqtt-v3">>,<<"mqtt-v3.1.1">>,<<"mqtt-v5">>],
         validate_utf8 => true}
      };
 listener_conf(_) -> #{}.
