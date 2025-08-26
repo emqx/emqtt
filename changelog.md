@@ -11,9 +11,12 @@
 
 - Switch to using `gun` 2.1.0 as WebSocket client.
 
-# 1.13.6
+# 1.13.7
 
 - Fix a typo in MQTT v3 reason code.
+
+# 1.13.6
+
 - Support QoE tcp latency tracking in SSL case.
 
 # 1.13.5
