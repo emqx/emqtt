@@ -1,3 +1,6 @@
+# Unreleased
+- Build packages on OTP 27.
+
 # 1.14.6
 - Respect PINGRESP timeout.
 
