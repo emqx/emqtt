@@ -96,6 +96,7 @@ groups() ->
        t_init,
        t_init_external_secret,
        t_connected,
+       t_ssl_error,
        t_qos2_flow_autoack_never,
        t_ssl_error_client_reject_server,
        t_ssl_error_server_reject_client]},
@@ -305,6 +306,36 @@ t_ssl_error_server_reject_client(Config) ->
                                ]),
     {error, Reason} = emqtt:connect(C),
     ?assertMatch({ssl_error, _Sock, {tls_alert, {unknown_ca, _}}}, Reason),
+    ok.
+
+t_ssl_error(Config) ->
+    ct:timetrap({seconds, 1}),
+    Port = proplists:get_value(ssl_port, Config, 8883),
+    DataDir = cert_dir(Config),
+    emqtt_test_lib:gen_ca(DataDir, "ca"),
+    emqtt_test_lib:gen_ca(DataDir, "ca2"),
+    emqtt_test_lib:gen_host_cert("server", "ca", DataDir, true),
+    emqtt_test_lib:gen_host_cert("client", "ca2", DataDir, true),
+    emqtt_test_lib:set_ssl_options(<<"ssl:default">>,
+                                   #{ verify => verify_peer
+                                    , cacertfile => emqtt_test_lib:ca_cert_name(DataDir, "ca")
+                                    , certfile => emqtt_test_lib:cert_name(DataDir, "server")
+                                    , keyfile => emqtt_test_lib:key_name(DataDir, "server")
+                                    }),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {ssl, true},
+                                {ssl_opts, [ {certfile, emqtt_test_lib:cert_name(DataDir, "client")}
+                                           , {keyfile, emqtt_test_lib:key_name(DataDir, "client")}
+                                           , {verify, verify_none}
+                                           ]}
+                               ]),
+    case emqtt:connect(C) of
+        {error, {{shutdown, {tls_alert, {unknown_ca, _}}}, _}} ->
+            ok;
+        {error, {ssl_error, _, {tls_alert, {unknown_ca, _}}}} ->
+            ok
+    end,
     ok.
 
 t_reconnect_enabled(Config) ->
@@ -1256,7 +1287,7 @@ t_qos2_flow_autoack_never(Config) ->
     after 100 ->
         ok = emqtt:disconnect(C2)
     end.
-        
+
 t_inflight_full(_) ->
     error('TODO').
 

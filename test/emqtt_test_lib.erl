@@ -71,7 +71,7 @@ compile_emqx_test_module(M) ->
     EmqttDir = code:lib_dir(emqtt),
     MFilename= filename:join([EmqxDir, "test", M]),
     OutDir = filename:join([EmqttDir, "test"]),
-    {ok, _} = compile:file(MFilename, [{outdir, OutDir}]),
+    {{ok, _}, M} = {compile:file(MFilename, [{outdir, OutDir}]), M},
     ok.
 
 -spec ensure_quic_listener(atom(), inet:port_number()) -> ok.
