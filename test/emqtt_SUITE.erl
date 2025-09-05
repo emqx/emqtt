@@ -77,6 +77,7 @@ groups() ->
        t_ack_inflight_and_shoot_cycle,
        t_unsubscribe,
        t_ping,
+       t_disconnect_on_pingresp_timeout,
        t_puback,
        t_pubrec,
        t_pubrel,
@@ -1096,6 +1097,39 @@ t_ping(Config) ->
     {ok, _} = emqtt:ConnFun(C),
     pong = emqtt:ping(C),
     ok = emqtt:disconnect(C).
+
+t_disconnect_on_pingresp_timeout(Config) ->
+    erlang:process_flag(trap_exit, true),
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    ClientId = atom_to_binary(?FUNCTION_NAME),
+    {ok, C} = emqtt:start_link([
+        {clean_start, true},
+        {port, Port},
+        {keepalive, 1},
+        {clientid, ClientId},
+        {reconnect, 0}
+    ]),
+    Topic = <<"t">>,
+    {ok, _} = emqtt:ConnFun(C),
+    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
+    %% Make channel be unresponsive for 5 seconds after receiving puback
+    emqx_hooks:add('message.acked', {?MODULE, pause, []}, 1000),
+    Message = emqx_message:make(ClientId, 1, Topic, <<"pingresp_test">>),
+    emqx_broker:publish(Message),
+    %% emqtt automatically acks the message, the channel freezes for 5 seconds because of the injected hook
+    %% emqtt should shutdown because of pingresp_timeout
+    Exited = receive
+        {'EXIT', C, _} ->
+            true
+    after 3000 ->
+        false
+    end,
+    emqx_hooks:del('message.acked', {?MODULE, pause}),
+    ?assert(Exited, "Client should shutdown because of pingresp_timeout").
+
+pause(_ClientInfo, _Message) ->
+    timer:sleep(5000).
 
 t_puback(Config) ->
     ConnFun = ?config(conn_fun, Config),

@@ -248,6 +248,7 @@
           proto_name      :: iodata(),
           keepalive       :: non_neg_integer(),
           keepalive_timer :: undefined | tref(),
+          awaiting_pingresp :: boolean(),
           force_ping      :: boolean(),
           paused          :: boolean(),
           will_msg        :: undefined | mqtt_msg(),
@@ -744,6 +745,7 @@ init([Options]) ->
                           proto_ver       = ?MQTT_PROTO_V4,
                           proto_name      = <<"MQTT">>,
                           keepalive       = ?DEFAULT_KEEPALIVE,
+                          awaiting_pingresp = false,
                           force_ping      = false,
                           paused          = false,
                           will_msg        = undefined,
@@ -1394,49 +1396,58 @@ connected(cast, {?UNSUBACK_PACKET(PacketId, Properties, ReasonCodes), Via},
             keep_state_and_data
     end;
 
-connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []}) ->
-    keep_state_and_data;
+connected(cast, {?PACKET(?PINGRESP), _Via}, #state{pending_calls = []} = State) ->
+    {keep_state, cancel_wait_pingresp(State)};
 connected(cast, {?PACKET(?PINGRESP), Via}, State) ->
     case take_call(call_id(ping, Via), State) of
         {value, #call{from = From}, NewState} ->
-            {keep_state, NewState, [{reply, From, pong}]};
+            {keep_state, cancel_wait_pingresp(NewState), [{reply, From, pong}]};
         false ->
-            keep_state_and_data
+            {keep_state, cancel_wait_pingresp(State)}
     end;
 
 connected(cast, {?DISCONNECT_PACKET(ReasonCode, Properties), _Via}, State) ->
     maybe_reconnect({disconnected, ReasonCode, Properties}, State);
 
 connected(info, {timeout, _TRef, keepalive}, State = #state{force_ping = true, low_mem = IsLowMem}) ->
-    case send(?PACKET(?PINGREQ), State) of
-        {ok, NewState} ->
-            IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
-            {keep_state, ensure_keepalive_timer(NewState)};
+    case ensure_pingresp_received(State) of
+        ok ->
+            case send(?PACKET(?PINGREQ), State) of
+                {ok, NewState} ->
+                    IsLowMem andalso erlang:garbage_collect(self(), [{type, major}]),
+                    {keep_state, ensure_wait_pingresp(ensure_keepalive_timer(NewState))};
+                {error, Reason} ->
+                    maybe_reconnect(Reason, State)
+            end;
         {error, Reason} ->
             maybe_reconnect(Reason, State)
     end;
 
 connected(info, {timeout, TRef, keepalive},
-          State = #state{conn_mod = ConnMod, socket = Sock,
-                         last_packet_id = LastPktId,
-                         paused = Paused, keepalive_timer = TRef}) ->
-    case (not Paused) andalso should_ping(ConnMod, Sock, LastPktId) of
-        true ->
-            case send(?PACKET(?PINGREQ), State) of
-                {ok, NewState} ->
-                    case ConnMod:getstat(Sock, [send_oct]) of
-                        {ok, [{send_oct, Val}]} ->
-                            put(send_oct, Val),
-                            {keep_state, ensure_keepalive_timer(NewState), [hibernate]};
+          State0 = #state{conn_mod = ConnMod, socket = Sock, keepalive_timer = TRef}) ->
+    case ensure_pingresp_received(State0) of
+        ok ->
+            case should_ping(State0) of
+                {ok, true} ->
+                    case send(?PACKET(?PINGREQ), State0) of
+                        {ok, State1} ->
+                            case ConnMod:getstat(Sock, [send_oct]) of
+                                {ok, [{send_oct, Val}]} ->
+                                    put(send_oct, Val),
+                                    {keep_state, ensure_wait_pingresp(ensure_keepalive_timer(State1)), [hibernate]};
+                                {error, Reason} ->
+                                    maybe_reconnect(Reason, State1)
+                            end;
                         {error, Reason} ->
-                            maybe_reconnect(Reason, State)
+                            maybe_reconnect(Reason, State0)
                     end;
-                {error, Reason} -> maybe_reconnect(Reason, State)
+                {ok, false} ->
+                    {keep_state, ensure_keepalive_timer(State0), [hibernate]};
+                {error, Reason} ->
+                    maybe_reconnect(Reason, State0)
             end;
-        false ->
-            {keep_state, ensure_keepalive_timer(State), [hibernate]};
         {error, Reason} ->
-            maybe_reconnect(Reason, State)
+            maybe_reconnect(Reason, State0)
     end;
 
 connected(info, {timeout, TRef, ack}, State = #state{ack_timer     = TRef,
@@ -1685,21 +1696,34 @@ format_status(_, State) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 
-should_ping(emqtt_quic, _Sock, LastPktId) ->
+should_ping(#state{paused = true}) ->
+    {ok, false};
+should_ping(#state{conn_mod = emqtt_quic, last_packet_id = LastPktId}) ->
     %% Unlike TCP, we should not use socket counter since it is the counter of the connection
     %% that the stream belongs to. Instead,  we use last_packet_id to keep track of last send msg.
     Old = put(quic_send_cnt, LastPktId),
     (IsPing = (LastPktId == Old orelse Old == undefined))
         andalso put(quic_send_cnt, LastPktId+1), % count this ping
-    IsPing;
-should_ping(ConnMod, Sock, _LastPktId) ->
+    {ok, IsPing};
+should_ping(#state{conn_mod = ConnMod, socket = Sock}) ->
     case ConnMod:getstat(Sock, [send_oct]) of
         {ok, [{send_oct, Val}]} ->
             OldVal = put(send_oct, Val),
-            OldVal == undefined orelse OldVal == Val;
+            {ok, OldVal == undefined orelse OldVal == Val};
         Error = {error, _Reason} ->
             Error
     end.
+
+ensure_pingresp_received(#state{awaiting_pingresp = false}) ->
+    ok;
+ensure_pingresp_received(#state{awaiting_pingresp = true}) ->
+    {error, pingresp_timeout}.
+
+ensure_wait_pingresp(State) ->
+    State#state{awaiting_pingresp = true}.
+
+cancel_wait_pingresp(State) ->
+    State#state{awaiting_pingresp = false}.
 
 maybe_shoot(PubReq, State = #state{pendings = Pendings0, inflight = Inflight}) ->
     case emqtt_inflight:is_full(Inflight) of
