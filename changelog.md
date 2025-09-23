@@ -1,3 +1,18 @@
+# Unreleased
+- Build packages on OTP 27.
+
+# 1.14.6
+- Respect PINGRESP timeout.
+
+# 1.14.5
+- Fix hanging connection when TLS alert happens during `mqtt_connect`.
+
+# 1.14.4
+- Avoid hanging websocket connection caused by race condition.
+
+# 1.14.3
+- Fix hanging connection when TLS disconnect happens during `mqtt_connect`.
+
 # 1.14.2
 
 - WebSocket: Correctly adopt Gun 2.x interfaces and semantics.
@@ -11,9 +26,12 @@
 
 - Switch to using `gun` 2.1.0 as WebSocket client.
 
-# 1.13.6
+# 1.13.7
 
 - Fix a typo in MQTT v3 reason code.
+
+# 1.13.6
+
 - Support QoE tcp latency tracking in SSL case.
 
 # 1.13.5
