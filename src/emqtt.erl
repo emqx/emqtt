@@ -173,6 +173,9 @@
                 | {low_mem, boolean()}
                 | {reconnect, reconnect()}
                 | {reconnect_timeout, pos_integer()}
+                %% if false, the calls like emqtt:subscribe will receive error {error, disconnected}
+                %% instead of being retried on client reconnect
+                | {retry_calls_on_reconnect, boolean()}
                 | {with_qoe_metrics, boolean()}
                 | {properties, properties()}
                 | {nst,  binary()} %% @deprecated 1.13.1
@@ -228,6 +231,16 @@
 -type reconnect() :: infinity | non_neg_integer().
 -type tref() :: reference().
 
+-type opname() :: connect | subscribe | unsubscribe | ping.
+-record(callid, {op :: opname(),
+                 via  :: via(),
+                 packet_id :: packet_id() | undefined
+                }).
+-type callid() :: #callid{}.
+
+-record(call, {id :: callid(), from :: gen_statem:from(), req :: term(), ts :: erlang:timestamp()}).
+-type(call() :: #call{}).
+
 -record(state, {
           name            :: atom(),
           owner           :: undefined | pid(),
@@ -257,7 +270,7 @@
           paused          :: boolean(),
           will_msg        :: undefined | mqtt_msg(),
           properties      :: properties(),
-          pending_calls   :: list(),
+          pending_calls   :: list(call()),
           subscriptions   :: map(),
           inflight        :: emqtt_inflight:inflight(
                                inflight_publish() | inflight_pubrel()
@@ -313,14 +326,7 @@
 
 -type(sent_at() :: non_neg_integer()). %% in millisecond
 
--type opname() :: connect | subscribe | unsubscribe | ping.
--record(callid, {op :: opname(),
-                 via  :: via(),
-                 packet_id :: packet_id() | undefined
-                }).
--type callid() :: #callid{}.
 -export_type([publish_success/0, publish_reply/0]).
-
 
 -define(PUB_REQ(Msg, Via, ExpireAt, Callback), {publish, Via, Msg, ExpireAt, Callback}).
 
@@ -329,8 +335,6 @@
 
 -define(INFLIGHT_PUBREL(Via, PacketId, SentAt, ExpireAt),
         {pubrel, Via, PacketId, SentAt, ExpireAt}).
-
--record(call, {id, from, req, ts}).
 
 %% Default timeout
 -define(DEFAULT_KEEPALIVE, 60).
@@ -923,6 +927,10 @@ init([{custom_auth_callbacks, #{init := InitFn,
                                  initial_auth_props => AuthProps,
                                  state => AuthState}},
     init(Opts, State#state{extra = Extra});
+init([{retry_calls_on_reconnect, false} | Opts], State) ->
+    Extra = State#state.extra,
+    %% save only non-default value to keep client's default state footprint small
+    init(Opts, State#state{extra = Extra#{retry_calls_on_reconnect => false}});
 init([_Opt | Opts], State) ->
     init(Opts, State).
 
@@ -1982,6 +1990,11 @@ timeout_calls(Now, Timeout, Calls) ->
                     end
                 end, [], Calls).
 
+error_calls(Reason, Calls) ->
+    lists:foreach(fun(#call{from = From}) ->
+                      gen_statem:reply(From, {error, Reason})
+                  end, Calls).
+
 ensure_ack_timer(State = #state{ack_timer     = undefined,
                                 ack_timeout   = Timeout,
                                 pending_calls = Calls}) when length(Calls) > 0 ->
@@ -2487,12 +2500,18 @@ default_via(#state{socket = Via})->
     Via.
 
 %% Update #state{} for reconnecting, forget about old connections.
-update_for_reconnecting(#state{socket = Socket, pending_calls = Calls} = State0)
+update_for_reconnecting(#state{socket = Socket} = State0)
   when Socket =/= ?socket_reconnecting ->
     NewSocket = ?socket_reconnecting,
-    PendingCalls = refresh_calls(Calls, ?socket_reconnecting),
-    State1 = maybe_reinit_quic_state(State0),
-    State1#state{socket = NewSocket, pending_calls = PendingCalls}.
+    State1 = maybe_refresh_calls(State0, ?socket_reconnecting),
+    State2 = maybe_reinit_quic_state(State1),
+    State2#state{socket = NewSocket}.
+
+maybe_refresh_calls(#state{pending_calls = Calls, extra = #{retry_calls_on_reconnect := false}} = State, _Via) ->
+    ok = error_calls(disconnected, Calls),
+    State#state{pending_calls = []};
+maybe_refresh_calls(#state{pending_calls = Calls} = State, Via) ->
+    State#state{pending_calls = refresh_calls(Calls, Via)}.
 
 maybe_reinit_quic_state(#state{extra = #{control_stream_sock := _}} = S) ->
     do_init_quic_state(S);

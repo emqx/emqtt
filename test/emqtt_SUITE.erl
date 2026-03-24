@@ -91,6 +91,7 @@ groups() ->
        t_reconnect_stop,
        t_reconnect_reach_max_attempts,
        t_reconnect_immediate_retry,
+       t_drop_calls_on_reconnect,
        t_subscriptions,
        t_info,
        t_stop,
@@ -911,6 +912,53 @@ t_publish_in_reconnect(Config) ->
                   {2, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
 
     meck:unload(emqtt),
+    meck:unload(emqx_access_control).
+
+%% Verify that with {retry_calls_on_reconnect, false}, the calls like emqtt:subscribe
+%% will receive error {error, disconnected} instead of being retried on client reconnect
+t_drop_calls_on_reconnect(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+
+    %% Create a client with retry_calls_on_reconnect set to false
+    Topic = nth(1, ?TOPICS),
+    {ok, C} = emqtt:start_link([{port, Port},
+                                {clean_start, false},
+                                {retry_calls_on_reconnect, false},
+                                {reconnect, true},
+                                {reconnect_timeout, 1}]), % 1 sec
+    {ok, _} = emqtt:ConnFun(C),
+
+    %% make subscribe be slow so that we could emulate a disconnect during subscribe
+    meck:new(emqx_access_control, [passthrough, no_history]),
+    meck:expect(emqx_access_control,
+                authorize,
+                fun(ClientInfo, PubSub, Topic) ->
+                        timer:sleep(2000),
+                        meck:passthrough([ClientInfo, PubSub, Topic])
+                end),
+
+    %% Subscribe
+    Self = self(),
+    spawn_link(fun() ->
+                      Result = emqtt:subscribe(C, Topic, 1),
+                      Self ! {subscribe_result, Result}
+               end),
+    ct:sleep(100),
+
+    %% While subscribing, stop emqx. This should cause a disconnect and a reconnect attempt
+    ok = emqtt_test_lib:stop_emqx(),
+
+    %% Verify that the subscribe call returned {error, disconnected}
+    receive
+        {subscribe_result, Result} ->
+            ?assertEqual({error, disconnected}, Result)
+    after 1000 ->
+            ct:fail("subscribe should fail with disconnected")
+    end,
+
+    %% Clean up
+    emqtt_test_lib:start_emqx(),
     meck:unload(emqx_access_control).
 
 t_publish_async(Config) ->
