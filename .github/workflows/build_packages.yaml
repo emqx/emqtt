@@ -60,8 +60,7 @@ jobs:
           fail-fast: false
           matrix:
             otp:
-              - 24
-              - 25
+              - 26
 
         steps:
         - uses: actions/checkout@v3
