@@ -1,10 +1,10 @@
 CT_NODE_NAME = ct@127.0.0.1
 CT_EMQX_PROFILE = emqx
 
-REBAR ?= $(or $(shell which rebar3 2>/dev/null),$(CURDIR)/rebar3)
+REBAR := $(CURDIR)/rebar3
 REBAR_TEST = env PROFILE=$(CT_EMQX_PROFILE) $(REBAR)
 
-REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.19.0/rebar3
+REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.27.0/rebar3
 
 export REBAR_GIT_CLONE_OPTIONS += --depth=1
 
@@ -24,7 +24,7 @@ pkg: escript
 compile: $(REBAR)
 	$(REBAR) compile
 
-unlock:
+unlock: $(REBAR)
 	$(REBAR) unlock
 
 clean: distclean
@@ -32,7 +32,7 @@ clean: distclean
 distclean:
 	@rm -rf _build _packages erl_crash.dump rebar3.crashdump rebar.lock emqtt_cli rebar3
 
-xref:
+xref: $(REBAR)
 	$(REBAR) xref
 
 eunit: compile
@@ -41,12 +41,12 @@ eunit: compile
 ct: compile
 	$(REBAR_TEST) as test ct --verbose --name $(CT_NODE_NAME)
 
-cover:
+cover: $(REBAR)
 	$(REBAR_TEST) cover
 
 test: eunit ct cover
 
-dialyzer:
+dialyzer: $(REBAR)
 	$(REBAR) dialyzer
 
 escript: $(REBAR) compile
