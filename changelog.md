@@ -1,5 +1,10 @@
-# Unreleased
-- Build packages on OTP 27.
+# 1.15.0
+
+- Build packages on OTP 27 and OTP 28.
+- Drop OTP < 26 from the build matrix; raise `minimum_otp_vsn` to 26.0.
+- Relax `cowlib` and `gun` version pins to `~> 2.13` and `~> 2.1` so
+  emqtt can be used as a Mix/rebar3 dependency alongside packages that
+  require newer 2.x releases (#308).
 
 # 1.14.6
 - Respect PINGRESP timeout.
