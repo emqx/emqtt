@@ -40,12 +40,17 @@
 -define(DEFAULT_TCP_OPTIONS, [binary, {packet, raw}, {active, false},
                               {nodelay, true}]).
 
+%% Default user-space socket buffer (and sndbuf/recbuf) when the
+%% `emqtt' application env `socket_buffer' is unset.
+-define(DEFAULT_SOCKET_BUFFER, (10 * 1024 * 1024)).
+
 -spec(connect(inet:ip_address() | inet:hostname(),
               inet:port_number(), [option()], timeout())
       -> {ok, socket()} | {error, term()}).
 connect(Host, Port, SockOpts, Timeout) ->
-    TcpOpts = merge_opts(?DEFAULT_TCP_OPTIONS,
-                         lists:keydelete(ssl_opts, 1, SockOpts)),
+    TcpOpts0 = merge_opts(?DEFAULT_TCP_OPTIONS,
+                          lists:keydelete(ssl_opts, 1, SockOpts)),
+    TcpOpts = merge_opts(TcpOpts0, forced_socket_buffer_opts()),
     case gen_tcp:connect(Host, Port, TcpOpts, Timeout) of
         {ok, Sock} ->
             case lists:keyfind(ssl_opts, 1, SockOpts) of
@@ -157,6 +162,16 @@ merge_opts(Defaults, Options) ->
          (Opt, Acc) ->
           lists:usort([Opt | Acc])
       end, Defaults, Options).
+
+%% Hard-coded socket buffer sizing. Overrides any caller-provided
+%% buffer/sndbuf/recbuf so the emqtt client always has enough
+%% user-space and kernel buffer to absorb bursts. The value is read
+%% from `application:get_env(emqtt, socket_buffer, _)' so an EMQX
+%% deployment can tune it without recompiling. The same value is
+%% applied to `buffer', `sndbuf', and `recbuf'.
+forced_socket_buffer_opts() ->
+    Sz = application:get_env(emqtt, socket_buffer, ?DEFAULT_SOCKET_BUFFER),
+    [{buffer, Sz}, {sndbuf, Sz}, {recbuf, Sz}].
 
 default_ciphers(TlsVersions) ->
     lists:foldl(
