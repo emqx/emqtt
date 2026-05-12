@@ -44,6 +44,12 @@
 %% `emqtt' application env `socket_buffer' is unset.
 -define(DEFAULT_SOCKET_BUFFER, (10 * 1024 * 1024)).
 
+%% Default port driver high watermark. The inet driver's built-in
+%% default is 8 KiB, which would mark the port busy long before the
+%% large `buffer' set above is actually used. Match the buffer so the
+%% driver can absorb full-buffer bursts before applying back-pressure.
+-define(DEFAULT_HIGH_WATERMARK, ?DEFAULT_SOCKET_BUFFER).
+
 -spec(connect(inet:ip_address() | inet:hostname(),
               inet:port_number(), [option()], timeout())
       -> {ok, socket()} | {error, term()}).
@@ -164,14 +170,35 @@ merge_opts(Defaults, Options) ->
       end, Defaults, Options).
 
 %% Hard-coded socket buffer sizing. Overrides any caller-provided
-%% buffer/sndbuf/recbuf so the emqtt client always has enough
-%% user-space and kernel buffer to absorb bursts. The value is read
-%% from `application:get_env(emqtt, socket_buffer, _)' so an EMQX
-%% deployment can tune it without recompiling. The same value is
-%% applied to `buffer', `sndbuf', and `recbuf'.
+%% buffer/sndbuf/recbuf/high_watermark/delay_send so the emqtt client
+%% always has enough user-space and kernel buffer to absorb bursts.
+%%
+%% Values are read from the `emqtt' application env so an EMQX
+%% deployment can tune them without recompiling:
+%%   * `socket_buffer'   - applied to `buffer', `sndbuf', `recbuf'.
+%%   * `high_watermark'      - port driver output-queue busy threshold;
+%%                             defaults to `socket_buffer' (the inet
+%%                             driver default is only 8 KiB and would
+%%                             otherwise neutralise the large buffer
+%%                             above).
+%%   * `high_msgq_watermark' - port message-queue busy threshold; same
+%%                             reasoning as `high_watermark', applied
+%%                             to the msgq side.
+%%   * `delay_send'          - coalesce small writes; defaults to
+%%                             `true' to match the bursty-write
+%%                             profile this patch is tuning for.
 forced_socket_buffer_opts() ->
     Sz = application:get_env(emqtt, socket_buffer, ?DEFAULT_SOCKET_BUFFER),
-    [{buffer, Sz}, {sndbuf, Sz}, {recbuf, Sz}].
+    Hw = application:get_env(emqtt, high_watermark, ?DEFAULT_HIGH_WATERMARK),
+    HMw = application:get_env(emqtt, high_msgq_watermark, ?DEFAULT_HIGH_WATERMARK),
+    DelaySend = application:get_env(emqtt, delay_send, true),
+    [ {buffer, Sz}
+    , {sndbuf, Sz}
+    , {recbuf, Sz}
+    , {high_watermark, Hw}
+    , {high_msgq_watermark, HMw}
+    , {delay_send, DelaySend}
+    ].
 
 default_ciphers(TlsVersions) ->
     lists:foldl(
