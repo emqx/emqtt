@@ -42,7 +42,7 @@
 
 %% Default user-space socket buffer (and sndbuf/recbuf) when the
 %% `emqtt' application env `socket_buffer' is unset.
--define(DEFAULT_SOCKET_BUFFER, (10 * 1024 * 1024)).
+-define(DEFAULT_SOCKET_BUFFER, (32 * 1024 * 1024)).
 
 %% Default port driver high watermark. The inet driver's built-in
 %% default is 8 KiB, which would mark the port busy long before the
