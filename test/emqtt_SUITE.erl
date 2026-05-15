@@ -101,7 +101,10 @@ groups() ->
        t_connected,
        t_qos2_flow_autoack_never,
        t_ssl_error_client_reject_server,
-       t_ssl_error_server_reject_client]},
+       t_ssl_error_server_reject_client,
+       t_active_default_recv,
+       t_active_n_rearm]},
+
     {mqttv3,[],
       [basic_test_v3]},
     {mqttv4, [],
@@ -1649,6 +1652,64 @@ retain_as_publish_test(Config) ->
 
     ok = emqtt:disconnect(Pub),
     clean_retained(Topic).
+
+t_active_default_recv(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    {ok, Sub} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Sub),
+    SockOpts = proplists:get_value(sock_opts, emqtt:info(Sub)),
+    ?assertEqual(once, proplists:get_value(active, SockOpts, once)),
+    {ok, _, _} = emqtt:subscribe(Sub, Topic, ?QOS_0),
+    {ok, Pub} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+    {ok, _} = emqtt:ConnFun(Pub),
+    N = 5,
+    lists:foreach(
+        fun(I) ->
+            ok = emqtt:publish(Pub, Topic, integer_to_binary(I), ?QOS_0)
+        end,
+        lists:seq(1, N)
+    ),
+    ?assertEqual(N, length(receive_messages(N))),
+    ok = emqtt:disconnect(Sub),
+    ok = emqtt:disconnect(Pub).
+
+t_active_n_rearm(Config) ->
+    ConnFun = ?config(conn_fun, Config),
+    case ConnFun of
+        quic_connect ->
+            ct:pal("skipped: active_n tcp test is not applicable for QUIC", []),
+            ok;
+        _ ->
+            Port = ?config(port, Config),
+            Topic = atom_to_binary(?FUNCTION_NAME),
+            ActiveN = 3,
+            {ok, Sub} = emqtt:start_link([{clean_start, true}, {port, Port},
+                                           {tcp_opts, [{active, ActiveN}]}]),
+            {ok, _} = emqtt:connect(Sub),
+            SockOpts = proplists:get_value(sock_opts, emqtt:info(Sub)),
+            ?assertEqual(ActiveN, proplists:get_value(active, SockOpts)),
+            {ok, _, _} = emqtt:subscribe(Sub, Topic, ?QOS_1),
+            NumMsgs = ActiveN * 2 + 1,
+            {ok, Pub} = emqtt:start_link([{clean_start, true}, {port, Port}]),
+            {ok, _} = emqtt:connect(Pub),
+            lists:foreach(
+                fun(I) ->
+                    {ok, _} = emqtt:publish(Pub, Topic, integer_to_binary(I), [{qos, 1}])
+                end,
+                lists:seq(1, NumMsgs)
+            ),
+            %% Receiving all messages proves activate_sock re-armed the socket
+            %% with ActiveN after each tcp_passive event
+            ?assertEqual(NumMsgs, length(receive_messages(NumMsgs))),
+            %% Socket must be set to {active, ActiveN}, not {active, once}
+            Sock = proplists:get_value(socket, emqtt:info(Sub)),
+            {ok, [{active, ActiveNow}]} = inet:getopts(Sock, [active]),
+            ?assert((ActiveNow > 0 andalso ActiveNow =< ActiveN) orelse ActiveNow =:= false),
+            ok = emqtt:disconnect(Sub),
+            ok = emqtt:disconnect(Pub)
+    end.
 
 merge_config(Config1, Config2) ->
     lists:foldl(
