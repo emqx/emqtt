@@ -1,3 +1,8 @@
+# 1.15.1
+
+- fix: emqtt should respect the sockopt `active`
+- doc: fix typo in message type
+
 # 1.15.0
 
 - Build packages on OTP 27 and OTP 28.
