@@ -357,6 +357,8 @@
 
 -define(NEED_RECONNECT(Re), (Re == infinity orelse (is_integer(Re) andalso Re > 0))).
 
+-define(DEFAULT_SOCK_ACTIVE, once).
+
 -define(SOCK_ERROR(E), (E =:= tcp_error orelse
                         E =:= ssl_error orelse
                         E =:= quic_error orelse
@@ -1038,10 +1040,12 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
             State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
             State2 = qoe_inject(handshaked, maybe_qoe_tcp(State1)),
             NewPendings = refresh_calls(Pendings, NewSock),
-            State3 = run_sock(State2#state{conn_mod = ConnMod,
-                                           socket = NewSock,
-                                           pending_calls = NewPendings
-                                          }),
+            %% Apply the sock opt 'active', as the sock was started in 'passive' mode.
+            State3 = State2#state{conn_mod = ConnMod,
+                                  socket = NewSock,
+                                  pending_calls = NewPendings
+                                 },
+            _ = run_sock(State3),
             case mqtt_connect(State3) of
                 {ok, State4} ->
                     {ok, State4};
@@ -1531,6 +1535,12 @@ handle_event({call, From}, stop, _StateName, _State) ->
 
 handle_event({call, From}, status, StateName, _State) ->
     {keep_state_and_data, {reply, From, StateName}};
+
+handle_event(info, {Passive, Sock}, _StateName, #state{socket = Sock} = State) 
+  when Passive =:= tcp_passive orelse Passive =:= ssl_passive ->
+    %% Auto reactivate the sock
+    _ = activate_sock(State),
+    keep_state_and_data;
 
 handle_event(info, {gun_ws, ConnPid, StreamRef, {binary, Data}},
              _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
@@ -2246,12 +2256,29 @@ send(Sock, Packet, State = #state{conn_mod = ConnMod, proto_ver = Ver})
 
 run_sock(State = #state{conn_mod = emqtt_quic}) ->
     State;
-run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
-    %% error is discarded, if socket is already closed,
-    %% so the next 'send' call will return {error, closed} or {error, einval}
-    %% then it should decide if it should shutdown or retry
-    _ = ConnMod:setopts(Sock, [{active, once}]),
+run_sock(State = #state{conn_mod = ConnMod, socket = Sock, sock_opts = Opts}) ->
+    case proplists:get_value(active, Opts, ?DEFAULT_SOCK_ACTIVE) of
+        once ->
+            %% error is discarded, if socket is already closed,
+            %% so the next 'send' call will return {error, closed} or {error, einval}
+            %% then it should decide if it should shutdown or retry 
+            set_active(ConnMod, Sock, once);
+        _ -> 
+            %% No need to set for the other values 
+            ok
+    end,
     State.
+
+-spec activate_sock(state()) -> ok.
+activate_sock(#state{conn_mod = ConnMod, socket = Sock, sock_opts = Opts}) ->
+    V = proplists:get_value(active, Opts, ?DEFAULT_SOCK_ACTIVE),
+    set_active(ConnMod, Sock, V).
+
+set_active(emqtt_quic, _Sock, _V) ->
+    ok;
+set_active(ConnMod, Sock, V) ->
+    _ = ConnMod:setopts(Sock, [{active, V}]),
+    ok.
 
 %%--------------------------------------------------------------------
 %% Process incomming

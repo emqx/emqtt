@@ -223,7 +223,7 @@ send_and_recv_with(Sock) ->
 tlsv13_connect_test(Config) ->
     ServerSslOpts = ?config(server_ssl_opts, Config),
     ClientSslOpts = ?config(client_ssl_opts, Config),
-    Port = 1024 + random:uniform(erlang:system_info(port_limit) - 1024),
+    Port = 1024 + rand:uniform(erlang:system_info(port_limit) - 1024),
     {Server, _} = ssl_server:start_link(Port, ServerSslOpts),
     {ok, Sock} = emqtt_sock:connect(?config(target_host, Config), Port, [{ssl_opts, ClientSslOpts}], 3000),
     send_and_recv_with(Sock),
