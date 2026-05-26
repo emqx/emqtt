@@ -107,6 +107,11 @@
 %% export for internal calls
 -export([sync_publish_result/3]).
 
+-ifdef(TEST).
+%% Exported only for eunit (see test/emqtt_tests.erl).
+-export([connack_properties_to_merge/1]).
+-endif.
+
 -ifdef(UPGRADE_TEST_CHEAT).
 -export([format_status/2]).
 -endif.
@@ -1152,9 +1157,19 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
                                    socket = Via,
                                    proto_ver = Ver
                                   }) ->
+    %% MQTT v5: a few property identifiers are valid in both CONNECT and
+    %% CONNACK but describe the OPPOSITE direction of the connection. The
+    %% client-supplied value (CONNECT) is the limit that applies to traffic
+    %% from broker -> client; the broker-supplied value (CONNACK) is the
+    %% limit that applies to traffic from client -> broker. Blindly
+    %% merging the CONNACK map over the State's CONNECT map would clobber
+    %% the client-side limit. See MQTT v5 spec sections 3.2.2.3.3
+    %% (Receive Maximum), 3.2.2.3.6 (Maximum Packet Size) and 3.2.2.3.8
+    %% (Topic Alias Maximum). `connack_properties_to_merge/1' drops those
+    %% directional keys before merging.
     AllProps1 = case Properties of
                     undefined -> AllProps;
-                    _ -> maps:merge(AllProps, Properties)
+                    _ -> maps:merge(AllProps, connack_properties_to_merge(Properties))
                 end,
     Reply = {ok, Properties},
     State1 = State#state{clientid = assign_id(ClientId, Ver, AllProps1),
@@ -1167,7 +1182,18 @@ waiting_for_connack(cast, {?CONNACK_PACKET(?RC_SUCCESS,
     %% This is fine for the initial connection, but for reconnections, it's not clear what
     %% to do if the `Receive-Maximum` is reduced and is now less than the inflight size
     %% (see `connected(info, immediate_retry, ...)` below).
-    ReceiveMaximum = maps:get('Receive-Maximum', AllProps1, infinity),
+    %%
+    %% NOTE: read `Receive-Maximum' from the raw CONNACK properties rather
+    %% than `AllProps1', because the merge above intentionally drops the
+    %% broker's `Receive-Maximum' (it is the client->broker limit, not the
+    %% client's own broker->client limit declared in CONNECT). The inflight
+    %% window we cap here is precisely how many unacked PUBLISHes we may
+    %% have in flight TO the broker, so the broker's CONNACK value is the
+    %% authoritative one to use.
+    ReceiveMaximum = case Properties of
+                         undefined -> infinity;
+                         _ -> maps:get('Receive-Maximum', Properties, infinity)
+                     end,
     Inflight1 = emqtt_inflight:limit(ReceiveMaximum, Inflight),
     State4 = State3#state{inflight = Inflight1},
     Retry = [{next_event, info, immediate_retry} || not emqtt_inflight:is_empty(Inflight1)],
@@ -1899,6 +1925,34 @@ assign_id(Id, Ver, Props) when Id =:= ?NO_CLIENT_ID orelse Id =:= undefined ->
     end;
 assign_id(Id, _Ver, _Props) ->
     Id.
+
+%% @doc Filter broker-sent CONNACK properties to those whose value should
+%% replace the client-side value in `State#state.properties'.
+%%
+%% MQTT v5 property identifiers 0x21 (`Receive-Maximum'), 0x22
+%% (`Topic-Alias-Maximum') and 0x27 (`Maximum-Packet-Size') are valid in
+%% both CONNECT and CONNACK, but the two occurrences describe opposite
+%% directions of the connection:
+%%
+%%   - In CONNECT, the property is the LIMIT THE CLIENT IMPOSES on the
+%%     traffic it will accept FROM the broker (broker -> client).
+%%   - In CONNACK, the property is the LIMIT THE BROKER IMPOSES on the
+%%     traffic it will accept FROM the client (client -> broker).
+%%
+%% See MQTT v5 spec sections 3.1.2.11.3 / 3.2.2.3.3 (Receive Maximum),
+%% 3.1.2.11.4 / 3.2.2.3.6 (Maximum Packet Size) and 3.1.2.11.5 /
+%% 3.2.2.3.8 (Topic Alias Maximum).
+%%
+%% These three properties must therefore NOT be merged from the CONNACK
+%% map into the client-side state, otherwise we would silently overwrite
+%% the client-declared limit. Code that actually needs the broker-side
+%% value (e.g. inflight window sizing for client -> broker traffic) must
+%% read it from the raw CONNACK properties.
+-spec connack_properties_to_merge(properties()) -> properties().
+connack_properties_to_merge(Properties) when is_map(Properties) ->
+    maps:without(['Receive-Maximum',
+                  'Topic-Alias-Maximum',
+                  'Maximum-Packet-Size'], Properties).
 
 publish_qos1(Via, Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
              State0 = #state{auto_ack = AutoAck}) ->
