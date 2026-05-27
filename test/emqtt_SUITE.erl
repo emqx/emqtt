@@ -936,9 +936,9 @@ t_drop_calls_on_reconnect(Config) ->
     meck:new(emqx_access_control, [passthrough, no_history]),
     meck:expect(emqx_access_control,
                 authorize,
-                fun(ClientInfo, PubSub, Topic) ->
+                fun(ClientInfo, PubSub, Topic1) ->
                         timer:sleep(2000),
-                        meck:passthrough([ClientInfo, PubSub, Topic])
+                        meck:passthrough([ClientInfo, PubSub, Topic1])
                 end),
 
     %% Subscribe
