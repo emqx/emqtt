@@ -1,3 +1,11 @@
+# 1.15.2
+
+- fix: do not merge MQTT v5 directional properties (`Receive-Maximum`,
+  `Topic-Alias-Maximum`, `Maximum-Packet-Size`) from CONNACK into the
+  client state. These properties describe opposite directions in
+  CONNECT vs CONNACK, so merging them silently overwrote the client's
+  own broker→client limits with the broker's client→broker limits.
+
 # 1.15.1
 
 - fix: emqtt should respect the sockopt `active`
