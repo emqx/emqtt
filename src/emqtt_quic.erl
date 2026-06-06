@@ -14,217 +14,287 @@
 %% limitations under the License.
 %%-------------------------------------------------------------------------
 
+%% @doc QUIC transport for emqtt, backed by the pure-Erlang `quic' library.
 -module(emqtt_quic).
--ifndef(BUILD_WITHOUT_QUIC).
 -include("logger.hrl").
--include("emqtt.hrl").
--include_lib("quicer/include/quicer.hrl").
-
 
 -define(LOG(Level, Msg, Meta, State),
-        ?SLOG(Level, Meta#{msg => Msg, clientid => maps:get(clientid, State)}, #{})).
+        ?SLOG(Level, maps:merge(#{msg => Msg, clientid => maps:get(clientid, State)}, Meta), #{})).
 
 -export([ connect/4
         , send/2
-        , recv/2
         , close/1
-        , open_connection/0
+        , open_connection/3
+        , open_stream/1
+        , open_stream/2
         ]).
 
--export([ setopts/2
-        , getstat/2
+-export([ getstat/2
         , sockname/1
         ]).
 
--export([init_state/1]).
+-export([ init_state/2
+        , has_ctrl_stream/1
+        , set_ctrl_stream/2
+        , add_data_stream/2
+        , add_logic_stream/3
+        , get_logic_stream/2
+        ]).
 
-%% state machine callback1
 -export([handle_info/3]).
 
--export_type([ mqtt_packets/0
-             , quic_msg/0
-             , quic_sock/0
-             , cb_data/0
-             ]).
+-export_type([quic_sock/0]).
 
 -type cb_data() :: #{ clientid := binary()
-                    , connection_parse_state := emqtt_frame:parse_state()
+                    , conn_parse_state := emqtt_frame:parse_state()
                     , stream_parse_state := #{ quic_sock() => emqtt_frame:parse_state() }
                     , data_stream_socks := [quic_sock()]
                     , control_stream_sock := undefined | quic_sock()
-                    , stream_opts := map()
-                    , state_name := atom()
-                    , is_local => boolean()
-                    , is_unidir => boolean()
-                    , quic_conn_cb => module()
-                    , quic_stream_cb => module()
-                    , reconnect => boolean()
-                    , peer_bidi_stream_count => non_neg_integer()
-                    , peer_unidi_stream_count => non_neg_integer()
+                    , logic_stream_map := #{non_neg_integer() => quic_sock()}
                     }.
--type mqtt_packets() :: [#mqtt_packet{}] | [].
--type quic_sock() :: {quic, quicer:connection_handle(), quicer:stream_handle()}.
--type quic_msg() :: {quic, atom() | binary(), Resource::any(), Props::any()}.
+-type conn() :: pid().
+-type stream() :: non_neg_integer().
+-type quic_sock() :: {quic, conn(), stream()}.
+-type quic_msg() :: {quic, conn(), tuple()}.
 
+-spec init_state(binary(), emqtt_frame:parse_state()) -> cb_data().
+init_state(ClientId, ParseState) ->
+    #{ clientid => ClientId
+     , conn_parse_state => ParseState
+     , stream_parse_state => #{}
+     , data_stream_socks => []
+     , logic_stream_map => #{}
+     , control_stream_sock => undefined
+     }.
 
--spec init_state(map()) -> cb_data().
-init_state(#{ state_name := _S} = OldData) ->
-    OldData;
-init_state(Data) when is_map(Data) ->
-    Data#{ quic_conn_cb => emqtt_quic_connection
-         , quic_stream_cb => emqtt_quic_stream
-         , state_name => init
-         , is_local => true %% @TODO per stream
-         , is_unidir => false %% @TODO per stream
-         }.
+-spec has_ctrl_stream(cb_data()) -> boolean().
+has_ctrl_stream(#{control_stream_sock := {quic, _, _}}) -> true;
+has_ctrl_stream(_) -> false.
 
--spec handle_info(quic_msg(), atom(), cb_data()) -> gen_statem:handle_event_result().
-%% Handle Quic Data
-handle_info({quic, Data, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
-  when is_binary(Data) ->
-    StreamCB:handle_stream_data(Stream, Data, Props, CBState#{state_name := StateName} );
-handle_info({quic, Event, Connection, Props}, StateName, #{quic_conn_cb := ConnCB} = CBState)
-  when connected =:= Event orelse
-       transport_shutdown =:= Event orelse
-       shutdown =:= Event orelse
-       closed =:= Event orelse
-       local_address_changed =:= Event orelse
-       peer_address_changed =:= Event orelse
-       streams_available =:= Event orelse
-       peer_needs_streams =:= Event orelse
-       dgram_state_changed =:= Event orelse
-       nst_received =:= Event ->
-    ConnCB:Event(Connection, Props, CBState#{state_name := StateName});
-handle_info({quic, Event, Stream, Props}, StateName, #{quic_stream_cb := StreamCB} = CBState)
-  when start_completed =:= Event orelse
-       send_complete =:= Event orelse
-       peer_send_shutdown =:= Event orelse
-       peer_send_aborted =:= Event orelse
-       peer_receive_aborted =:= Event orelse
-       send_shutdown_complete =:= Event orelse
-       stream_closed =:= Event orelse
-       peer_accepted =:= Event orelse
-       passive =:= Event ->
-    StreamCB:Event(Stream, Props, CBState#{state_name := StateName}).
+-spec set_ctrl_stream(quic_sock(), cb_data()) -> cb_data().
+set_ctrl_stream(Sock, #{conn_parse_state := PS, stream_parse_state := PSS} = CBData) ->
+    CBData#{ control_stream_sock := Sock
+           , stream_parse_state := PSS#{Sock => PS}
+           }.
 
-open_connection() ->
-    quicer:open_connection().
+-spec add_data_stream(quic_sock(), cb_data()) -> cb_data().
+add_data_stream(Sock, #{ data_stream_socks := Socks
+                       , conn_parse_state := PS
+                       , stream_parse_state := PSS
+                       } = CBData) ->
+    CBData#{ data_stream_socks := [Sock | Socks]
+           , stream_parse_state := PSS#{Sock => PS}
+           }.
 
+-spec add_logic_stream(non_neg_integer(), quic_sock(), cb_data()) -> cb_data().
+add_logic_stream(LogicId, Sock, #{logic_stream_map := LSM} = CBData) ->
+    add_data_stream(Sock, CBData#{logic_stream_map := LSM#{LogicId => Sock}}).
+
+-spec get_logic_stream(non_neg_integer(), cb_data()) -> quic_sock() | undefined.
+get_logic_stream(LogicId, #{logic_stream_map := LSM}) ->
+    maps:get(LogicId, LSM, undefined).
+
+%% @doc Establish a connection and open the control stream. Blocks until
+%% the QUIC handshake completes; the synchronous contract matches the one
+%% emqtt's state machine expects from any `ConnMod:connect/4'.
+-spec connect(inet:hostname() | inet:ip_address(), inet:port_number(),
+              proplists:proplist(), timeout())
+             -> {ok, quic_sock()} | skip | {error, term()}.
 connect(Host, Port, Opts, Timeout) ->
-    {ConnOpts, StreamOpts} = from_sockopts(Opts),
-    case maps:is_key(nst, ConnOpts) of
-        true -> do_0rtt_connect(Host, Port, ConnOpts, StreamOpts);
-        false -> do_1rtt_connect(Host, Port, ConnOpts, StreamOpts, Timeout)
+    case proplists:is_defined(handle, Opts) of
+        true ->
+            skip;
+        false ->
+            case do_connect(Host, Port, Opts, Timeout) of
+                {ok, Conn} ->
+                    case open_stream(Conn) of
+                        {ok, Stream} ->
+                            {ok, {quic, Conn, Stream}};
+                        {error, _} = Error ->
+                            _ = quic:safe_close(Conn),
+                            Error
+                    end;
+                {error, _} = Error ->
+                    Error
+            end
     end.
 
-do_0rtt_connect(Host, Port, ConnOpts, StreamOpts) ->
-    IsConnOpened = maps:is_key(handle, ConnOpts),
-    case quicer:async_connect(Host, Port, ConnOpts) of
-        {ok, Conn} when not IsConnOpened ->
-            case quicer:start_stream(Conn, StreamOpts) of
-                {ok, Stream} ->
-                    {ok, {quic, Conn, Stream}};
-                {error, Type, Info} ->
-                    {error, {Type, Info}};
-                Error ->
+%% @doc Connect without opening a stream; pairs with `emqtt:quic_mqtt_connect/1'.
+-spec open_connection([{inet:hostname() | inet:ip_address(), inet:port_number()}],
+                      proplists:proplist(), timeout())
+                     -> {ok, conn()} | {error, term()}.
+open_connection([{Host, Port} | _], Opts, Timeout) ->
+    do_connect(Host, Port, Opts, Timeout).
+
+-spec open_stream(conn()) -> {ok, stream()} | {error, term()}.
+open_stream(Conn) ->
+    quic:open_stream(Conn).
+
+%% Supported stream options: `priority' (non_neg_integer urgency).
+-spec open_stream(conn(), map() | proplists:proplist()) -> {ok, stream()} | {error, term()}.
+open_stream(Conn, StreamOpts) when is_list(StreamOpts) ->
+    open_stream(Conn, maps:from_list(StreamOpts));
+open_stream(Conn, StreamOpts) when is_map(StreamOpts) ->
+    case quic:open_stream(Conn) of
+        {ok, Stream} = OK ->
+            case maps:get(priority, StreamOpts, undefined) of
+                P when is_integer(P) ->
+                    ok = quic:set_stream_priority(Conn, Stream, P, false);
+                _ ->
+                    ok
+            end,
+            OK;
+        Error ->
+            Error
+    end.
+
+do_connect(Host, Port, Opts, Timeout) ->
+    ConnOpts = conn_opts(Host, Opts, Timeout),
+    case quic:connect(Host, Port, ConnOpts, self()) of
+        {ok, Conn} ->
+            case wait_connected(Conn, Timeout) of
+                ok -> {ok, Conn};
+                {error, _} = Error ->
+                    _ = quic:safe_close(Conn),
                     Error
             end;
-        {ok, _Conn} ->
-            skip;
         {error, _} = Error ->
             Error
     end.
 
-do_1rtt_connect(Host, Port, ConnOpts, StreamOpts, Timeout) ->
-    IsConnOpened = maps:is_key(handle, ConnOpts),
-    case quicer:connect(Host, Port, ConnOpts, Timeout) of
-        {ok, Conn} when not IsConnOpened ->
-            case quicer:start_stream(Conn, StreamOpts) of
-                {ok, Stream} ->
-                    {ok, {quic, Conn, Stream}};
-                {error, Type, Info} ->
-                    {error, {Type, Info}};
-                Error ->
-                    Error
-            end;
-        {ok, _Conn} ->
-            skip;
-        {error, transport_down, Reason} ->
-            {error, {transport_down, Reason}};
-        {error, _} = Error ->
-            Error
+wait_connected(Conn, Timeout) ->
+    receive
+        {quic, Conn, {connected, _Info}} -> ok;
+        {quic, Conn, {Tag, Reason}} when Tag =:= closed; Tag =:= error -> {error, Reason}
+    after Timeout ->
+        {error, timeout}
     end.
 
-send({quic, _Conn, Stream}, Bin) ->
-    send(Stream, Bin);
-send(Stream, Bin) ->
-    %% Use async here because we could send before start the connection.
-    case quicer:async_send(Stream, Bin) of
-        {ok, _Len} ->
-            ok;
-        {error, ErrorType, Reason} ->
-            {error, {ErrorType, Reason}};
-        Other ->
-            Other
-    end.
+send({quic, Conn, Stream}, Bin) ->
+    quic:send_data(Conn, Stream, Bin, false).
 
-recv({quic, _Conn, Stream}, Count) ->
-    quicer:recv(Stream, Count).
+%% Stub: QUIC keepalive uses `last_packet_id' (see `emqtt:should_ping/1');
+%% the byte counters fetched by the generic keepalive path are unused.
+getstat({quic, _Conn, _Stream}, Options) ->
+    {ok, [{Opt, 0} || Opt <- Options]}.
 
-getstat({quic, Conn, _Stream}, Options) ->
-    quicer:getstat(Conn, Options).
-
-setopts({quic, _Conn, Stream}, Opts) ->
-    [ ok = quicer:setopt(Stream, Opt, OptV)
-      || {Opt, OptV} <- Opts ],
-    ok.
-
-close({quic, Conn, Stream}) ->
-    %% gracefully shutdown the stream to flush all the msg in sndbuf.
-    _ = quicer:shutdown_stream(Stream, 500),
-    quicer:close_connection(Conn, ?QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0, 500).
+close({quic, Conn, _Stream}) ->
+    quic:close(Conn).
 
 sockname({quic, Conn, _Stream}) ->
-    quicer:sockname(Conn).
+    quic:sockname(Conn).
 
-local_addr(SOpts) ->
-    case { proplists:get_value(port, SOpts, 0),
-           proplists:get_value(ip, SOpts, undefined)} of
-        {0, undefined} ->
-            [];
-        {Port, undefined} ->
-            [{param_conn_local_address, ":" ++ integer_to_list(Port)}];
-        {Port, IpAddr} when is_tuple(IpAddr) ->
-            [{param_conn_local_address, inet:ntoa(IpAddr) ++ ":" ++integer_to_list(Port)}]
+-spec handle_info(quic_msg(), atom(), cb_data()) -> gen_statem:event_handler_result(atom()).
+handle_info({quic, Conn, Inner}, _StateName, CBData) ->
+    handle_event(Inner, Conn, CBData).
+
+%% A peer FIN closes the read side; for the control stream that's the
+%% MQTT session ending.
+handle_event({stream_data, StreamId, Bin, Fin}, Conn, CBData) ->
+    Via = {quic, Conn, StreamId},
+    case handle_stream_data(Via, Bin, CBData) of
+        {stop, _, _} = Stop ->
+            Stop;
+        {keep_state, CBData1, Actions} when Fin ->
+            {CBData2, CloseActions} = on_stream_closed(Via, Conn, CBData1),
+            {keep_state, CBData2, Actions ++ CloseActions};
+        {keep_state, _, _} = Result ->
+            Result
+    end;
+
+handle_event({connected, _Info}, _Conn, _CBData) ->
+    keep_state_and_data;
+
+handle_event({session_ticket, Ticket}, _Conn, #{clientid := Cid}) ->
+    try ets:insert(quic_clients_nsts, {Cid, Ticket}) catch _:_ -> ok end,
+    keep_state_and_data;
+
+%% Stale events for an old connection (e.g. lingering in the mailbox
+%% across a reconnect) are ignored — only the active ctrl-stream conn
+%% drives state transitions.
+handle_event({closed, _Reason}, Conn, CBData) ->
+    case is_active_conn(Conn, CBData) of
+        true ->
+            ?LOG(info, "quic_connection_closed", #{}, CBData),
+            {keep_state, CBData, [{next_event, info, {quic_closed, Conn}}]};
+        false ->
+            keep_state_and_data
+    end;
+
+handle_event({Tag, StreamId, _ErrorCode}, Conn, CBData)
+  when Tag =:= stream_reset; Tag =:= stop_sending ->
+    {NewCBData, Actions} = on_stream_closed({quic, Conn, StreamId}, Conn, CBData),
+    {keep_state, NewCBData, Actions};
+
+handle_event(_Other, _Conn, _CBData) ->
+    keep_state_and_data.
+
+handle_stream_data(Via, Bin, #{stream_parse_state := PSS} = CBData) ->
+    ?LOG(debug, "recv_data", #{data => Bin}, CBData),
+    case maps:get(Via, PSS, undefined) of
+        undefined ->
+            ?LOG(warning, "unknown_stream_data", #{stream => Via}, CBData),
+            {stop, {unknown_stream_data, Via}, CBData};
+        PS ->
+            case emqtt_frame:parse_all(Bin, PS) of
+                {ok, Packets, NewPS} ->
+                    {keep_state, CBData#{stream_parse_state := PSS#{Via => NewPS}},
+                     [{next_event, cast, {P, Via}} || P <- Packets]};
+                {error, Reason} ->
+                    {stop, Reason, CBData}
+            end
     end.
 
-ssl_opts(SOpts) ->
-    proplists:get_value(ssl_opts, SOpts, []).
+is_active_conn(Conn, #{control_stream_sock := {quic, Conn, _}}) -> true;
+is_active_conn(_Conn, _CBData) -> false.
 
--spec from_sockopts(proplists:proplist()) -> {ConnOpts::map(), StreamOpts::map()}.
-from_sockopts(SockOpts) ->
-    {UserConnOpts0, UserStreamOpts0} = proplists:get_value(quic_opts, SockOpts, {[], []}),
-    %% Mandatory defaults
-    KeepAlive = proplists:get_value(keepalive, SockOpts, 60),
-    DefConnOpts = [ {alpn, ["mqtt"]}
-                  , {idle_timeout_ms, timer:seconds(KeepAlive * 3)}
-                  , {peer_unidi_stream_count, 1}
-                  , {peer_bidi_stream_count, 3}
-                  , {verify, proplists:get_value(verify, SockOpts, verify_none)}
-                  , {quic_event_mask, ?QUICER_CONNECTION_EVENT_MASK_NST}],
-    %% Deprecated but for backward compatibility
-    OptionalOpts = lists:filter(fun({handle, _}) -> true;
-                                   ({nst, _}) -> true;
-                                   (_) -> false
-                                end, SockOpts),
-    QuicConnOpts = maps:from_list(DefConnOpts
-                                  ++ ssl_opts(SockOpts)
-                                  ++ local_addr(SockOpts)
-                                  ++ OptionalOpts
-                                  ++ UserConnOpts0),
-    QuicStremOpts = maps:from_list([{active, 1} | UserStreamOpts0]),
-    {QuicConnOpts, QuicStremOpts}.
+on_stream_closed(Via, Conn, #{ data_stream_socks := DataStreams
+                             , stream_parse_state := PSS
+                             , control_stream_sock := CtrlSock
+                             } = CBData) ->
+    case lists:member(Via, DataStreams) of
+        true ->
+            {CBData#{ data_stream_socks := lists:delete(Via, DataStreams)
+                    , stream_parse_state := maps:remove(Via, PSS)
+                    }, []};
+        false when Via =:= CtrlSock ->
+            {CBData, [{next_event, info, {quic_closed, Conn}}]};
+        false ->
+            ?LOG(warning, "unknown_stream_closed", #{stream => Via}, CBData),
+            {CBData, []}
+    end.
 
--else.
-%% BUILD_WITHOUT_QUIC
--endif.
+-spec conn_opts(inet:hostname() | inet:ip_address(), proplists:proplist(), timeout())
+               -> map().
+conn_opts(Host, SockOpts, Timeout) ->
+    {UserConnOpts, _} = proplists:get_value(quic_opts, SockOpts, {[], []}),
+    SslOpts = proplists:get_value(ssl_opts, SockOpts, []),
+    Pairs = [{alpn,            [<<"mqtt">>]},
+             {verify,          translate_verify(proplists:get_value(verify, SockOpts, verify_none))},
+             {connect_timeout, translate_timeout(Timeout)},
+             {server_name,     sni(SslOpts, Host)},
+             {cacerts,         proplists:get_value(cacerts, SslOpts)},
+             {session_ticket,  proplists:get_value(nst, SockOpts)}],
+    Derived = maps:from_list([KV || {_, V} = KV <- Pairs, V =/= undefined]),
+    %% User-supplied quic_opts override the derived defaults.
+    maps:merge(Derived, maps:from_list(UserConnOpts)).
+
+translate_timeout(infinity) -> undefined;
+translate_timeout(T)        -> T.
+
+translate_verify(verify_none)            -> false;
+translate_verify(verify_peer)            -> true;
+translate_verify(B) when is_boolean(B)   -> B.
+
+%% Derive SNI from Host unless explicitly set. An IP address is not a valid
+%% SNI, so it yields `undefined`.
+sni(SslOpts, Host) ->
+    case proplists:get_value(server_name_indication, SslOpts) of
+        S when is_binary(S) -> S;
+        S when is_list(S)   -> list_to_binary(S);
+        _                   -> host_to_sni(Host)
+    end.
+
+host_to_sni(H) when is_binary(H) -> H;
+host_to_sni(H) when is_list(H)   -> list_to_binary(H);
+host_to_sni(_)                   -> undefined.  % IP address tuple

@@ -377,7 +377,7 @@ option() = {name, atom()} |
            {tcp_opts, [gen_tcp:option()]} |
            {ssl, boolean()} |
            {ssl_opts, [ssl:tls_client_option()]} |
-           {quic_opts, {quicer:conn_opts(), quicer:stream_opts()}} |
+           {quic_opts, {ConnOpts :: proplists:proplist(), StreamOpts :: proplists:proplist()}} |
            {ws_path, string()} |
            {connect_timeout, pos_integer()} |
            {bridge_mode, boolean()} |

@@ -24,6 +24,7 @@
 
 -export([ parse/1
         , parse/2
+        , parse_all/2
         , serialize_fun/0
         , serialize_fun/1
         , serialize/1
@@ -116,6 +117,27 @@ parse(<<Type:4, Dup:1, QoS:2, Retain:1, Rest/binary>>,
     parse_remaining_len(Rest, Header1, Options);
 parse(Bin, Cont) when is_binary(Bin), is_function(Cont) ->
     Cont(Bin).
+
+%% @doc Consume `Bin' in full, returning every complete packet plus the
+%% residual parse state. Used by transports that hand byte streams to the
+%% gen_statem in one chunk (TCP/SSL/WS, and per-stream for QUIC).
+-spec parse_all(binary(), parse_state()) ->
+        {ok, [#mqtt_packet{}], parse_state()} | {error, {term(), list()}}.
+parse_all(Bin, PS) ->
+    parse_all(Bin, PS, []).
+
+parse_all(<<>>, PS, Acc) ->
+    {ok, lists:reverse(Acc), PS};
+parse_all(Bin, PS, Acc) ->
+    try parse(Bin, PS) of
+        {ok, Packet, Rest, NewPS} ->
+            parse_all(Rest, NewPS, [Packet | Acc]);
+        {more, NewPS} ->
+            {ok, lists:reverse(Acc), NewPS}
+    catch
+        error:Reason:ST ->
+            {error, {Reason, ST}}
+    end.
 
 parse_remaining_len(<<>>, Header, Options) ->
     {more, fun(Bin) -> parse_remaining_len(Bin, Header, Options) end};

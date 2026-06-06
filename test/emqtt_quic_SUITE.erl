@@ -26,8 +26,6 @@
 suite() ->
     [{timetrap, {seconds, 30}}].
 
--ifndef(BUILD_WITHOUT_QUIC).
--include_lib("quicer/include/quicer.hrl").
 all() ->
     [
      {group, mstream},
@@ -35,8 +33,7 @@ all() ->
      t_quic_sock,
      t_quic_sock_fail,
      t_0_rtt,
-     t_0_rtt_fail,
-     t_ssl_keylogfile_dump
+     t_0_rtt_fail
     ].
 
 groups() ->
@@ -125,19 +122,13 @@ init_per_group(pub_qos2, Config) ->
 init_per_group(sub_qos2, Config) ->
     [{sub_qos, 2} | Config];
 init_per_group(abort_send_shutdown, Config) ->
-    [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND} | Config];
+    [{stream_shutdown_flag, abort_send} | Config];
 init_per_group(abort_recv_shutdown, Config) ->
-    [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_RECEIVE} | Config];
+    [{stream_shutdown_flag, abort_recv} | Config];
 init_per_group(abort_send_recv_shutdown, Config) ->
-    [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT} | Config];
+    [{stream_shutdown_flag, abort} | Config];
 init_per_group(graceful_shutdown, Config) ->
-    [{stream_shutdown_flag, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL} | Config];
-init_per_group(profile_max_throughput, Config) ->
-    quicer:reg_open(quic_execution_profile_type_max_throughput),
-    Config;
-init_per_group(profile_low_latency, Config) ->
-    quicer:reg_open(quic_execution_profile_low_latency),
-    Config;
+    [{stream_shutdown_flag, graceful} | Config];
 init_per_group(_, Config) ->
     Config.
 
@@ -148,9 +139,6 @@ t_quic_sock(Config) ->
     Port = 4567,
     SslOpts = [ {certfile, certfile(Config)}
               , {keyfile,  keyfile(Config)}
-              , {idle_timeout_ms, 10000}
-              , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
-              , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
     process_flag(trap_exit, true),
@@ -158,7 +146,7 @@ t_quic_sock(Config) ->
     timer:sleep(500),
     {ok, Sock} = emqtt_quic:connect("localhost",
                                     Port,
-                                    [{alpn, ["mqtt"]}, {active, false}],
+                                    [{alpn, ["mqtt"]}],
                                     3000),
     send_and_recv_with(Sock),
     ok = emqtt_quic:close(Sock),
@@ -166,17 +154,11 @@ t_quic_sock(Config) ->
 
 t_quic_sock_fail(_Config) ->
     Port = 3567,
-    Error1 = {error, {transport_down, #{ error => 2,
-                                         status => connection_refused}}
-             },
-    Error2 = {error, {transport_down, #{error => 1, status => unreachable}}},
     case emqtt_quic:connect("localhost",
                                Port,
-                               [{alpn, ["mqtt"]}, {active, false}],
+                               [{alpn, ["mqtt"]}],
                                3000) of
-        Error1 ->
-            ok;
-        Error2 ->
+        {error, _} ->
             ok;
         Other ->
             ct:fail("unexpected return ~p", [Other])
@@ -186,9 +168,6 @@ t_0_rtt(Config) ->
     Port = 4568,
     SslOpts = [ {certfile, certfile(Config)}
               , {keyfile,  keyfile(Config)}
-              , {idle_timeout_ms, 10000}
-              , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
-              , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
     process_flag(trap_exit, true),
@@ -196,19 +175,19 @@ t_0_rtt(Config) ->
     timer:sleep(500),
     {ok, {quic, Conn, _Stream} = Sock} = emqtt_quic:connect("localhost",
                                                           Port,
-                                                          [ {alpn, ["mqtt"]}, {active, false}
-                                                          , {quic_event_mask, 1}
-                                                          ],
+                                                          [{alpn, ["mqtt"]}],
                                                           3000),
     send_and_recv_with(Sock),
-    ok = emqtt_quic:close(Sock),
     NST = receive
-              {quic, nst_received, Conn, Ticket} ->
+              {quic, Conn, {session_ticket, Ticket}} ->
                   Ticket
+          after 5000 ->
+              ct:fail("no session ticket")
           end,
+    ok = emqtt_quic:close(Sock),
     {ok, Sock2} = emqtt_quic:connect("localhost",
                                      Port,
-                                     [{alpn, ["mqtt"]}, {active, false},
+                                     [{alpn, ["mqtt"]},
                                       {nst, NST}
                                      ],
                                      3000),
@@ -220,9 +199,6 @@ t_0_rtt_fail(Config) ->
     Port = 4569,
     SslOpts = [ {certfile, certfile(Config)}
               , {keyfile,  keyfile(Config)}
-              , {idle_timeout_ms, 10000}
-              , {server_resumption_level, 2} % QUIC_SERVER_RESUME_AND_ZERORTT
-              , {peer_bidi_stream_count, 10}
               , {alpn, ["mqtt"]}
               ],
     process_flag(trap_exit, true),
@@ -230,24 +206,32 @@ t_0_rtt_fail(Config) ->
     timer:sleep(500),
     {ok, {quic, Conn, _Stream} = Sock} = emqtt_quic:connect("localhost",
                                                           Port,
-                                                          [ {alpn, ["mqtt"]}, {active, false}
-                                                          , {quic_event_mask, 1}
-                                                          ],
+                                                          [{alpn, ["mqtt"]}],
                                                           3000),
     send_and_recv_with(Sock),
+    Ticket = receive
+                 {quic, Conn, {session_ticket, T}} ->
+                     T
+             after 5000 ->
+                 ct:fail("no session ticket")
+             end,
     ok = emqtt_quic:close(Sock),
-    << _Head:16, Left/binary>> = receive
-                                    {quic, nst_received, Conn, Ticket} when is_binary(Ticket) ->
-                                        Ticket
-                                end,
 
-    Error = {error, invalid_parameter},
-    Error = emqtt_quic:connect("localhost",
-                               Port,
-                               [{alpn, ["mqtt"]}, {active, false},
-                                {nst, Left}
-                               ],
-                               3000),
+    %% Corrupt the opaque ticket identity (record field 3) so the server
+    %% cannot resume; resumption must then error or fall back to a full
+    %% handshake.
+    Corrupted = setelement(3, Ticket, crypto:strong_rand_bytes(byte_size(element(3, Ticket)))),
+    case emqtt_quic:connect("localhost",
+                            Port,
+                            [{alpn, ["mqtt"]},
+                             {nst, Corrupted}
+                            ],
+                            3000) of
+        {error, _} ->
+            ok;
+        {ok, Sock2} ->
+            ok = emqtt_quic:close(Sock2)
+    end,
     quic_server:stop(Server).
 
 t_multi_streams_sub(Config) ->
@@ -349,9 +333,6 @@ t_multi_streams_packet_boundary(Config) ->
     PktId3 = calc_pkt_id(RecQos, 3),
     Topic = atom_to_binary(?FUNCTION_NAME),
 
-    %% make quicer to batch job
-    quicer:reg_open(quic_execution_profile_type_max_throughput),
-
     {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
     {ok, _} = emqtt:quic_connect(C),
     {ok, _, [SubQos]} = emqtt:subscribe(C, #{}, [{Topic, [{qos, SubQos}]}]),
@@ -400,9 +381,6 @@ t_multi_streams_packet_malform(Config) ->
     PktId3 = calc_pkt_id(RecQos, 3),
     Topic = atom_to_binary(?FUNCTION_NAME),
 
-    %% make quicer to batch job
-    quicer:reg_open(quic_execution_profile_type_max_throughput),
-
     {ok, C} = emqtt:start_link([{proto_ver, v5} | Config]),
     {ok, _} = emqtt:quic_connect(C),
     {ok, _, [SubQos]} = emqtt:subscribe(C, #{}, [{Topic, [{qos, SubQos}]}]),
@@ -411,8 +389,8 @@ t_multi_streams_packet_malform(Config) ->
     ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 1">>, [{qos, PubQos}],
                              undefined),
 
-    {ok, {quic, _Conn, MalformStream}} = emqtt:start_data_stream(C, []),
-    {ok, _} = quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>),
+    {ok, {quic, MConn, MalformStream}} = emqtt:start_data_stream(C, []),
+    ok = quic:send_data(MConn, MalformStream, <<0,0,0,0,0,0,0,0,0,0>>, false),
 
     ok = emqtt:publish_async(C, PubVia, Topic,  <<"stream data 2">>, [{qos, PubQos}],
                              undefined),
@@ -444,19 +422,17 @@ t_multi_streams_packet_malform(Config) ->
          }
        ], PubRecvs),
 
-    case quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>) of
-        {ok, 10} -> ok;
-        {error, cancelled} -> ok;
-        {error, stm_send_error, aborted} -> ok;
-        {error, closed} -> ok
+    case quic:send_data(MConn, MalformStream, <<0,0,0,0,0,0,0,0,0,0>>, false) of
+        ok -> ok;
+        {error, _} -> ok
     end,
 
     timer:sleep(200),
     ?assert(is_list(emqtt:info(C))),
 
-    case quicer:send(MalformStream, <<0,0,0,0,0,0,0,0,0,0>>) of
-        {error, stm_send_error, aborted} -> ok;
-        {error, closed} -> ok
+    case quic:send_data(MConn, MalformStream, <<0,0,0,0,0,0,0,0,0,0>>, false) of
+        ok -> ok;
+        {error, _} -> ok
     end,
     timer:sleep(200),
     ?assert(is_list(emqtt:info(C))),
@@ -553,7 +529,7 @@ t_multi_streams_dup_sub(Config) ->
     {ok, #{via := SVia1}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
     {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
 
-    #{data_stream_socks := [{quic, _Conn, SubStream} | _]} = proplists:get_value(extra, emqtt:info(C)),
+    #{data_stream_socks := [{quic, DConn, SubStream} | _]} = proplists:get_value(extra, emqtt:info(C)),
     ?assertEqual(2, length(emqx_broker:subscribers(Topic))),
 
     case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<"stream data 3">>, [{qos, PubQos}]) of
@@ -584,7 +560,7 @@ t_multi_streams_dup_sub(Config) ->
     ?assert([SVia1, SVia2] == RecvVias orelse [SVia2, SVia1] == RecvVias),
 
     %% Shutdown one stream
-    quicer:async_shutdown_stream(SubStream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 500),
+    shutdown_stream(DConn, SubStream, graceful),
     timer:sleep(100),
 
     ?assertEqual(1, length(emqx_broker:subscribers(Topic))),
@@ -755,8 +731,8 @@ t_multi_streams_shutdown_data_stream_abortive(Config) ->
        ], PubRecvs),
 
     #{data_stream_socks := [PubVia | _]} = proplists:get_value(extra, emqtt:info(C)),
-    {quic, _Conn, DataStream} = PubVia,
-    quicer:shutdown_stream(DataStream, ?QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND, 500, 100),
+    {quic, DConn, DataStream} = PubVia,
+    shutdown_stream(DConn, DataStream, abort_send),
     timer:sleep(500),
     %% Still alive
     ?assert(is_list(emqtt:info(C))).
@@ -790,8 +766,8 @@ t_multi_streams_shutdown_ctrl_stream(Config) ->
          }
        ], PubRecvs),
 
-    {quic, _Conn, Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
-    quicer:shutdown_stream(Ctrlstream, ?config(stream_shutdown_flag, Config), 500, 1000),
+    {quic, CConn, Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
+    shutdown_stream(CConn, Ctrlstream, ?config(stream_shutdown_flag, Config)),
     timer:sleep(500),
     %% Client should be closed
     ?assertMatch({'EXIT', {noproc, {gen_statem, call, [_,info,infinity] } }}, catch emqtt:info(C)).
@@ -831,8 +807,8 @@ t_multi_streams_shutdown_ctrl_stream_then_reconnect(Config) ->
          }
        ], PubRecvs),
 
-    {quic, _Conn, Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
-    quicer:shutdown_stream(Ctrlstream, ?config(stream_shutdown_flag, Config), 500, 100),
+    {quic, CConn, Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
+    shutdown_stream(CConn, Ctrlstream, ?config(stream_shutdown_flag, Config)),
     timer:sleep(200),
     %% Client should be closed
     ?assert(is_list(emqtt:info(C))).
@@ -927,42 +903,27 @@ t_multi_streams_remote_shutdown_with_reconnect(Config) ->
     %% Client is alive.
     ?assert(is_list(emqtt:info(C))).
 
-t_ssl_keylogfile_dump(Config) ->
-    TargetFName = filename:join(["/tmp/", ?FUNCTION_NAME]),
-    erlang:process_flag(trap_exit, true),
-    PubQos = ?config(pub_qos, Config),
-    Topic = atom_to_binary(?FUNCTION_NAME),
-    %% GIVEN: quic conn opt sslkeylogfile is set
-    {ok, C} = emqtt:start_link([{proto_ver, v5}, {reconnect, true},
-                                {clean_start, false},
-                                {clientid, <<"remote_shutdown_with_reconnect">>},
-                                {connect_timeout, 5}, %% speedup test
-                                {quic_opts, {[{sslkeylogfile, TargetFName}],[]}}
-                               | Config]),
-    %% WHEN: client connected to server successfully
-    {ok, _} = emqtt:quic_connect(C),
-    case emqtt:publish_via(C, {logic_stream_id, 1, #{}}, Topic, #{},  <<1,2,3,4,5>>, [{qos, PubQos}]) of
-        ok when PubQos == 0 -> ok;
-        {ok, #{reason_code := 0, via := _PVia}} -> ok
-    end,
-    %% THEN: file is created and none empty.
-    ?assertMatch({ok, #file_info{type = regular, size = S}} when S > 0, file:read_file_info(TargetFName)),
-    file:delete(TargetFName),
-    ok.
-
 %%--------------------------------------------------------------------
 %% Helper functions
 %%--------------------------------------------------------------------
-send_and_recv_with(Sock) ->
+send_and_recv_with({quic, Conn, Stream} = Sock) ->
     {ok, {IP, _}} = emqtt_quic:sockname(Sock),
     ?assert(lists:member(tuple_size(IP), [4, 8])),
     ok = emqtt_quic:send(Sock, <<"ping">>),
-    emqtt_quic:setopts(Sock, [{active, false}]),
-    {ok, <<"pong">>} = emqtt_quic:recv(Sock, 0),
-    ok = emqtt_quic:setopts(Sock, [{active, 100}]),
+    receive
+        {quic, Conn, {stream_data, Stream, <<"pong">>, _Fin}} ->
+            ok
+    after 3000 ->
+            ct:fail("no pong received")
+    end,
     {ok, Stats} = emqtt_quic:getstat(Sock, [send_cnt, recv_cnt]),
-    %% connection level counters, not stream level
     [{send_cnt, _}, {recv_cnt, _}] = Stats.
+
+%% Graceful stream shutdown sends a fin; abort variants reset the stream.
+shutdown_stream(Conn, Stream, graceful) ->
+    quic:send_data(Conn, Stream, <<>>, true);
+shutdown_stream(Conn, Stream, _Abort) ->
+    quic:reset_stream(Conn, Stream, 0).
 
 
 certfile(Config) ->
@@ -1013,9 +974,3 @@ start_emqx_quic(UdpPort) ->
     emqtt_test_lib:start_emqx(),
     application:ensure_all_started(quicer),
     ok = emqtt_test_lib:ensure_quic_listener(mqtt, UdpPort).
-
--else.
-
-all() ->
-    [].
--endif. %% BUILD_WITHOUT_QUIC

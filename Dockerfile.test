@@ -4,6 +4,3 @@ FROM ${BUILD_FROM}
 ADD . /_w
 
 WORKDIR /_w
-
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt update -y && apt install -y cmake

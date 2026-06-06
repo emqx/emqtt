@@ -47,6 +47,7 @@ all(Suite) ->
 start_emqx() ->
     ensure_test_module(emqx_common_test_helpers),
     emqx_common_test_helpers:start_apps([]),
+    {ok, _} = application:ensure_all_started(quic),
     ok = ensure_quic_listener(mqtt, 14567),
     ok.
 
