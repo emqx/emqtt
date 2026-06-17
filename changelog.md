@@ -1,5 +1,13 @@
 # 1.15.2
 
+- fix: re-arm the socket on `ssl_passive` events when `{active, N}` is configured.
+  The handler matched the event's sslsocket against the one stored in state,
+  which never matched because emqtt wraps the OTP `sslsocket` in its own
+  `#ssl_socket{tcp, ssl}` record. The handler now peels into the wrapper on the
+  SSL branch (#314).
+
+# 1.15.2
+
 - fix: do not merge MQTT v5 directional properties (`Receive-Maximum`,
   `Topic-Alias-Maximum`, `Maximum-Packet-Size`) from CONNACK into the
   client state. These properties describe opposite directions in
