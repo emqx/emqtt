@@ -1562,9 +1562,16 @@ handle_event({call, From}, stop, _StateName, _State) ->
 handle_event({call, From}, status, StateName, _State) ->
     {keep_state_and_data, {reply, From, StateName}};
 
-handle_event(info, {Passive, Sock}, _StateName, #state{socket = Sock} = State) 
-  when Passive =:= tcp_passive orelse Passive =:= ssl_passive ->
-    %% Auto reactivate the sock
+%% TLS: the OTP ssl driver delivers events with the bare sslsocket
+%% record; emqtt wraps it as #ssl_socket{tcp, ssl} in state. Peel
+%% into the wrapper to match.
+handle_event(info, {ssl_passive, SslSock}, _StateName,
+             #state{socket = #ssl_socket{ssl = SslSock}} = State) ->
+    _ = activate_sock(State),
+    keep_state_and_data;
+%% Plain TCP: state stores the raw inet socket, term-equality holds.
+handle_event(info, {tcp_passive, Sock}, _StateName,
+             #state{socket = Sock} = State) ->
     _ = activate_sock(State),
     keep_state_and_data;
 
