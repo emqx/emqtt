@@ -222,12 +222,15 @@
     handle_auth := custom_auth_handle_fn()
 }).
 
+%% QUIC stream options, e.g. #{priority => non_neg_integer()}.
+-type stream_opts() :: map() | proplists:proplist().
+
 %% 'Via' field add ability of multi stream support for QUIC transport
 %% For TCP based, always try use 'default'
 -type via() :: default                                         % via default socket
-               | {new_data_stream, quicer:stream_opts()}       % Create and use new long living data stream
-               | {new_req_stream, quicer:stream_opts()}        % @TODO create and use short lived req stream
-               | {logic_stream_id, non_neg_integer(), quicer:stream_opts()}
+               | {new_data_stream, stream_opts()}              % Create and use new long living data stream
+               | {new_req_stream, stream_opts()}               % @TODO create and use short lived req stream
+               | {logic_stream_id, non_neg_integer(), stream_opts()}
                | inet:socket() | emqtt_quic:quic_sock()
                | ?socket_reconnecting.
 
@@ -630,7 +633,7 @@ publish_async(Client, Via, Topic, Properties, Payload, Opts, Timeout, Callback)
                   Callback).
 
 %% QUIC only
--spec start_data_stream(client(), quicer:stream_opts())-> {ok, via()} | {error, any()}.
+-spec start_data_stream(client(), stream_opts())-> {ok, via()} | {error, any()}.
 start_data_stream(Client, StreamOpts) ->
     call(Client, {new_data_stream, StreamOpts}).
 
@@ -996,21 +999,22 @@ initialized({call, From}, {connect, ConnMod}, State) ->
         {error, Reason} ->
             shutdown_reply(Reason, From, {error, Reason})
     end;
-initialized({call, From}, {open_connection, emqtt_quic}, #state{sock_opts = SockOpts} = State) ->
-    case emqtt_quic:open_connection() of
+initialized({call, From}, {open_connection, emqtt_quic},
+            #state{sock_opts = SockOpts, connect_timeout = Timeout} = State0) ->
+    State = maybe_init_quic_state(emqtt_quic, State0),
+    case emqtt_quic:open_connection(hosts(State), SockOpts, Timeout) of
         {ok, Conn} ->
             State1 = State#state{
                        conn_mod = emqtt_quic,
                        socket = {quic, Conn, undefined},
-                       %% `handle' is quicer connecion opt
+                       %% `handle' marks the connection as already established
                        sock_opts = [{handle, Conn} | SockOpts]},
-            {keep_state, maybe_init_quic_state(emqtt_quic, State1),
-             {reply, From, ok}};
+            {keep_state, State1, {reply, From, ok}};
         {error, Reason} = Error ->
             shutdown_reply(Reason, From, Error)
     end;
 initialized({call, From}, quic_mqtt_connect, #state{socket = {quic, Conn, undefined}} = State) ->
-    {ok, NewCtrlStream} = quicer:start_stream(Conn, #{active => 1}),
+    {ok, NewCtrlStream} = emqtt_quic:open_stream(Conn),
     NewSocket = {quic, Conn, NewCtrlStream},
     case mqtt_connect(maybe_update_ctrl_sock(emqtt_quic, maybe_init_quic_state(emqtt_quic, State), NewSocket)) of
         {ok, #state{socket = Via} = NewState} ->
@@ -1036,12 +1040,13 @@ do_connect(ConnMod, #state{pending_calls = Pendings,
                            qoe = IsQoE
                           } = State) ->
     State0 = maybe_init_quic_state(ConnMod, State),
-    IsUsingQuicHandle = proplists:is_defined(handle, SockOpts),
     IsQoE =/= false andalso put(qoe, IsQoE),
     case sock_connect(ConnMod, hosts(State0), SockOpts, Timeout) of
         skip ->
+            %% emqtt_quic returns `skip' when sock_opts carries a pre-opened
+            %% handle from open_quic_connection.
             {ok, State0};
-        {ok, NewSock} when not IsUsingQuicHandle ->
+        {ok, NewSock} ->
             State1 = maybe_update_ctrl_sock(ConnMod, State0, NewSock),
             State2 = qoe_inject(handshaked, maybe_qoe_tcp(State1)),
             NewPendings = refresh_calls(Pendings, NewSock),
@@ -1578,7 +1583,7 @@ handle_event(info, {tcp_passive, Sock}, _StateName,
 handle_event(info, {gun_ws, ConnPid, StreamRef, {binary, Data}},
              _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
     ?LOG(debug, "websocket_recv_data", #{data => Data}, State),
-    process_incoming(iolist_to_binary(Data), [], State);
+    process_incoming(iolist_to_binary(Data), State);
 
 handle_event(info, {gun_ws, ConnPid, StreamRef, {close, Code, _}},
              _StateName, State = #state{socket = {ConnPid, StreamRef}}) ->
@@ -1598,7 +1603,7 @@ handle_event(info, {ssl, session_ticket, _Ticket}, _StateName, _State) ->
 handle_event(info, {TcpOrSsL, _Sock, Data}, _StateName, State)
         when TcpOrSsL =:= tcp; TcpOrSsL =:= ssl ->
     ?LOG(debug, "recv_data", #{data => Data}, State),
-    process_incoming(Data, [], run_sock(State));
+    process_incoming(Data, run_sock(State));
 
 handle_event(info, {Error, Sock, Reason}, connected, #state{socket = Sock} = State)
         when ?SOCK_ERROR(Error) ->
@@ -1666,25 +1671,13 @@ handle_event(info, {inet_reply, _Sock, {error, Reason}}, _, State) ->
     maybe_reconnect(Reason, State);
 
 %% QUIC messages
-handle_event(info, {quic, _, _, _} = QuicMsg, StateName, #state{extra = Extra} = State) ->
+handle_event(info, {quic, _, _} = QuicMsg, StateName, #state{extra = Extra} = State) ->
     case emqtt_quic:handle_info(QuicMsg, StateName, Extra) of
-        {next_state, NewStatName, NewCBState} ->
-            {next_state, NewStatName, State#state{extra = NewCBState}};
-        {next_state, NewStatName, NewCBState, Actions} ->
-            {next_state, NewStatName, State#state{extra = NewCBState}, Actions};
-        {keep_state, NewCBState} ->
-            {keep_state, State#state{extra = NewCBState}};
         {keep_state, NewCBState, Actions} ->
             {keep_state, State#state{extra = NewCBState}, Actions};
-        {repeat_state, NewCBState} ->
-            {repeat_state, State#state{extra = NewCBState}};
-        {repeat_state, NewCBState, Actions} ->
-            {repeat_state, State#state{extra = NewCBState}, Actions};
         {stop, Reason, NewCBState} ->
             shutdown(Reason, State#state{extra = NewCBState});
-        {stop_and_reply, Reason, Replies, NewCBState} ->
-            {stop_and_reply, Reason, Replies, State#state{extra = NewCBState}};
-        Other -> %% Without NewCBState
+        Other ->
             Other
     end;
 
@@ -2335,26 +2328,18 @@ activate_sock(#state{conn_mod = ConnMod, socket = Sock, sock_opts = Opts}) ->
     V = proplists:get_value(active, Opts, ?DEFAULT_SOCK_ACTIVE),
     set_active(ConnMod, Sock, V).
 
-set_active(emqtt_quic, _Sock, _V) ->
-    ok;
 set_active(ConnMod, Sock, V) ->
     _ = ConnMod:setopts(Sock, [{active, V}]),
     ok.
 
 %%--------------------------------------------------------------------
-%% Process incomming
+%% Process incoming
 
-process_incoming(<<>>, Packets, #state{socket = Via} = State) ->
-    {keep_state, State, next_events(Via, Packets)};
-
-process_incoming(Bytes, Packets, State = #state{parse_state = ParseState, socket = Via}) ->
-    try emqtt_frame:parse(Bytes, ParseState) of
-        {ok, Packet, Rest, NParseState} ->
-            process_incoming(Rest, [Packet|Packets], State#state{parse_state = NParseState});
-        {more, NParseState} ->
-            {keep_state, State#state{parse_state = NParseState}, next_events(Via, Packets)}
-    catch
-        error:Reason:St ->
+process_incoming(Bytes, State = #state{parse_state = PS, socket = Via}) ->
+    case emqtt_frame:parse_all(Bytes, PS) of
+        {ok, Packets, NewPS} ->
+            {keep_state, State#state{parse_state = NewPS}, next_events(Via, Packets)};
+        {error, {Reason, St}} ->
             maybe_reconnect({parse_packets_error, Reason, St}, State)
     end.
 
@@ -2363,7 +2348,7 @@ next_events(_Via, []) -> [];
 next_events(Via, [Packet]) ->
     {next_event, cast, {Packet, Via}};
 next_events(Via, Packets) ->
-    [{next_event, cast, {Packet, Via}} || Packet <- lists:reverse(Packets)].
+    [{next_event, cast, {Packet, Via}} || Packet <- Packets].
 
 %%--------------------------------------------------------------------
 %% packet_id generation
@@ -2499,55 +2484,22 @@ now_ts() ->
     erlang:system_time(millisecond).
 
 -spec maybe_init_quic_state(module(), #state{}) -> #state{}.
-maybe_init_quic_state(emqtt_quic, Old = #state{extra = #{control_stream_sock := {quic, _, _} }}) ->
-    %% Already opened
-    Old;
-maybe_init_quic_state(emqtt_quic, State) ->
-    do_init_quic_state(State);
+maybe_init_quic_state(emqtt_quic, #state{extra = Extra} = Old) ->
+    case emqtt_quic:has_ctrl_stream(Extra) of
+        true -> Old;
+        false -> do_init_quic_state(Old)
+    end;
 maybe_init_quic_state(_, Old) ->
     Old.
 
-do_init_quic_state(#state{extra = Extra, clientid = Cid,
-                          reconnect = Re, parse_state = PS} = Old) ->
-    Old#state{extra = emqtt_quic:init_state(Extra#{ clientid => Cid
-                                                  , conn_parse_state => PS %% set once
-                                                  , data_stream_socks => []
-                                                  , logic_stream_map => #{}
-                                                  , control_stream_sock => undefined
-                                                  , reconnect => ?NEED_RECONNECT(Re)})}.
+do_init_quic_state(#state{extra = Extra, clientid = Cid, parse_state = PS} = Old) ->
+    Old#state{extra = maps:merge(Extra, emqtt_quic:init_state(Cid, PS))}.
 
-update_data_streams(#{ data_stream_socks := Socks
-                     , conn_parse_state := PS
-                     , stream_parse_state := PSS
-                     } = Extra, NewSock) ->
-    Extra#{ data_stream_socks := [ NewSock | Socks ]
-          , stream_parse_state := PSS#{NewSock => PS}
-          }.
-
-update_data_streams(#{ data_stream_socks := Socks
-                     , conn_parse_state := PS
-                     , logic_stream_map := LSM
-                     , stream_parse_state := PSS
-                     } = Extra, LogicStreamId, NewSock) ->
-    Extra#{ data_stream_socks := [ NewSock | Socks ]
-          , logic_stream_map := LSM#{LogicStreamId => NewSock}
-          , stream_parse_state := PSS#{NewSock => PS}
-          }.
-
-get_logic_stream(#{logic_stream_map := LSM}, ID) ->
-    maps:get(ID, LSM, undefined).
-
-maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}
-                                         } = OldState, _Sock)
+maybe_update_ctrl_sock(emqtt_quic, #state{socket = {quic, Conn, Stream}} = OldState, _Sock)
   when Stream =/= undefined andalso Conn =/= undefined ->
     OldState;
-maybe_update_ctrl_sock(emqtt_quic, #state{ extra = #{conn_parse_state := PS} = OldExtra
-                                         } = OldState, Sock) ->
-    OldState#state{ extra = OldExtra#{ control_stream_sock := Sock
-                                     , stream_parse_state => #{Sock => PS} %% Clone Connection PS
-                                     }
-                  , socket = Sock
-                  };
+maybe_update_ctrl_sock(emqtt_quic, #state{extra = OldExtra} = OldState, Sock) ->
+    OldState#state{extra = emqtt_quic:set_ctrl_stream(Sock, OldExtra), socket = Sock};
 maybe_update_ctrl_sock(_, Old, _) ->
     Old.
 
@@ -2557,25 +2509,18 @@ maybe_new_stream({new_data_stream, StreamOpts}, #state{conn_mod = emqtt_quic,
                                                        extra = Extra
                                                       } = State) ->
     %% @TODO handle error
-    {ok, NewStream} = quicer:start_stream(Conn, StreamOpts),
+    {ok, NewStream} = emqtt_quic:open_stream(Conn, StreamOpts),
     NewSock = {quic, Conn, NewStream},
-    NewState = State#state{extra = update_data_streams(Extra, NewSock)},
-    {NewSock, NewState};
+    {NewSock, State#state{extra = emqtt_quic:add_data_stream(NewSock, Extra)}};
 maybe_new_stream({logic_stream_id, LSID, StreamOpts}, #state{conn_mod = emqtt_quic,
                                                        socket = {quic, Conn, _Stream},
                                                        extra = Extra
                                                       } = State) ->
-    case get_logic_stream(Extra, LSID) of
+    case emqtt_quic:get_logic_stream(LSID, Extra) of
         undefined ->
-            {ok, NewStream} = quicer:start_stream(Conn, StreamOpts),
-            P = maps:get(priority, StreamOpts, undefined),
-            is_integer(P) andalso
-                            (begin ok = quicer:setopt(NewStream, priority, P),
-                             {ok, P} = quicer:getopt(NewStream, priority, false)
-                             end),
+            {ok, NewStream} = emqtt_quic:open_stream(Conn, StreamOpts),
             NewSock = {quic, Conn, NewStream},
-            NewState = State#state{extra = update_data_streams(Extra, LSID, NewSock)},
-            {NewSock, NewState};
+            {NewSock, State#state{extra = emqtt_quic:add_logic_stream(LSID, NewSock, Extra)}};
         Sock ->
             {Sock, State}
     end;
@@ -2601,10 +2546,11 @@ maybe_refresh_calls(#state{pending_calls = Calls, extra = #{retry_calls_on_recon
 maybe_refresh_calls(#state{pending_calls = Calls} = State, Via) ->
     State#state{pending_calls = refresh_calls(Calls, Via)}.
 
-maybe_reinit_quic_state(#state{extra = #{control_stream_sock := _}} = S) ->
-    do_init_quic_state(S);
-maybe_reinit_quic_state(S) ->
-    S.
+maybe_reinit_quic_state(#state{extra = Extra} = S) ->
+    case emqtt_quic:has_ctrl_stream(Extra) of
+        true -> do_init_quic_state(S);
+        false -> S
+    end.
 
 refresh_calls(Calls, Via) ->
     lists:map(fun(X)-> set_call_via(X, Via) end, Calls).
@@ -2629,7 +2575,7 @@ call_id(Op, Via) when is_atom(Op) ->
     call_id(Op, Via, undefined).
 
 
-maybe_qoe_tcp(#state{qoe = false} = S) ->
-    S;
+maybe_qoe_tcp(#state{qoe = false} = S) -> S;
+maybe_qoe_tcp(#state{conn_mod = emqtt_quic} = S) -> S;
 maybe_qoe_tcp(#state{qoe = QoE} = S) when is_map(QoE) ->
     S#state{qoe = QoE#{tcp_connected_at => get(tcp_connected_at)}}.

@@ -147,7 +147,7 @@ main(_Argv) ->
 
 main(PubSubOrJustConnect, Opts0) ->
     _ = process_flag(trap_exit, true),
-    _ = application:ensure_all_started(quicer),
+    _ = application:ensure_all_started(quic),
     _ = application:ensure_all_started(emqtt),
     Print = proplists:get_value(print, Opts0),
     Opts = proplists:delete(print, Opts0),

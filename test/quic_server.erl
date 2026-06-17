@@ -23,57 +23,67 @@ start_link(Port, Opts) ->
     spawn_link(fun() -> quic_server(Port, Opts) end).
 
 quic_server(Port, Opts) ->
-    {ok, L} = quicer:listen(Port, Opts),
-    spawn_link(fun() -> accepter_loop(L) end),
-    spawn_link(fun() -> accepter_loop(L) end),
+    {ok, _} = application:ensure_all_started(quic),
+    Name = list_to_atom("quic_test_server_" ++ integer_to_list(Port)),
+    {ok, _} = quic:start_server(Name, Port, server_opts(Opts)),
     receive
         stop ->
-            quicer:close_listener(L),
-            ok
-    end.
-
-accepter_loop(L) ->
-    case quicer:accept(L, [], 30000) of
-        {ok, Conn} ->
-            case quicer:handshake(Conn, 1000) of
-                {ok, Conn} ->
-                    server_conn_loop(Conn);
-                _ ->
-                    ct:pal("server handshake failed~n", []),
-                    ok
-            end;
-        {error, timeout} ->
-            ct:pal("server accpet conn timeout ~n", []),
-            ok
-    end,
-    accepter_loop(L).
-
-
-server_conn_loop(Conn) ->
-    case quicer:accept_stream(Conn, [{active, false}]) of
-        {ok, Stm} ->
-            %% Assertion
-            {ok, false} = quicer:getopt(Stm, active),
-            server_stream_loop(Conn, Stm);
-        {error, timeout} ->
-            ct:pal("server accpet steam timeout ~n", []),
-            ok
-    end.
-
-server_stream_loop(Conn, Stm) ->
-    quicer:setopt(Stm, active, true),
-    receive
-        {quic, <<"ping">>, Stm, #{}} ->
-            quicer:send(Stm, <<"pong">>)
-    end,
-    receive
-        %% graceful shutdown
-        {quic, peer_send_shutdown, Stm, undefined} ->
-            quicer:close_connection(Conn);
-        %% Conn shutdown
-        {quic, shutdown, Conn, _} ->
+            _ = quic:stop_server(Name),
             ok
     end.
 
 stop(Server) ->
     Server ! stop.
+
+server_opts(Opts) ->
+    {ok, Cert, Key} = load_certs(Opts),
+    #{ cert => Cert
+     , key => Key
+     , alpn => alpn(Opts)
+     , connection_handler =>
+           fun(Conn) ->
+               Handler = spawn_link(fun() -> conn_loop(Conn) end),
+               {ok, Handler}
+           end
+     }.
+
+alpn(Opts) ->
+    case proplists:get_value(alpn, Opts, ["mqtt"]) of
+        L when is_list(L) ->
+            [iolist_to_binary(P) || P <- L]
+    end.
+
+load_certs(Opts) ->
+    CertFile = proplists:get_value(certfile, Opts),
+    KeyFile = proplists:get_value(keyfile, Opts),
+    {ok, CertPem} = file:read_file(CertFile),
+    {ok, KeyPem} = file:read_file(KeyFile),
+    [{'Certificate', CertDer, _} | _] = public_key:pem_decode(CertPem),
+    {ok, CertDer, decode_key(KeyPem)}.
+
+decode_key(KeyPem) ->
+    case public_key:pem_decode(KeyPem) of
+        [{'RSAPrivateKey', Der, not_encrypted} | _] ->
+            public_key:der_decode('RSAPrivateKey', Der);
+        [{'ECPrivateKey', Der, not_encrypted} | _] ->
+            public_key:der_decode('ECPrivateKey', Der);
+        [{'PrivateKeyInfo', Der, not_encrypted} | _] ->
+            public_key:der_decode('PrivateKeyInfo', Der);
+        [{_Type, Der, not_encrypted} | _] ->
+            Der
+    end.
+
+conn_loop(Conn) ->
+    receive
+        {quic, Conn, {stream_data, StreamId, <<"ping">>, _Fin}} ->
+            _ = quic:send_data(Conn, StreamId, <<"pong">>, false),
+            conn_loop(Conn);
+        {quic, Conn, {closed, _Reason}} ->
+            ok;
+        {quic, Conn, _Other} ->
+            conn_loop(Conn);
+        {'DOWN', _, process, Conn, _} ->
+            ok;
+        _ ->
+            conn_loop(Conn)
+    end.

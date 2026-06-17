@@ -93,13 +93,8 @@ send(#ssl_socket{ssl = SslSock}, Data) ->
         {error, Reason}->
             {error, Reason}
     end;
-send(QuicStream, Data) when is_reference(QuicStream) ->
-    case quicer:send(QuicStream, Data) of
-        {ok, _Len} ->
-            ok;
-        Other ->
-            Other
-    end.
+send({quic, _Conn, _Stream} = QuicSock, Data) ->
+    emqtt_quic:send(QuicSock, Data).
 
 -if(?OTP_RELEASE >= 26).
 send_tcp_data(Sock, Data) ->
@@ -118,9 +113,7 @@ send_tcp_data(Sock, Data) ->
 recv(Sock, Length) when is_port(Sock) ->
     gen_tcp:recv(Sock, Length);
 recv(#ssl_socket{ssl = SslSock}, Length) ->
-    ssl:recv(SslSock, Length);
-recv(QuicStream, Length) when is_reference(QuicStream) ->
-    quicer:recv(QuicStream, Length).
+    ssl:recv(SslSock, Length).
 
 -spec(close(socket()) -> ok).
 close(Sock) when is_port(Sock) ->
@@ -146,8 +139,8 @@ sockname(Sock) when is_port(Sock) ->
     inet:sockname(Sock);
 sockname(#ssl_socket{ssl = SslSock}) ->
     ssl:sockname(SslSock);
-sockname(Sock) when is_reference(Sock)->
-    quicer:sockname(Sock).
+sockname({quic, _Conn, _Stream} = QuicSock) ->
+    emqtt_quic:sockname(QuicSock).
 
 -spec(merge_opts(list(), list()) -> list()).
 merge_opts(Defaults, Options) ->
