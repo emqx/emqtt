@@ -1,4 +1,4 @@
-# 1.15.2
+# 1.15.3
 
 - fix: re-arm the socket on `ssl_passive` events when `{active, N}` is configured.
   The handler matched the event's sslsocket against the one stored in state,
