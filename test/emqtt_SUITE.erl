@@ -103,7 +103,8 @@ groups() ->
        t_ssl_error_client_reject_server,
        t_ssl_error_server_reject_client,
        t_active_default_recv,
-       t_active_n_rearm]},
+       t_active_n_rearm,
+       t_active_n_rearm_ssl]},
 
     {mqttv3,[],
       [basic_test_v3]},
@@ -1710,6 +1711,49 @@ t_active_n_rearm(Config) ->
             ok = emqtt:disconnect(Sub),
             ok = emqtt:disconnect(Pub)
     end.
+
+%% Verifies that {active, N} sockets re-arm correctly on TLS, so the
+%% subscriber keeps receiving past the first active-N window.
+t_active_n_rearm_ssl(Config) ->
+    %% Some test matrices ship an EMQX whose ssl:default listener requires
+    %% a client cert (mTLS). Force verify_none on just that field so the
+    %% test exercises the active-N rearm path and not cert-chain validation,
+    %% without clobbering the server's certfile/keyfile.
+    emqx_config:put_listener_conf(ssl, default, [ssl_options, verify], verify_none),
+    ok = emqx_listeners:restart_listener(<<"ssl:default">>),
+    Port = proplists:get_value(ssl_port, Config, 8883),
+    Topic = atom_to_binary(?FUNCTION_NAME),
+    ActiveN = 3,
+    SslOpts = [{verify, verify_none}],
+    {ok, Sub} = emqtt:start_link([{clean_start, true},
+                                  {port, Port},
+                                  {ssl, true},
+                                  {ssl_opts, SslOpts},
+                                  {tcp_opts, [{active, ActiveN}]}]),
+    {ok, _} = emqtt:connect(Sub),
+    SockOpts = proplists:get_value(sock_opts, emqtt:info(Sub)),
+    ?assertEqual(ActiveN, proplists:get_value(active, SockOpts)),
+    {ok, _, _} = emqtt:subscribe(Sub, Topic, ?QOS_1),
+
+    NumMsgs = ActiveN * 2 + 1,
+    {ok, Pub} = emqtt:start_link([{clean_start, true},
+                                  {port, Port},
+                                  {ssl, true},
+                                  {ssl_opts, SslOpts}]),
+    {ok, _} = emqtt:connect(Pub),
+    lists:foreach(
+      fun(I) ->
+              {ok, _} = emqtt:publish(Pub, Topic, integer_to_binary(I),
+                                      [{qos, 1}])
+      end,
+      lists:seq(1, NumMsgs)),
+
+    Received = receive_messages(NumMsgs),
+    ct:pal("received ~p of ~p expected messages", [length(Received), NumMsgs]),
+    ?assertEqual(NumMsgs, length(Received)),
+
+    ok = emqtt:disconnect(Sub),
+    ok = emqtt:disconnect(Pub).
 
 merge_config(Config1, Config2) ->
     lists:foldl(
