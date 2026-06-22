@@ -437,10 +437,10 @@ parse_variable_byte_integer(<<0:1, Len:7, Rest/binary>>, Multiplier, Value) ->
 
 parse_topic_filters(subscribe, Bin) ->
     [{Topic, #{rh => Rh, rap => Rap, nl => Nl, qos => QoS}}
-     || <<Len:16/big, Topic:Len/binary, _:2, Rh:2, Rap:1, Nl:1, QoS:2>> <= Bin];
+     || <<_:8, Len:16/big, Topic:Len/binary, _:2, Rh:2, Rap:1, Nl:1, QoS:2>> <= Bin];
 
 parse_topic_filters(unsubscribe, Bin) ->
-    [Topic || <<Len:16/big, Topic:Len/binary>> <= Bin].
+    [Topic || <<_:8, Len:16/big, Topic:Len/binary>> <= Bin].
 
 parse_reason_codes(Bin) ->
     [Code || <<Code>> <= Bin].
