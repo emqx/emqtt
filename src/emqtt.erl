@@ -1261,10 +1261,12 @@ waiting_for_connack(EventType, EventContent, State) ->
             case take_call(call_id(connect, Via), NewState) of
                 {value, #call{from = From}, _State} ->
                     Reply = case Reason of
-                                {shutdown, _ShutdownReason} ->
-                                    %% All _ShutdownReason reasons returned from handle_event
-                                    %% are included in EventContext
-                                    {error, EventContent};
+                                {shutdown, ShutdownReason} ->
+                                    %% Reply with the shutdown reason, not the raw
+                                    %% event: the event may be a socket data message
+                                    %% like `{tcp, Port, Bytes}' which leaks the port
+                                    %% and payload to the caller as an error reason.
+                                    {error, ShutdownReason};
                                 _ ->
                                     {error, {Reason, EventContent}}
                             end,
@@ -2355,7 +2357,13 @@ process_incoming(Bytes, Packets, State = #state{parse_state = ParseState, socket
             {keep_state, State#state{parse_state = NParseState}, next_events(Via, Packets)}
     catch
         error:Reason:St ->
-            maybe_reconnect({parse_packets_error, Reason, St}, State)
+            %% Received bytes that do not parse as an MQTT frame, e.g. a TLS
+            %% handshake alert when connecting plain TCP to a TLS listener.
+            %% Log the details here; the process exit reason (and hence the
+            %% error callers see) carries only a compact, typed term.
+            ?LOG(error, "frame_parse_error",
+                 #{reason => Reason, stacktrace => St, data => Bytes}, State),
+            maybe_reconnect({frame_parse_error, Reason}, State)
     end.
 
 -compile({inline, [next_events/2]}).

@@ -102,6 +102,7 @@ groups() ->
        t_qos2_flow_autoack_never,
        t_ssl_error_client_reject_server,
        t_ssl_error_server_reject_client,
+       t_frame_parse_error,
        t_active_default_recv,
        t_active_n_rearm,
        t_active_n_rearm_ssl]},
@@ -311,7 +312,43 @@ t_ssl_error_server_reject_client(Config) ->
                                            ]}
                                ]),
     {error, Reason} = emqtt:connect(C),
-    ?assertMatch({ssl_error, _Sock, {tls_alert, {unknown_ca, _}}}, Reason),
+    %% The shutdown reason itself, not the raw `{ssl_error, Sock, Reason}'
+    %% socket event; same shape as in `t_ssl_error_client_reject_server'.
+    ?assertMatch({tls_alert, {unknown_ca, _}}, Reason),
+    ok.
+
+%% Receiving bytes that do not parse as an MQTT frame — e.g. the TLS alert a
+%% TLS listener sends back when a plain TCP client posts MQTT CONNECT to it —
+%% must yield a compact typed error: not the raw `{tcp, Port, Data}' socket
+%% event, and no stacktrace in the reason. A fake server is used instead of a
+%% real TLS listener so the alert bytes are delivered deterministically
+%% (a real TLS stack may close the socket before the alert is flushed).
+t_frame_parse_error(_Config) ->
+    ct:timetrap({seconds, 10}),
+    {ok, L} = gen_tcp:listen(0, [binary, {active, false}, {reuseaddr, true}]),
+    {ok, Port} = inet:port(L),
+    TestPid = self(),
+    Server = spawn_link(fun() ->
+        {ok, S} = gen_tcp:accept(L, 5000),
+        {ok, _Connect} = gen_tcp:recv(S, 0, 5000),
+        %% TLS alert record: fatal (2), unexpected_message (10)
+        ok = gen_tcp:send(S, <<21, 3, 3, 0, 2, 2, 10>>),
+        TestPid ! {sent, self()},
+        %% Keep the socket open so the close does not race the data delivery.
+        receive stop -> ok after 5000 -> ok end
+    end),
+    process_flag(trap_exit, true),
+    {ok, C} = emqtt:start_link([{host, "127.0.0.1"}, {port, Port}]),
+    ?assertMatch({error, {frame_parse_error, _}}, emqtt:connect(C)),
+    receive
+        {'EXIT', C, ExitReason} ->
+            ?assertMatch({shutdown, {frame_parse_error, _}}, ExitReason)
+    after 1000 ->
+        ok
+    end,
+    receive {sent, Server} -> ok after 1000 -> ok end,
+    unlink(Server),
+    Server ! stop,
     ok.
 
 t_reconnect_enabled(Config) ->
