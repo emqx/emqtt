@@ -1,3 +1,17 @@
+# 1.15.4
+
+- fix: return clean, typed error reasons from failed connect attempts.
+  - Frame parse failures (e.g. receiving TLS handshake bytes after connecting
+    plain TCP to a TLS listener) now yield `{error, {frame_parse_error, Reason}}`
+    instead of `{error, {tcp, Port, Bytes}}` (the raw socket event) or a
+    `parse_packets_error` reason embedding a stacktrace. The parse failure
+    details (reason, stacktrace, offending bytes) are logged instead.
+  - Socket errors and closes while waiting for CONNACK reply the shutdown
+    reason itself rather than the raw socket event; e.g. a rejected TLS client
+    certificate now returns `{error, {tls_alert, {unknown_ca, _}}}` instead of
+    `{error, {ssl_error, Sock, {tls_alert, {unknown_ca, _}}}}`, and a closed
+    socket returns `{error, tcp_closed}` instead of `{error, {tcp_closed, Sock}}`.
+
 # 1.15.3
 
 - fix: re-arm the socket on `ssl_passive` events when `{active, N}` is configured.
