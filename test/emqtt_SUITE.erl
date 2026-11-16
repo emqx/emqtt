@@ -84,6 +84,7 @@ groups() ->
        t_unsubscribe,
        t_ping,
        t_disconnect_on_pingresp_timeout,
+       t_reconnect_after_pingresp_timeout,
        t_puback,
        t_pubrec,
        t_pubrel,
@@ -1243,6 +1244,40 @@ t_disconnect_on_pingresp_timeout(Config) ->
 
 pause(_ClientInfo, _Message) ->
     timer:sleep(5000).
+
+t_reconnect_after_pingresp_timeout(Config) ->
+    erlang:process_flag(trap_exit, true),
+    ConnFun = ?config(conn_fun, Config),
+    Port = ?config(port, Config),
+    ClientId = atom_to_binary(?FUNCTION_NAME),
+    %% The client reconnects after the frozen channel has woken and seen its connection
+    %% closed, so the next connection is the only one the broker holds for this client
+    {ok, C} = emqtt:start_link([
+        {clean_start, true},
+        {port, Port},
+        {keepalive, 1},
+        {clientid, ClientId},
+        {reconnect, true},
+        {reconnect_timeout, 6}
+    ]),
+    StateName = fun() -> {Name, _Data} = sys:get_state(C), Name end,
+    Topic = <<"t">>,
+    {ok, _} = emqtt:ConnFun(C),
+    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
+    %% The channel freezes for 5 seconds after receiving the puback, so the connection is
+    %% lost with a PINGREQ outstanding
+    emqx_hooks:add('message.acked', {?MODULE, pause, []}, 1000),
+    Message = emqx_message:make(ClientId, 1, Topic, <<"pingresp_test">>),
+    emqx_broker:publish(Message),
+    _ = retry_if_errors([connected], StateName),
+    emqx_hooks:del('message.acked', {?MODULE, pause}),
+    connected = retry_if_errors([reconnect, waiting_for_connack], StateName),
+    Socket = proplists:get_value(socket, emqtt:info(C)),
+    %% The new connection outlives three keepalive intervals on the same socket
+    timer:sleep(3000),
+    ?assertEqual(connected, StateName()),
+    ?assertEqual(Socket, proplists:get_value(socket, emqtt:info(C))),
+    ok = emqtt:disconnect(C).
 
 t_puback(Config) ->
     ConnFun = ?config(conn_fun, Config),
