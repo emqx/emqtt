@@ -149,14 +149,13 @@ suite() ->
     [{timetrap, {seconds, 60}}].
 
 init_per_suite(Config) ->
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:ensure_broker(),
     Config.
 
 end_per_suite(_Config) ->
-    emqtt_test_lib:stop_emqx().
+    ok.
 
 init_per_testcase(_TC, Config) ->
-    ok = emqtt_test_lib:ensure_quic_listener(mqtt, 14567),
     Config.
 
 end_per_testcase(TC, _Config)
@@ -165,10 +164,11 @@ end_per_testcase(TC, _Config)
        TC =:= t_reconnect_stop orelse
        TC =:= t_reconnect_reach_max_attempts ->
     process_flag(trap_exit, false),
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:start_listeners(),
     meck:unload(),
     ok;
 end_per_testcase(_TC, _Config) ->
+    ok = emqtt_test_lib:clear_delays(),
     meck:unload(),
     ok.
 
@@ -258,7 +258,7 @@ t_reconnect_disabled(Config) ->
     {ok, C} = emqtt:start_link([{port, Port}]),
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             receive
@@ -376,14 +376,13 @@ t_reconnect_enabled(Config) ->
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
-    ok = emqtt_test_lib:stop_emqx(),
-    false = retry_if_errors([true], fun emqx:is_running/0),
+    ok = emqtt_test_lib:stop_listeners(),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             ct:fail(conn_dead)
     after 100 ->
-            timer:apply_after(5000, emqtt_test_lib, start_emqx, []),
-            true = retry_if_errors([false], fun emqx:is_running/0),
+            timer:apply_after(5000, emqtt_test_lib, start_listeners, []),
+            true = retry_if_errors([false], fun emqtt_test_lib:is_running/0),
             ct:pal("emqx is up"),
             connected = retry_if_errors([reconnect, waiting_for_connack],
                                        fun() ->
@@ -479,8 +478,7 @@ t_reconnect_enabled_server_disconnect(Config) ->
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
-    %% ok = emqx_mgmt:kickout_client(ClientId),
-    ok = emqx_cm:kick_session(ClientId),
+    ok = emqtt_test_lib:kick_client(ClientId),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             ct:fail(conn_dead)
@@ -525,7 +523,7 @@ t_reconnect_stop(Config) ->
                                 {reconnect_timeout, 1}]), % 1 sec
     {ok, _} = emqtt:ConnFun(C),
     MRef = erlang:monitor(process, C),
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
     receive
         {'DOWN', MRef, process, C, _Info} ->
             ct:fail(conn_dead)
@@ -568,7 +566,7 @@ t_reconnect_reach_max_attempts(Config) ->
             ok
     end,
 
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
 
     receive
         {'DOWN', MRef, process, C, {shutdown, fake_conn_error}} -> ok
@@ -616,11 +614,11 @@ test_reconnect_immediate_retry(Config) ->
     ok = emqtt:publish_async(C, Topic, <<"enqueue2">>, [{qos, 1}],
                              fun(R) -> Parent ! {publish_async_result, 4, R} end),
 
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
     meck:unload(emqtt_sock),
     unmock_quic(),
 
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:start_listeners(),
 
     ?assertMatch([{1, {ok, _}},
                   {2, {ok, _}},
@@ -933,21 +931,16 @@ t_publish_in_reconnect(Config) ->
     {ok, _} = emqtt:ConnFun(C),
 
     %% enqueue PUBLISH request in reconnect state
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
     timer:sleep(1000),
     Parent = self(),
     ?assertEqual(reconnect, emqtt:status(C)),
     ok = emqtt:publish_async(C, Topic, <<"enqueue_in_reconnect">>, 0,
                              fun(R) -> Parent ! {publish_async_result, 1, R} end),
 
-    meck:new(emqx_access_control, [passthrough, no_history]),
+    %% The broker takes 2 seconds to authenticate the client
+    ok = emqtt_test_lib:delay_authn(2000),
     meck:new(emqtt, [passthrough, no_history]),
-    meck:expect(emqx_access_control,
-                authenticate,
-                fun(Credential) ->
-                        timer:sleep(2000),
-                        meck:passthrough([Credential])
-                end),
     Self = self(),
     meck:expect(emqtt,
                 waiting_for_connack,
@@ -957,7 +950,7 @@ t_publish_in_reconnect(Config) ->
                 end),
 
     %% enqueue PUBLISH request in waiting_for_connack state
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:start_listeners(),
     ?WAIT(waiting_for_connack, ok),
     ?assertEqual(waiting_for_connack, emqtt:status(C)),
     ok = emqtt:publish_async(C, Topic, <<"enqueue_in_waiting_for_connack">>, 1,
@@ -966,8 +959,7 @@ t_publish_in_reconnect(Config) ->
     ?assertMatch([{1, ok},
                   {2, {ok, _}}], ?COLLECT_ASYNC_RESULT(C)),
 
-    meck:unload(emqtt),
-    meck:unload(emqx_access_control).
+    meck:unload(emqtt).
 
 %% Verify that with {retry_calls_on_reconnect, false}, the calls like emqtt:subscribe
 %% will receive error {error, disconnected} instead of being retried on client reconnect
@@ -985,13 +977,7 @@ t_drop_calls_on_reconnect(Config) ->
     {ok, _} = emqtt:ConnFun(C),
 
     %% make subscribe be slow so that we could emulate a disconnect during subscribe
-    meck:new(emqx_access_control, [passthrough, no_history]),
-    meck:expect(emqx_access_control,
-                authorize,
-                fun(ClientInfo, PubSub, Topic1) ->
-                        timer:sleep(2000),
-                        meck:passthrough([ClientInfo, PubSub, Topic1])
-                end),
+    ok = emqtt_test_lib:delay_authz(2000),
 
     %% Subscribe
     Self = self(),
@@ -1002,7 +988,7 @@ t_drop_calls_on_reconnect(Config) ->
     ct:sleep(100),
 
     %% While subscribing, stop emqx. This should cause a disconnect and a reconnect attempt
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
 
     %% Verify that the subscribe call returned {error, disconnected}
     receive
@@ -1013,8 +999,7 @@ t_drop_calls_on_reconnect(Config) ->
     end,
 
     %% Clean up
-    emqtt_test_lib:start_emqx(),
-    meck:unload(emqx_access_control).
+    ok = emqtt_test_lib:start_listeners().
 
 t_publish_async(Config) ->
     ConnFun = ?config(conn_fun, Config),
@@ -1226,24 +1211,19 @@ t_disconnect_on_pingresp_timeout(Config) ->
     ]),
     Topic = <<"t">>,
     {ok, _} = emqtt:ConnFun(C),
-    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
-    %% Make channel be unresponsive for 5 seconds after receiving puback
-    emqx_hooks:add('message.acked', {?MODULE, pause, []}, 1000),
-    Message = emqx_message:make(ClientId, 1, Topic, <<"pingresp_test">>),
-    emqx_broker:publish(Message),
-    %% emqtt automatically acks the message, the channel freezes for 5 seconds because of the injected hook
-    %% emqtt should shutdown because of pingresp_timeout
+    %% The channel freezes for 10 seconds in the authorization of the next PUBLISH
+    ok = emqtt_test_lib:delay_authz(10000),
+    ok = emqtt:publish(C, Topic, <<"pingresp_test">>, ?QOS_0),
+    %% emqtt should shutdown because of pingresp_timeout. The PUBLISH counts as
+    %% activity, so the first PINGREQ goes out about 1 second later, and its
+    %% timeout is detected 1 to 2 keepalive intervals after that.
     Exited = receive
         {'EXIT', C, _} ->
             true
-    after 3000 ->
+    after 6000 ->
         false
     end,
-    emqx_hooks:del('message.acked', {?MODULE, pause}),
     ?assert(Exited, "Client should shutdown because of pingresp_timeout").
-
-pause(_ClientInfo, _Message) ->
-    timer:sleep(5000).
 
 t_reconnect_after_pingresp_timeout(Config) ->
     erlang:process_flag(trap_exit, true),
@@ -1263,14 +1243,11 @@ t_reconnect_after_pingresp_timeout(Config) ->
     StateName = fun() -> {Name, _Data} = sys:get_state(C), Name end,
     Topic = <<"t">>,
     {ok, _} = emqtt:ConnFun(C),
-    {ok, _, [1]} = emqtt:subscribe(C, Topic, 1),
-    %% The channel freezes for 5 seconds after receiving the puback, so the connection is
-    %% lost with a PINGREQ outstanding
-    emqx_hooks:add('message.acked', {?MODULE, pause, []}, 1000),
-    Message = emqx_message:make(ClientId, 1, Topic, <<"pingresp_test">>),
-    emqx_broker:publish(Message),
+    %% The channel freezes for 5 seconds in the authorization of the next PUBLISH, so the
+    %% connection is lost with a PINGREQ outstanding
+    ok = emqtt_test_lib:delay_authz(5000),
+    ok = emqtt:publish(C, Topic, <<"pingresp_test">>, ?QOS_0),
     _ = retry_if_errors([connected], StateName),
-    emqx_hooks:del('message.acked', {?MODULE, pause}),
     connected = retry_if_errors([reconnect, waiting_for_connack], StateName),
     Socket = proplists:get_value(socket, emqtt:info(C)),
     %% The new connection outlives three keepalive intervals on the same socket
@@ -1714,7 +1691,20 @@ will_retain_message_test(Config) ->
     [?assertMatch( #{qos := 1, retain := true, topic := Topic} ,Msg2) || Msg2 <- receive_messages(1)],
     ok = emqtt:disconnect(C3),
 
+    %% The broker publishes the will message after it sees C1 go away. Wait
+    %% for it, or it can be retained after the clean up below.
+    {ok, C4} = emqtt:start_link([{port, Port}]),
+    {ok, _} = emqtt:ConnFun(C4),
+    {ok, _, [2]} = emqtt:subscribe(C4, Topic, 2),
     ok = emqtt:stop(C1),
+    receive
+        {publish, #{client_pid := C4, topic := Topic,
+                    payload := <<"will_retain_message_test">>}} ->
+            ok
+    after 5000 ->
+            ct:fail(no_will_message)
+    end,
+    ok = emqtt:disconnect(C4),
     clean_retained(Topic),
     ct:print("Will retain message test succeeded").
 
@@ -1829,18 +1819,19 @@ retain_as_publish_test(Config) ->
     {ok, Sub2} = emqtt:start_link([{clean_start, true}, {proto_ver, v5}, {port, Port}]),
     {ok, _} = emqtt:ConnFun(Sub2),
 
-    {ok, _} = emqtt:publish(Pub, Topic, #{}, <<"retain_as_publish_test">>, [{qos, ?QOS_1}, {retain, true}]),
-    timer:sleep(10),
-
+    %% Subscribe before the PUBLISH: a retained message sent on subscription
+    %% always has the RETAIN flag set, whatever Retain As Published says.
     {ok, _, [2]} = emqtt:subscribe(Sub1, Topic, 2),
-    timer:sleep(5),
-    [?assertMatch( #{qos := 1, retain := false, topic := Topic} ,Msg1) || Msg1 <- receive_messages(1)],
-    ok = emqtt:disconnect(Sub1),
-
-
     {ok, _, [2]} = emqtt:subscribe(Sub2, Topic, [{qos, 2}, {rap, true}]),
-    timer:sleep(5),
-    [?assertMatch( #{qos := 1, retain := true, topic := Topic} ,Msg2) || Msg2 <- receive_messages(1)],
+
+    {ok, _} = emqtt:publish(Pub, Topic, #{}, <<"retain_as_publish_test">>, [{qos, ?QOS_1}, {retain, true}]),
+
+    Msgs = receive_messages(2),
+    ?assertMatch([#{qos := 1, retain := false, topic := Topic}],
+                 [M || M = #{client_pid := P} <- Msgs, P =:= Sub1]),
+    ?assertMatch([#{qos := 1, retain := true, topic := Topic}],
+                 [M || M = #{client_pid := P} <- Msgs, P =:= Sub2]),
+    ok = emqtt:disconnect(Sub1),
     ok = emqtt:disconnect(Sub2),
 
     ok = emqtt:disconnect(Pub),
@@ -1907,12 +1898,10 @@ t_active_n_rearm(Config) ->
 %% Verifies that {active, N} sockets re-arm correctly on TLS, so the
 %% subscriber keeps receiving past the first active-N window.
 t_active_n_rearm_ssl(Config) ->
-    %% Some test matrices ship an EMQX whose ssl:default listener requires
-    %% a client cert (mTLS). Force verify_none on just that field so the
-    %% test exercises the active-N rearm path and not cert-chain validation,
-    %% without clobbering the server's certfile/keyfile.
-    emqx_config:put_listener_conf(ssl, default, [ssl_options, verify], verify_none),
-    ok = emqx_listeners:restart_listener(<<"ssl:default">>),
+    %% An earlier case can leave the ssl:default listener requiring a client
+    %% cert (mTLS). Reset it to the image's certs with verify_none so the
+    %% test exercises the active-N rearm path and not cert-chain validation.
+    ok = emqtt_test_lib:set_ssl_options(<<"ssl:default">>, #{verify => verify_none}),
     Port = proplists:get_value(ssl_port, Config, 8883),
     Topic = atom_to_binary(?FUNCTION_NAME),
     ActiveN = 3,

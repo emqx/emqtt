@@ -91,7 +91,6 @@ end_per_group(server_verify_none, Config) ->
 
 
 init_per_suite(Config) ->
-    emqtt_test_lib:ensure_test_module(emqx_common_test_helpers),
     DataDir = cert_dir(Config),
     _ = emqtt_test_lib:gen_ca(DataDir, "ca"),
     _ = emqtt_test_lib:gen_host_cert("wildcard.localhost", "ca", DataDir, true),
