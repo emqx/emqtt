@@ -27,8 +27,8 @@
 
 -include("emqtt.hrl").
 
--type qos() :: emqx_mqtt_types:qos_name() | emqx_mqtt_types:qos().
--type topic() :: emqx_topic:topic().
+-type qos() :: emqtt:qos().
+-type topic() :: emqtt:topic().
 -type handler() :: fun((CorrData :: binary(), ReqPayload :: binary()) -> RspPayload :: binary()).
 
 -spec start_link(topic(), qos(), handler(), emqtt:options()) ->
@@ -72,7 +72,7 @@ handle_msg(ReqMsg, RequestHandler, Parent) ->
                                props = RspProps,
                                payload = RspPayload
                               },
-            emqx_logger:debug("~p sending response msg to topic ~s with~n"
+            logger:debug("~p sending response msg to topic ~s with~n"
                               "corr-data=~p~npayload=~p",
                               [?MODULE, RspTopic, CorrData, RspPayload]),
             ok = send_response(RspMsg);

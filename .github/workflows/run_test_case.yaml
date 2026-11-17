@@ -35,14 +35,21 @@ jobs:
             docker build -t testimage --build-arg BUILD_FROM=${DOCKER_IMAGE} -f Dockerfile.test .
             docker network create --ipv6 --subnet 2001:0DB8::/112 testnet
             docker run -d --net testnet --name testcontainer testimage bash -c "tail -f /dev/null"
+            # The CT suites run against an EMQX container that shares the
+            # network namespace of the test container.
+            CT_BROKER_NETWORK=container:testcontainer scripts/ct-broker.sh up
             docker exec testcontainer bash -c 'make eunit'
-            docker exec testcontainer bash -c 'make ct'
+            docker exec testcontainer bash -c 'make ct CT_BROKER=external'
             docker exec testcontainer bash -c 'make cover'
             # @TODO rebar3 tar does not include appup of dep apps
             # docker exec testcontainer bash -c 'make relup-test'
             # copy the build dir to host working dir for following build steps
             docker cp testcontainer:/_w/_build .
+            scripts/ct-broker.sh down
             docker rm -f testcontainer
+        - name: EMQX logs
+          if: failure()
+          run: docker logs emqtt-ct-emqx || true
         - uses: actions/upload-artifact@v4
           if: always()
           with:

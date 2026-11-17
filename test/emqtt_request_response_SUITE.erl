@@ -24,11 +24,11 @@
 -include_lib("common_test/include/ct.hrl").
 
 init_per_suite(Config) ->
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:ensure_broker(),
     Config.
 
 end_per_suite(_Config) ->
-    emqtt_test_lib:stop_emqx().
+    ok.
 
 all() ->
     [request_response].

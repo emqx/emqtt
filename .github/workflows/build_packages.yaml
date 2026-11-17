@@ -39,8 +39,13 @@ jobs:
           # Doing it manually instead of just setting `container` for the job because of
           # discrepancies in the images' environments affecting even basic things like
           # repo checkouts.
+          # The package smoke test in build.sh publishes to an EMQX container
+          # on the same docker network.
           run: |
-            docker run --rm --name emqtt-${{ matrix.os }}-build -v $(pwd):/emqtt --workdir /emqtt ${BUILDER_IMAGE} /bin/bash -c '
+            docker network create emqtt-pkg
+            docker run -d --name emqx --network emqtt-pkg -p 127.0.0.1:18083:18083 emqx/emqx:latest
+            timeout 120 sh -c 'until curl -sf http://127.0.0.1:18083/status >/dev/null; do sleep 1; done'
+            docker run --rm --name emqtt-${{ matrix.os }}-build --network emqtt-pkg -e EMQTT_TEST_BROKER=emqx -v $(pwd):/emqtt --workdir /emqtt ${BUILDER_IMAGE} /bin/bash -c '
               git config --global --add safe.directory "${PWD}"
               .github/workflows/script/build.sh
             '

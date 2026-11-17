@@ -1,8 +1,11 @@
 CT_NODE_NAME = ct@127.0.0.1
-CT_EMQX_PROFILE = emqx
+## The CT suites run against an EMQX broker in a container.
+## `docker': `make ct' starts the container and removes it after the run.
+## `external': the broker is already running, for example started by CI with
+## `scripts/ct-broker.sh up'.
+CT_BROKER ?= docker
 
 REBAR := $(CURDIR)/rebar3
-REBAR_TEST = env PROFILE=$(CT_EMQX_PROFILE) $(REBAR)
 
 REBAR_URL := https://github.com/erlang/rebar3/releases/download/3.27.0/rebar3
 
@@ -36,13 +39,25 @@ xref: $(REBAR)
 	$(REBAR) xref
 
 eunit: compile
-	$(REBAR_TEST) eunit --verbose
+	$(REBAR) eunit --verbose
 
 ct: compile
-	$(REBAR_TEST) as test ct --verbose --name $(CT_NODE_NAME)
+ifeq ($(CT_BROKER),docker)
+	scripts/ct-broker.sh up
+	$(REBAR) as test ct --verbose --name $(CT_NODE_NAME); \
+	  rc=$$?; scripts/ct-broker.sh down; exit $$rc
+else
+	$(REBAR) as test ct --verbose --name $(CT_NODE_NAME)
+endif
+
+ct-broker-up:
+	scripts/ct-broker.sh up
+
+ct-broker-down:
+	scripts/ct-broker.sh down
 
 cover: $(REBAR)
-	$(REBAR_TEST) cover
+	$(REBAR) cover
 
 test: eunit ct cover
 

@@ -105,11 +105,11 @@ init_per_suite(Config) ->
     emqtt_test_lib:gen_ca(DataDir, "quic_ca"),
     emqtt_test_lib:gen_host_cert("quic", "quic_ca", DataDir),
     UdpPort = 14567,
-    start_emqx_quic(UdpPort),
+    ok = emqtt_test_lib:ensure_broker(),
+    {ok, _} = application:ensure_all_started(quicer),
     [{port, UdpPort}, {pub_qos, 0}, {sub_qos, 0} | Config].
 
 end_per_suite(_) ->
-    emqtt_test_lib:stop_emqx(),
     ok.
 
 init_per_group(pub_qos0, Config) ->
@@ -554,7 +554,7 @@ t_multi_streams_dup_sub(Config) ->
     {ok, #{via := SVia2}, [SubQos]} = emqtt:subscribe_via(C, {new_data_stream, []}, #{}, [{Topic, [{qos, SubQos}]}]),
 
     #{data_stream_socks := [{quic, _Conn, SubStream} | _]} = proplists:get_value(extra, emqtt:info(C)),
-    ?assertEqual(2, length(emqx_broker:subscribers(Topic))),
+    ?assertEqual(2, length(emqtt_test_lib:subscriptions(Topic))),
 
     case emqtt:publish_via(C, {new_data_stream, []}, Topic, #{},  <<"stream data 3">>, [{qos, PubQos}]) of
         ok when PubQos == 0 ->
@@ -587,7 +587,7 @@ t_multi_streams_dup_sub(Config) ->
     quicer:async_shutdown_stream(SubStream, ?QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 500),
     timer:sleep(100),
 
-    ?assertEqual(1, length(emqx_broker:subscribers(Topic))),
+    ?assertEqual(1, length(emqtt_test_lib:subscriptions(Topic))),
 
     ok = emqtt:disconnect(C).
 
@@ -873,10 +873,10 @@ t_multi_streams_remote_shutdown(Config) ->
 
     {quic, _Conn, _Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
 
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
 
     timer:sleep(200),
-    start_emqx_quic(?config(port, Config)),
+    ok = emqtt_test_lib:start_listeners(),
 
     %% Client should be closed
     ?assertMatch({'EXIT', {noproc, {gen_statem, call, [_,info,infinity] } }}, catch emqtt:info(C)).
@@ -919,11 +919,11 @@ t_multi_streams_remote_shutdown_with_reconnect(Config) ->
 
     {quic, _Conn, _Ctrlstream} = proplists:get_value(socket, emqtt:info(C)),
 
-    ok = emqtt_test_lib:stop_emqx(),
+    ok = emqtt_test_lib:stop_listeners(),
 
     timer:sleep(200),
 
-    start_emqx_quic(?config(port, Config)),
+    ok = emqtt_test_lib:start_listeners(),
     %% Client is alive.
     ?assert(is_list(emqtt:info(C))).
 
@@ -1007,12 +1007,6 @@ calc_pkt_id(1, Id)->
     Id;
 calc_pkt_id(2, Id)->
     Id.
-
--spec start_emqx_quic(inet:port_number()) -> ok.
-start_emqx_quic(UdpPort) ->
-    emqtt_test_lib:start_emqx(),
-    application:ensure_all_started(quicer),
-    ok = emqtt_test_lib:ensure_quic_listener(mqtt, UdpPort).
 
 -else.
 

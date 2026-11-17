@@ -22,8 +22,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
--define(ALL_IF_IP6, {0, 0, 0, 0, 0, 0, 0, 0}).
-
 -define(HOSTS,
         [{ip4, [<<"127.0.0.1">>, "127.0.0.1", {127, 0, 0, 1}]},
          {ip6, ["localhost"]}
@@ -64,30 +62,24 @@ suite() ->
     [{timetrap, {seconds, 15}}].
 
 init_per_suite(Config) ->
-    ok = emqtt_test_lib:start_emqx(),
+    ok = emqtt_test_lib:ensure_broker(),
     Config.
 
 end_per_suite(_Config) ->
-    emqtt_test_lib:stop_emqx().
+    ok.
 
 init_per_group(ip4, Config) ->
     [{ip_type, ip4} | Config];
+%% The broker has the `mqtt_ip6' listeners at the IPv6 ports of ?PORTS,
+%% see `scripts/ct-broker.sh'.
 init_per_group(ip6, Config) ->
-    ok = emqtt_test_lib:ensure_listener(tcp, mqtt_ip6, ?ALL_IF_IP6, 21883),
-    ok = emqtt_test_lib:ensure_listener(ws, mqtt_ip6, ?ALL_IF_IP6, 28083),
-    case emqtt_test_lib:has_quic() of
-        true ->
-            ok = emqtt_test_lib:ensure_listener(quic, mqtt_ip6, ?ALL_IF_IP6, 34567);
-        false ->
-            ok
-    end,
     [{ip_type, ip6}, {listener, mqtt_ip6} | Config];
 init_per_group(tcp, Config) ->
     [{conn_fun, connect}, {transport, tcp} | Config];
 init_per_group(ws, Config) ->
     [{conn_fun, ws_connect}, {transport, ws} | Config];
 init_per_group(quic, Config) ->
-    [{conn_fun, quic_connect}, {transport, quic}, {listener, mqtt} | Config].
+    [{conn_fun, quic_connect}, {transport, quic} | Config].
 
 end_per_group(_, Config) ->
     Config.
@@ -123,7 +115,7 @@ t_reconnect(Config) ->
                                 {reconnect_timeout, 1}] ++ Opts),
     {ok, _} = emqtt:ConnFun(C),
     ct:pal("Connected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
-    ok = emqx_listeners:restart_listener(ListenerId),
+    ok = emqtt_test_lib:restart_listener(ListenerId),
     pong = emqtt:ping(C),
     connected = emqtt:status(C),
     ct:pal("Reconnected to ~p at port ~p via ~p", [Host, Port, ConnFun]),
