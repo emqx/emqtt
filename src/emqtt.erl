@@ -2478,11 +2478,15 @@ prepare_reconnect(#state{
     ok = cancel_timer(RetryTimer),
     ok = cancel_timer(KeepAliveTimer),
     ok = cancel_timer(AckTimer),
+    %% The counters should_ping/1 compares belong to the lost connection
+    _ = erase(send_oct),
+    _ = erase(quic_send_cnt),
     State1 = update_for_reconnecting(State),
     State1#state{
         sock_opts = proplists:delete(handle, OldSockOpts),
         retry_timer = undefined,
-        keepalive_timer = undefined
+        keepalive_timer = undefined,
+        awaiting_pingresp = false
     }.
 
 next_retry_cnt(infinity) -> infinity;

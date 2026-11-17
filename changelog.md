@@ -1,3 +1,12 @@
+# 1.16.2
+
+- fix: reset the keepalive state when reconnecting. A connection lost with a
+  PINGREQ outstanding left `awaiting_pingresp` set, so every later connection
+  failed its first keepalive tick with `pingresp_timeout` and never stayed up
+  past one keepalive interval. The sent-bytes counts `should_ping/1` compares
+  were also carried over, so a new connection's first PINGREQ went out one
+  interval late. Both are now cleared before reconnecting.
+
 # 1.16.1
 
 - feat: add the `ws_upgrade_options` option. The proplist is merged into the
