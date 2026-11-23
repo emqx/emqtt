@@ -760,7 +760,7 @@ t_publish_reply_error(Config) ->
 
     ?assertEqual({error, closed}, emqtt:publish(C, Topic, <<"t_publish">>)),
 
-    %% shutdown if an send error occured
+    %% shutdown if an send error occurred
     receive
         {'EXIT', C, _} -> ok
     after 1000 ->
